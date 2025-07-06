@@ -2,7 +2,7 @@
 
 use axum::{
     extract::{Request, State},
-    http::{header, StatusCode},
+    http::StatusCode,
     middleware::Next,
     response::Response,
 };
@@ -28,7 +28,7 @@ pub async fn auth_layer(
 
     let api_key_header = req.headers().get(API_KEY_HEADER).and_then(|value| value.to_str().ok());
 
-    let mut authenticated_as: Option<AuthenticatedUser> = None;
+    let authenticated_as: Option<AuthenticatedUser>;
 
     if let Some(api_key) = api_key_header {
         info!("Auth middleware: Found API key header");

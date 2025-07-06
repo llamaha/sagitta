@@ -1,6 +1,7 @@
 // crates/sagitta-search/src/search/mod.rs
 //! Core module for handling search operations (semantic, potentially others later).
 
+/// Result types for search operations.
 pub mod result;
 
 pub use result::SearchResult;
@@ -13,11 +14,10 @@ use qdrant_client::qdrant::{SearchPointsBuilder, Filter};
 use crate::config::AppConfig;
 use crate::qdrant_client_trait::QdrantClientTrait;
 use crate::{EmbeddingPool, app_config_to_embedding_config};
-use crate::repo_helpers::get_collection_name;
 use crate::repo_helpers::get_branch_aware_collection_name;
 use crate::error::SagittaError;
 use crate::constants::{FIELD_FILE_PATH, FIELD_START_LINE, FIELD_END_LINE, FIELD_CHUNK_CONTENT};
-use sagitta_embed::{ProcessedChunk, EmbeddingProcessor};
+use sagitta_embed::EmbeddingProcessor;
 // --- End imports --- 
 
 /// Performs semantic search against a specific repository collection in Qdrant.
@@ -33,10 +33,10 @@ pub async fn search_semantic<C>(
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
-    debug!("Performing semantic search query=\"{}\" repo=\"{}\" branch=\"{}\" limit={} filter={:?}", query, repo_name, branch_name, limit, filter);
+    debug!("Performing semantic search query=\"{query}\" repo=\"{repo_name}\" branch=\"{branch_name}\" limit={limit} filter={filter:?}");
 
     // 1. Get Query Embedding using EmbeddingPool
-    let embedding_config = app_config_to_embedding_config(&**config);
+    let embedding_config = app_config_to_embedding_config(config);
     let embedding_pool = EmbeddingPool::with_configured_sessions(embedding_config)
         .map_err(|e| SagittaError::EmbeddingError(e.to_string()))?;
     
@@ -66,8 +66,8 @@ where
     debug!("Generated query embedding of dimension {}", query_embedding.len());
 
     // 2. Determine Collection Name using branch-aware naming
-    let collection_name = get_branch_aware_collection_name(repo_name, branch_name, &**config);
-    debug!("Searching collection: {}", collection_name);
+    let collection_name = get_branch_aware_collection_name(repo_name, branch_name, config);
+    debug!("Searching collection: {collection_name}");
 
     // 3. Build Qdrant Search Request
     let mut builder = SearchPointsBuilder::new(collection_name, query_embedding, limit as u64);
@@ -79,8 +79,7 @@ where
     // 4. Execute Search
     let search_response = client
         .search_points(search_request) // Pass ownership
-        .await
-        .map_err(SagittaError::from)?;
+        .await?;
     
     debug!("Received {} search results from Qdrant", search_response.result.len());
 
@@ -120,7 +119,6 @@ where
 ///
 /// This module contains the central vector store trait that can be used
 /// by GUI components and analytics without pulling in all of sagitta-search.
-
 pub mod vector_store;
 
 pub use vector_store::{VectorStore, VectorStoreError, UpsertResult, CollectionConfig, DistanceMetric, VectorPoint, SearchQuery, CollectionInfo, CollectionStatus, ScrollResult};

@@ -24,13 +24,11 @@ use crate::agent::conversation::search::{
     ConversationSearchEngine, 
     text::TextConversationSearchEngine
 };
-use sagitta_embed::provider::{onnx::OnnxEmbeddingModel, EmbeddingProvider};
-use sagitta_search::{EmbeddingPool, EmbeddingProcessor};
 use std::path::PathBuf;
 // Additional tool imports removed - tools now via MCP
 
 // Imports for sagitta-search components for embedding provider
-use std::path::Path; // For Path::new
+ // For Path::new
 
 // Qdrant imports
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;
@@ -96,7 +94,7 @@ pub async fn create_repository_manager(core_config: sagitta_search::AppConfig) -
     let repo_manager = Arc::new(Mutex::new(RepositoryManager::new(repo_manager_core_config)));
     
     if let Err(e) = repo_manager.lock().await.initialize().await {
-        log::error!("Failed to initialize RepositoryManager: {}",e);
+        log::error!("Failed to initialize RepositoryManager: {e}");
         return Err(anyhow::anyhow!("Failed to initialize RepositoryManager: {}", e));
     }
     
@@ -112,7 +110,7 @@ pub fn create_embedding_pool(core_config: &sagitta_search::AppConfig) -> Result<
             Ok(Arc::new(pool))
         }
         Err(e) => {
-            log::error!("Failed to create EmbeddingPool for GUI App: {}. Intent analysis will be impaired.", e);
+            log::error!("Failed to create EmbeddingPool for GUI App: {e}. Intent analysis will be impaired.");
             Err(anyhow::anyhow!("Failed to create EmbeddingPool for GUI: {}", e))
         }
     }
@@ -125,8 +123,7 @@ pub async fn create_llm_client(config: &SagittaCodeConfig, _tool_registry: Optio
         Ok(client) => client,
         Err(e) => {
             log::error!(
-                "Failed to create ClaudeCodeClient: {}. Agent will not be initialized properly. Some features may be disabled.",
-                e
+                "Failed to create ClaudeCodeClient: {e}. Agent will not be initialized properly. Some features may be disabled."
             );
             return Err(anyhow::anyhow!("Failed to create ClaudeCodeClient for Agent: {}", e));
         }
@@ -135,7 +132,7 @@ pub async fn create_llm_client(config: &SagittaCodeConfig, _tool_registry: Optio
     // Initialize MCP directly (tools provided by sagitta-mcp)
     log::info!("Initializing MCP integration for Claude Code client");
     if let Err(e) = claude_client.initialize_mcp(None).await {
-        log::warn!("Failed to initialize MCP integration: {}. Tool calls may not work properly.", e);
+        log::warn!("Failed to initialize MCP integration: {e}. Tool calls may not work properly.");
     }
     
     Ok(Arc::new(claude_client))
@@ -172,7 +169,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     log::info!("SagittaCodeApp: Initializing...");
 
     // Load both sagitta-code and sagitta-search configs
-    let (code_config, core_config) = match load_all_configs() {
+    let (_code_config, core_config) = match load_all_configs() {
         Ok((code_cfg, core_cfg_opt)) => {
             log::info!("SagittaCodeApp: Loaded both configurations successfully");
             let core_cfg = core_cfg_opt.unwrap_or_else(|| {
@@ -182,7 +179,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
             (code_cfg, core_cfg)
         }
         Err(e) => {
-            log::warn!("SagittaCodeApp: Could not load configurations: {}. Using defaults.", e);
+            log::warn!("SagittaCodeApp: Could not load configurations: {e}. Using defaults.");
             (crate::config::SagittaCodeConfig::default(), sagitta_search::config::AppConfig::default())
         }
     };
@@ -216,10 +213,10 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     
     // Create LLM client (MCP tools are handled internally)
     let config_guard = app.config.lock().await;
-    let llm_client = create_llm_client(&*config_guard, None).await.map_err(|e| {
+    let llm_client = create_llm_client(&config_guard, None).await.map_err(|e| {
         let error_message = StreamingMessage::from_text(
             MessageAuthor::System,
-            format!("CRITICAL: Failed to initialize LLM Client: {}. Agent is disabled.", e),
+            format!("CRITICAL: Failed to initialize LLM Client: {e}. Agent is disabled."),
         );
         app.chat_manager.add_complete_message(error_message);
         e
@@ -234,13 +231,13 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
         }
         Err(e) => {
             log::error!("GUI: Failed to connect to Qdrant at {}: {}. Semantic features will be limited.", core_config.qdrant_url, e);
-            app.panels.events_panel.add_event(super::SystemEventType::Error, format!("Qdrant connection failed: {}", e));
+            app.panels.events_panel.add_event(super::SystemEventType::Error, format!("Qdrant connection failed: {e}"));
             None
         }
     };
 
     // Create trait version for tools that need it
-    let qdrant_client: Arc<dyn QdrantClientTrait> = if let Some(ref concrete_client) = qdrant_client_concrete {
+    let _qdrant_client: Arc<dyn QdrantClientTrait> = if let Some(ref concrete_client) = qdrant_client_concrete {
         concrete_client.clone()
     } else {
         // Fallback - should not happen in normal operation, but provides safety
@@ -281,7 +278,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     
     if let Some(saved_repo_context) = saved_repo_context {
         app.state.set_repository_context(Some(saved_repo_context.clone()));
-        log::info!("Restored repository context from config: {}", saved_repo_context);
+        log::info!("Restored repository context from config: {saved_repo_context}");
         
         // Working directory context handling removed
     }
@@ -290,7 +287,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
 
     // Create conversation persistence
     let config_guard = app.config.lock().await;
-    let persistence = create_conversation_persistence(&*config_guard).await?;
+    let persistence = create_conversation_persistence(&config_guard).await?;
     let config_clone = config_guard.clone();
     drop(config_guard);
     let search_engine: Box<dyn ConversationSearchEngine> = Box::new(TextConversationSearchEngine::new());
@@ -307,7 +304,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
         Ok(agent) => {
             // Set agent to fully autonomous mode to allow automatic tool execution
             if let Err(e) = agent.set_mode(AgentMode::FullyAutonomous).await {
-                log::error!("Failed to set agent mode to FullyAutonomous: {}", e);
+                log::error!("Failed to set agent mode to FullyAutonomous: {e}");
             } else {
                 log::info!("Agent mode set to FullyAutonomous for automatic tool execution");
             }
@@ -326,10 +323,10 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
             
             // Initialize conversation service for the sidebar - use shared instances (Phase 1 optimization)
             if let Err(e) = app.initialize_conversation_service_with_shared_instances(qdrant_client_concrete.clone(), Some(embedding_handler_arc.clone())).await {
-                log::warn!("Failed to initialize conversation service: {}. Conversation sidebar features may be limited.", e);
+                log::warn!("Failed to initialize conversation service: {e}. Conversation sidebar features may be limited.");
                 app.panels.events_panel.add_event(
                     super::SystemEventType::Info,
-                    format!("Conversation service initialization failed: {}", e)
+                    format!("Conversation service initialization failed: {e}")
                 );
             } else {
                 log::info!("Conversation service initialized successfully with shared instances");
@@ -346,12 +343,12 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
             app.chat_manager.add_complete_message(welcome_message);
         },
         Err(err) => {
-            log::error!("Failed to initialize agent: {}", err);
+            log::error!("Failed to initialize agent: {err}");
             
             // Add to events panel instead of chat
             app.panels.events_panel.add_event(
                 super::SystemEventType::Error,
-                format!("Failed to initialize agent: {}. Check your OpenRouter API key in settings.", err)
+                format!("Failed to initialize agent: {err}. Check your OpenRouter API key in settings.")
             );
         }
     }
@@ -370,17 +367,17 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
                         .map(|repo| repo.name.clone())
                         .collect();
                     
-                    log::info!("Initial repository list loaded: {:?}", repo_names);
+                    log::info!("Initial repository list loaded: {repo_names:?}");
                     
                     // Send the repository list update event
                     if let Err(e) = app_event_sender.send(super::events::AppEvent::RepositoryListUpdated(repo_names)) {
-                        log::error!("Failed to send initial repository list update event: {}", e);
+                        log::error!("Failed to send initial repository list update event: {e}");
                     } else {
                         log::debug!("Successfully sent initial repository list update event");
                     }
                 },
                 Err(e) => {
-                    log::error!("Failed to load initial repository list: {}", e);
+                    log::error!("Failed to load initial repository list: {e}");
                 }
             }
         });
@@ -415,9 +412,9 @@ mod tests {
         let repo_manager = Arc::new(tokio::sync::Mutex::new(
             RepositoryManager::new(Arc::new(tokio::sync::Mutex::new(app_config.clone())))
         ));
-        let mut sagitta_config = SagittaCodeConfig::default();
+        let sagitta_config = SagittaCodeConfig::default();
         
-        let mut app = SagittaCodeApp::new(repo_manager, sagitta_config, app_config);
+        let app = SagittaCodeApp::new(repo_manager, sagitta_config, app_config);
         
         // Test light theme - modify config directly before creating the app
         let mut sagitta_config_light = SagittaCodeConfig::default();
@@ -594,8 +591,8 @@ mod tests {
         let mut sagitta_config = SagittaCodeConfig::default();
         sagitta_config.ui.theme = "dark".to_string(); // Start with dark
         
-        let mut app = SagittaCodeApp::new(repo_manager, sagitta_config, app_config);
-        let original_theme = app.state.current_theme.clone();
+        let app = SagittaCodeApp::new(repo_manager, sagitta_config, app_config);
+        let original_theme = app.state.current_theme;
         
         // Now create a new config with light theme
         let app_config2 = CoreAppConfig::default();
@@ -680,7 +677,7 @@ mod tests {
         ));
         
         // Create app
-        let mut app = SagittaCodeApp::new(repo_manager.clone(), sagitta_config.clone(), app_config);
+        let app = SagittaCodeApp::new(repo_manager.clone(), sagitta_config.clone(), app_config);
         
         // Initially no repository context in state
         assert_eq!(app.state.current_repository_context, None);

@@ -4,7 +4,6 @@ use anyhow::{Result, anyhow};
 use uuid::Uuid;
 use dashmap::DashMap;
 use std::sync::Arc;
-use tracing;
 use async_trait::async_trait;
 
 pub const API_KEY_PREFIX: &str = "vdb_sk_"; // Made public
@@ -134,7 +133,7 @@ impl InMemoryApiKeyStore {
             .map(char::from)
             .collect();
         
-        format!("{}{}", API_KEY_PREFIX, random_part)
+        format!("{API_KEY_PREFIX}{random_part}")
     }
 
     fn hash_key(key: &str) -> String {

@@ -2,20 +2,19 @@
 
 use std::sync::Arc;
 use anyhow::Result;
-use egui::{Context, Key};
+use egui::Context;
 use tokio::sync::{Mutex, mpsc, broadcast};
 use uuid;
 use std::ops::{Deref, DerefMut};
-use std::path::PathBuf;
 
 use super::repository::manager::RepositoryManager;
 use super::repository::RepoPanel;
 use super::settings::SettingsPanel;
-use super::conversation::ConversationSidebar;
+// Removed - ConversationSidebar is re-exported from conversation module
 use super::claude_md_modal::ClaudeMdModal;
 use crate::agent::Agent;
 use crate::agent::message::types::{AgentMessage, ToolCall};
-use crate::agent::state::types::{AgentState, AgentMode, AgentStateInfo};
+use crate::agent::state::types::{AgentState, AgentStateInfo};
 use super::chat::StreamingChatManager;
 use super::theme::AppTheme;
 use crate::config::SagittaCodeConfig;
@@ -28,17 +27,16 @@ use crate::agent::conversation::manager::{ConversationManager, ConversationManag
 use crate::agent::conversation::persistence::disk::DiskConversationPersistence;
 use crate::agent::conversation::search::text::TextConversationSearchEngine;
 
-use crate::agent::conversation::tagging::{TaggingPipeline, TaggingPipelineConfig};
+use crate::agent::conversation::tagging::TaggingPipeline;
 use crate::llm::title::TitleGenerator;
-use crate::tools::WorkingDirectoryManager;
 
 // Import the modularized components
 mod panels;
 use super::conversation;
 pub mod events;
 pub mod tool_formatting;
-mod state;
-mod rendering;
+pub mod state;
+pub mod rendering;
 mod initialization;
 mod conversation_title_updater;
 
@@ -259,7 +257,7 @@ impl SagittaCodeApp {
         let clustering_manager = match self.try_create_clustering_manager().await {
             Ok(manager) => Some(manager),
             Err(e) => {
-                log::warn!("Failed to initialize clustering manager: {}. Clustering features will be disabled.", e);
+                log::warn!("Failed to initialize clustering manager: {e}. Clustering features will be disabled.");
                 None
             }
         };
@@ -289,7 +287,7 @@ impl SagittaCodeApp {
                         Some(Arc::new(provider) as Arc<dyn crate::llm::fast_model::FastModelOperations>)
                     }
                     Err(e) => {
-                        log::warn!("Failed to initialize fast model provider: {}", e);
+                        log::warn!("Failed to initialize fast model provider: {e}");
                         None
                     }
                 }
@@ -348,7 +346,7 @@ impl SagittaCodeApp {
         let clustering_manager = match self.try_create_clustering_manager().await {
             Ok(manager) => Some(manager),
             Err(e) => {
-                log::warn!("Failed to initialize clustering manager: {}. Clustering features will be disabled.", e);
+                log::warn!("Failed to initialize clustering manager: {e}. Clustering features will be disabled.");
                 None
             }
         };
@@ -378,7 +376,7 @@ impl SagittaCodeApp {
                         Some(Arc::new(provider) as Arc<dyn crate::llm::fast_model::FastModelOperations>)
                     }
                     Err(e) => {
-                        log::warn!("Failed to initialize fast model provider: {}", e);
+                        log::warn!("Failed to initialize fast model provider: {e}");
                         None
                     }
                 }
@@ -479,7 +477,7 @@ impl SagittaCodeApp {
             log::info!("Updated conversation sidebar with {} clusters", self.conversation_sidebar.clusters.len());
 
             // After refresh, send an event to update conversation list in AppState
-            let convos = service.list_conversations().await?;
+            let _convos = service.list_conversations().await?;
             self.app_event_sender.send(AppEvent::RefreshConversationList)?;
         }
         
@@ -519,11 +517,7 @@ impl SagittaCodeApp {
     }
 
     pub fn agent_state_info(&self) -> Option<Arc<tokio::sync::RwLock<AgentStateInfo>>> {
-        if let Some(agent_arc) = &self.agent {
-            Some(agent_arc.get_state_manager_state_info_arc())
-        } else {
-            None
-        }
+        self.agent.as_ref().map(|agent_arc| agent_arc.get_state_manager_state_info_arc())
     }
 
     /// Try to create a title generator (may fail if dependencies are not available)
@@ -572,17 +566,17 @@ impl SagittaCodeApp {
                         .map(|repo| repo.name.clone())
                         .collect();
                     
-                    log::info!("Manual refresh completed: {:?}", repo_names);
+                    log::info!("Manual refresh completed: {repo_names:?}");
                     
                     // Send the repository list update event
                     if let Err(e) = app_event_sender.send(crate::gui::app::events::AppEvent::RepositoryListUpdated(repo_names)) {
-                        log::error!("Failed to send repository list update event: {}", e);
+                        log::error!("Failed to send repository list update event: {e}");
                     } else {
                         log::debug!("Successfully sent repository list update event from manual refresh");
                     }
                 },
                 Err(e) => {
-                    log::error!("Failed to manually refresh repository list: {}", e);
+                    log::error!("Failed to manually refresh repository list: {e}");
                 }
             }
         });

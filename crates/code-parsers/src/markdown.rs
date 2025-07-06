@@ -18,10 +18,28 @@ struct MarkdownHeading {
     end_line: usize,   // End line in the document (1-based)
 }
 
+/// Parameters for splitting and adding chunks
+struct ChunkSplitParams<'a> {
+    chunks: &'a mut Vec<CodeChunk>,
+    current_heading: Option<&'a MarkdownHeading>,
+    section_content: &'a str,
+    file_path: &'a str,
+    section_start_line: usize,
+    section_end_line: usize,
+    base_element_type: String,
+    parent_headings: &'a [&'a MarkdownHeading],
+}
+
 /// Parser for Markdown files using Tree-sitter and custom section logic.
 pub struct MarkdownParser {
     parser: Parser,
     // Query might not be needed directly if extract_headings uses its own
+}
+
+impl Default for MarkdownParser {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MarkdownParser {
@@ -146,7 +164,7 @@ impl MarkdownParser {
                  if let Some(heading) = self.node_to_heading(capture.node, code) {
                      if heading.level == 1 || heading.level == 2 { // Extra check for setext typical levels
                          let kind = if code[node.start_byte()..node.end_byte()].contains("===") { "Setext H1" } else { "Setext H2" };
-                         log::debug!("extract_headings: Converted node to {} heading: {:?}", kind, heading);
+                         log::debug!("extract_headings: Converted node to {kind} heading: {heading:?}");
                      }
                      headings.push(heading);
                  }
@@ -162,7 +180,7 @@ impl MarkdownParser {
     /// Handles plain text splitting when no markdown structure is found or parsing fails.
     /// Splits purely by MAX_CHUNK_LINES.
     fn handle_plain_text(&self, code: &str, file_path: &str) -> Vec<CodeChunk> {
-        log::debug!("Handling content as plain text for file: {}", file_path);
+        log::debug!("Handling content as plain text for file: {file_path}");
         let lines: Vec<&str> = code.lines().collect();
         let mut fallback_chunks = Vec::new();
         let mut current_line_start = 1;
@@ -230,7 +248,7 @@ impl MarkdownParser {
         let mut chunks = Vec::new();
         let mut heading_stack: Vec<&MarkdownHeading> = Vec::new();
 
-        let mut current_pos = 0; // Current line index (0-based)
+        let current_pos = 0; // Current line index (0-based)
 
         // 1. Handle content before the first heading
         let first_heading_start_line = headings.first().map_or(usize::MAX, |h| h.start_line);
@@ -252,20 +270,20 @@ impl MarkdownParser {
                         root_end_line_idx,
                         root_content.len()
                     );
-                    self.split_and_add_chunk(
-                        &mut chunks,
-                        None,
-                        &root_content,
+                    self.split_and_add_chunk(ChunkSplitParams {
+                        chunks: &mut chunks,
+                        current_heading: None,
+                        section_content: &root_content,
                         file_path,
-                        1,                 // Root starts at line 1
-                        root_end_line_idx, // Root ends at this line (1-based)
-                        "root_content".to_string(),
-                        &[],
-                    );
-                    current_pos = slice_end_idx; // Update position (0-based index)
+                        section_start_line: 1,                 // Root starts at line 1
+                        section_end_line: root_end_line_idx, // Root ends at this line (1-based)
+                        base_element_type: "root_content".to_string(),
+                        parent_headings: &[],
+                    });
+                    // Position updated for tracking
                 } else {
-                     log::debug!("Content before first heading (lines 1-{}) is empty/whitespace, skipping root chunk.", root_end_line_idx);
-                     current_pos = slice_end_idx; // Still update position
+                     log::debug!("Content before first heading (lines 1-{root_end_line_idx}) is empty/whitespace, skipping root chunk.");
+                     // Position would be updated for tracking
                 }
             }
         } else {
@@ -276,7 +294,7 @@ impl MarkdownParser {
         // 2. Process each heading and the content following it
         for (i, heading) in headings.iter().enumerate() {
             // Update heading stack (pop higher/equal levels)
-            log::debug!("build_section_chunks: Processing heading: {:?}", heading);
+            log::debug!("build_section_chunks: Processing heading: {heading:?}");
             while let Some(last_heading) = heading_stack.last() {
                 if last_heading.level >= heading.level {
                     heading_stack.pop();
@@ -321,16 +339,16 @@ impl MarkdownParser {
 
                      // Only create a chunk if there's actual content in the section
                      if !section_content.is_empty() { // Restore this check
-                         self.split_and_add_chunk(
-                             &mut chunks,
-                             Some(heading), // Pass the current heading
-                             &section_content,
+                         self.split_and_add_chunk(ChunkSplitParams {
+                             chunks: &mut chunks,
+                             current_heading: Some(heading), // Pass the current heading
+                             section_content: &section_content,
                              file_path,
-                             heading.start_line, // Chunk logically starts at the heading
-                             content_end_line,   // Ends where the content ends
-                             format!("h{}_section", heading.level),
-                             &heading_stack,
-                         );
+                             section_start_line: heading.start_line, // Chunk logically starts at the heading
+                             section_end_line: content_end_line,   // Ends where the content ends
+                             base_element_type: format!("h{}_section", heading.level),
+                             parent_headings: &heading_stack,
+                         });
                      } else {
                          // Handle heading-only chunk if needed? Decide against for now.
                          // We could add a chunk containing only the heading + parents here if desired.
@@ -347,7 +365,7 @@ impl MarkdownParser {
             // Push current heading onto the stack for subsequent sections
             heading_stack.push(heading);
             // Update current_pos: section content ends at content_end_line (1-based)
-            current_pos = content_end_line.min(total_lines);
+            // Position tracking for section end
         }
 
         log::debug!("build_section_chunks created {} chunks for {}", chunks.len(), file_path);
@@ -369,67 +387,57 @@ impl MarkdownParser {
     }
 
     /// Helper to split large content and add chunk(s).
-    fn split_and_add_chunk(
-        &self,
-        chunks: &mut Vec<CodeChunk>,
-        current_heading: Option<&MarkdownHeading>, // Added: Pass the actual current heading (or None for root)
-        section_content: &str, // Just the content *within* this section
-        file_path: &str,
-        section_start_line: usize, // Line number of the heading (or 1 for root)
-        section_end_line: usize,   // Line number of the last line of content for this section
-        base_element_type: String,
-        parent_headings: &[&MarkdownHeading],
-    ) {
-        let parent_context = Self::build_parent_context(parent_headings);
+    fn split_and_add_chunk(&self, params: ChunkSplitParams) {
+        let parent_context = Self::build_parent_context(params.parent_headings);
         // Use the passed-in current_heading (if Some) to format the heading line
-        let current_heading_line = match current_heading {
+        let current_heading_line = match params.current_heading {
             Some(h) => format!("{} {}\n\n", "#".repeat(h.level), h.content), // Use h.level and h.content
             None => "".to_string(), // No heading line for root content (handled by base_element_type == "root_content")
         };
         
-        let full_header = format!("{}{}", parent_context, current_heading_line);
+        let full_header = format!("{parent_context}{current_heading_line}");
 
         // Calculate the actual content slice *excluding* the headers
-        let section_content_trimmed = section_content.trim();
+        let section_content_trimmed = params.section_content.trim();
 
         // Combine header with the actual content slice for this section
-        let full_content_combined = format!("{}{}", full_header, section_content_trimmed);
+        let full_content_combined = format!("{full_header}{section_content_trimmed}");
 
         // Now, check size and split `full_content` if needed
         if full_content_combined.len() <= MAX_SECTION_SIZE {
             // Fits in one chunk
-            log::debug!("Creating single chunk: Start={}, End={}, Type={}", section_start_line, section_end_line, base_element_type);
+            log::debug!("Creating single chunk: Start={}, End={}, Type={}", params.section_start_line, params.section_end_line, params.base_element_type);
             let chunk = CodeChunk {
                 content: full_content_combined,
-                file_path: file_path.to_string(),
-                start_line: section_start_line, // Logical start is the heading (or line 1 for root)
-                end_line: section_end_line,      // Use section_end_line which is calculated as next_heading_start_line - 1
+                file_path: params.file_path.to_string(),
+                start_line: params.section_start_line, // Logical start is the heading (or line 1 for root)
+                end_line: params.section_end_line,      // Use section_end_line which is calculated as next_heading_start_line - 1
                 language: "markdown".to_string(),
-                element_type: base_element_type.clone(),
+                element_type: params.base_element_type.clone(),
             };
             // Only add chunks for core element types
             if is_core_element_type(&chunk.element_type, Some("markdown")) {
-                chunks.push(chunk);
+                params.chunks.push(chunk);
             }
         } else {
             // Needs splitting
             log::debug!(
                 "Section starting line {} (type {}) is too large ({} chars), splitting.",
-                section_start_line, base_element_type, full_content_combined.len()
+                params.section_start_line, params.base_element_type, full_content_combined.len()
             );
 
             let mut remaining_content_to_split = section_content_trimmed; // Split the content part only
             let mut current_chunk_idx = 1;
-            let mut current_chunk_start_line = section_start_line; // Start line for the first split chunk
+            let mut current_chunk_start_line = params.section_start_line; // Start line for the first split chunk
 
             while !remaining_content_to_split.is_empty() {
-                let chunk_element_type = format!("{}_split_{}", base_element_type, current_chunk_idx);
+                let chunk_element_type = format!("{}_split_{}", params.base_element_type, current_chunk_idx);
                 
                 let available_content_len = MAX_SECTION_SIZE.saturating_sub(full_header.len());
                 if available_content_len == 0 {
                     log::error!(
                         "Header for section starting at line {} is longer ({}) than MAX_SECTION_SIZE ({}). Cannot split content.", 
-                        section_start_line, full_header.len(), MAX_SECTION_SIZE
+                        params.section_start_line, full_header.len(), MAX_SECTION_SIZE
                     );
                     break; 
                 }
@@ -481,19 +489,19 @@ impl MarkdownParser {
                      current_chunk_content_part = remaining_content_to_split[..last_processed_byte_pos].to_string();
                 } else if current_chunk_content_part.is_empty() && last_processed_byte_pos == 0 {
                      // Edge case: available_content_len was 0 or negative (checked above), or first char invalid?
-                     log::warn!("Unable to extract any content for split chunk {} in {}. Header length might be too close to MAX_SECTION_SIZE.", current_chunk_idx, file_path);
+                     log::warn!("Unable to extract any content for split chunk {} in {}. Header length might be too close to MAX_SECTION_SIZE.", current_chunk_idx, params.file_path);
                      break; // Avoid infinite loop
                 }
 
 
                 // Use the determined content_part and update remaining_content_to_split
                 let content_part = current_chunk_content_part.trim_end(); // Trim trailing whitespace
-                let final_chunk_content = format!("{}{}", full_header, content_part);
+                let final_chunk_content = format!("{full_header}{content_part}");
 
                 // Check if we actually consumed any bytes
                 if last_processed_byte_pos == 0 && !remaining_content_to_split.is_empty() {
-                     log::error!("Split logic failed to advance in chunk {}. File: {}, Heading Line: {}. Remaining content starts with: '{}'", 
-                                current_chunk_idx, file_path, section_start_line, remaining_content_to_split.chars().take(20).collect::<String>());
+                     log::error!("Split logic failed to advance in chunk {}. File: {}, Heading Line: {}. Remaining content starts with: '{}'", current_chunk_idx, params.file_path, params.section_start_line, 
+                                remaining_content_to_split.chars().take(20).collect::<String>());
                      break; // Prevent potential infinite loop
                 }
 
@@ -515,14 +523,14 @@ impl MarkdownParser {
                  // Estimate start/end lines - this is tricky!
                  // The `section_start_line` refers to the original heading.
                  // The physical content starts later. Let's try to be slightly more accurate.
-                 let physical_content_start_line = current_heading.map_or(1, |h| h.end_line + 1);
-                 let chunk_start_line_approx = if current_chunk_idx == 1 { section_start_line } else { current_chunk_start_line };
+                 let _physical_content_start_line = params.current_heading.map_or(1, |h| h.end_line + 1);
+                 let chunk_start_line_approx = if current_chunk_idx == 1 { params.section_start_line } else { current_chunk_start_line };
                  // This end line calc is still flawed. 
                  let chunk_end_line_approx = chunk_start_line_approx + header_lines + lines_in_content_part - 1; 
 
                 let chunk = CodeChunk {
                     content: final_chunk_content,
-                    file_path: file_path.to_string(),
+                    file_path: params.file_path.to_string(),
                     start_line: chunk_start_line_approx, // Approximate start line
                     end_line: chunk_end_line_approx,     // Approximate end line
                     language: "markdown".to_string(),
@@ -530,7 +538,7 @@ impl MarkdownParser {
                 };
                 // Only add chunks for core element types
                 if is_core_element_type(&chunk.element_type, Some("markdown")) {
-                    chunks.push(chunk);
+                    params.chunks.push(chunk);
                 }
 
                 // The start line for the *next* chunk needs to relate to the previous end line.
@@ -543,7 +551,7 @@ impl MarkdownParser {
 
 impl SyntaxParser for MarkdownParser {
     fn parse(&mut self, code: &str, file_path: &str) -> Result<Vec<CodeChunk>> {
-        log::debug!("Parsing markdown file: {}", file_path);
+        log::debug!("Parsing markdown file: {file_path}");
         // 1. Handle empty or whitespace-only content right away
         if code.trim().is_empty() {
             log::debug!("Content is empty, returning zero chunks.");
@@ -560,7 +568,7 @@ impl SyntaxParser for MarkdownParser {
         let tree = match self.parser.parse(code, None) {
             Some(t) => t,
             None => {
-                log::warn!("Tree-sitter failed to parse {}, falling back to plain text handling.", file_path);
+                log::warn!("Tree-sitter failed to parse {file_path}, falling back to plain text handling.");
                 // Fallback if initial parse fails
                 return Ok(self.handle_plain_text(code, file_path));
             }
@@ -570,7 +578,7 @@ impl SyntaxParser for MarkdownParser {
         let headings = match self.extract_headings(&tree, code) {
              Ok(h) => h,
              Err(e) => {
-                 log::error!("Failed to extract headings from {}: {}. Falling back to plain text.", file_path, e);
+                 log::error!("Failed to extract headings from {file_path}: {e}. Falling back to plain text.");
                  return Ok(self.handle_plain_text(code, file_path));
              }
         };
@@ -578,7 +586,7 @@ impl SyntaxParser for MarkdownParser {
         // 4. Determine chunking strategy
         if headings.is_empty() {
             // No headings found, treat as plain text
-            log::debug!("No headings found in {}, using plain text handler.", file_path);
+            log::debug!("No headings found in {file_path}, using plain text handler.");
             Ok(self.handle_plain_text(code, file_path))
         } else {
             // Headings found, build chunks based on sections

@@ -27,14 +27,12 @@ struct SearchResult {
 }
 
 /// Formats search results for display, handling both JSON and human-readable output.
-///
-
 pub fn print_search_results(results: &[ScoredPoint], query_text: &str, json_output: bool) -> Result<()> {
     if results.is_empty() {
         if json_output {
             println!("[]"); // Output empty JSON array
         } else {
-            println!("No results found for query: \"{}\"", query_text);
+            println!("No results found for query: \"{query_text}\"");
         }
         return Ok(());
     }
@@ -89,7 +87,7 @@ pub fn print_search_results(results: &[ScoredPoint], query_text: &str, json_outp
         // Serialize the results to JSON, wrapped in a "results" field
         let output_json = serde_json::json!({ "results": serializable_results });
         let json_string = serde_json::to_string_pretty(&output_json)?;
-        println!("{}", json_string);
+        println!("{json_string}");
     } else {
         // Original human-readable output
         println!("Search results for: \"{}\"", query_text.cyan());
@@ -121,7 +119,7 @@ pub fn print_search_results(results: &[ScoredPoint], query_text: &str, json_outp
 
             // Format line range
             let line_range = if end_line > start_line {
-                format!("{}-{}", start_line, end_line)
+                format!("{start_line}-{end_line}")
             } else {
                 start_line.to_string()
             };
@@ -141,7 +139,7 @@ pub fn print_search_results(results: &[ScoredPoint], query_text: &str, json_outp
                 // Print the full chunk content as the snippet, indented
                 println!("{}", "-".repeat(4));
                 for line in content.lines() {
-                    println!("  {}", line);
+                    println!("  {line}");
                 }
             } else {
                 // No full content available - show preview if we have it
@@ -159,7 +157,7 @@ pub fn print_search_results(results: &[ScoredPoint], query_text: &str, json_outp
                     });
                 
                 if let Some(preview_line) = preview {
-                    println!("  {}", preview_line);
+                    println!("  {preview_line}");
                     println!("  {} Use 'sagitta-cli repo view-file -n <repo> {} -s {} -e {}' for full content",
                             "[...]".dimmed(),
                             file_path,

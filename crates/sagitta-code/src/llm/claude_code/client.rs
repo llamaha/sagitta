@@ -1,6 +1,5 @@
 use async_trait::async_trait;
 use std::pin::Pin;
-use std::sync::Arc;
 use futures_util::Stream;
 use uuid::Uuid;
 use tokio::time::Duration;
@@ -8,13 +7,11 @@ use tokio::time::Duration;
 use crate::config::types::{SagittaCodeConfig, ClaudeCodeConfig};
 use crate::llm::client::{
     LlmClient, Message, MessagePart, Role, ToolDefinition, LlmResponse, 
-    StreamChunk, ThinkingConfig, GroundingConfig, TokenUsage
+    StreamChunk, ThinkingConfig, GroundingConfig
 };
 use crate::utils::errors::SagittaCodeError;
-use super::error::ClaudeCodeError;
 use super::process::ClaudeProcess;
 use super::streaming::ClaudeCodeStream;
-use super::message_converter::{convert_messages_to_claude, ClaudeMessage, ClaudeMessageContent, stream_message_as_json};
 use super::models::ClaudeCodeModel;
 use super::claude_interface::{ClaudeInterface, ClaudeModelInfo, ClaudeConfigInfo};
 use super::mcp_integration::McpIntegration;
@@ -64,12 +61,12 @@ impl ClaudeCodeClient {
         
         // Start the MCP server and get config
         let mcp_config = mcp.start().await
-            .map_err(|e| SagittaCodeError::LlmError(format!("Failed to start MCP: {}", e)))?;
+            .map_err(|e| SagittaCodeError::LlmError(format!("Failed to start MCP: {e}")))?;
         
         // Extract the config path
         if let Some(path) = mcp_config.get("mcp_config_path").and_then(|v| v.as_str()) {
             self.mcp_config_path = Some(path.to_string());
-            log::info!("CLAUDE_CODE: MCP config created at: {}", path);
+            log::info!("CLAUDE_CODE: MCP config created at: {path}");
         }
         
         self.mcp_integration = Some(mcp);
@@ -158,7 +155,7 @@ impl LlmClient for ClaudeCodeClient {
                         })
                         .collect::<Vec<_>>()
                         .join(" ");
-                    prompt.push_str(&format!("Human: {}\n\n", text));
+                    prompt.push_str(&format!("Human: {text}\n\n"));
                 }
                 Role::Assistant => {
                     // Only include actual text content, not thinking
@@ -170,7 +167,7 @@ impl LlmClient for ClaudeCodeClient {
                         .collect::<Vec<_>>()
                         .join(" ");
                     if !text.is_empty() {
-                        prompt.push_str(&format!("Assistant: {}\n\n", text));
+                        prompt.push_str(&format!("Assistant: {text}\n\n"));
                     }
                 }
                 Role::System => {
@@ -312,7 +309,7 @@ impl LlmClient for ClaudeCodeClient {
                         })
                         .collect::<Vec<_>>()
                         .join(" ");
-                    prompt.push_str(&format!("Human: {}\n\n", text));
+                    prompt.push_str(&format!("Human: {text}\n\n"));
                 }
                 Role::Assistant => {
                     // Only include actual text content, not thinking
@@ -324,7 +321,7 @@ impl LlmClient for ClaudeCodeClient {
                         .collect::<Vec<_>>()
                         .join(" ");
                     if !text.is_empty() {
-                        prompt.push_str(&format!("Assistant: {}\n\n", text));
+                        prompt.push_str(&format!("Assistant: {text}\n\n"));
                     }
                 }
                 Role::System => {

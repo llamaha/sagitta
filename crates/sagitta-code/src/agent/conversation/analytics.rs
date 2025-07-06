@@ -7,9 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::agent::conversation::types::{Conversation, ConversationSummary, ProjectType};
+use crate::agent::conversation::types::{Conversation, ProjectType};
 use crate::agent::state::types::ConversationStatus;
-use crate::config::types::SagittaCodeConfig;
 // Tool types removed - tools now via MCP
 
 /// Conversation analytics manager for tracking metrics and patterns
@@ -574,7 +573,7 @@ impl ConversationAnalyticsManager {
         };
         
         // Analyze peak activity hours
-        let mut hour_counts = vec![0; 24];
+        let mut hour_counts = [0; 24];
         for conversation in conversations {
             let hour = conversation.created_at.hour();
             hour_counts[hour as usize] += 1;
@@ -593,7 +592,7 @@ impl ConversationAnalyticsManager {
         for conversation in conversations {
             if let Some(ref project_context) = conversation.project_context {
                 *project_type_distribution
-                    .entry(project_context.project_type.clone())
+                    .entry(project_context.project_type)
                     .or_insert(0) += 1;
             }
         }
@@ -652,10 +651,10 @@ impl ConversationAnalyticsManager {
         for conversation in conversations {
             if let Some(ref project_context) = conversation.project_context {
                 let project_type = &project_context.project_type;
-                *project_totals.entry(project_type.clone()).or_insert(0) += 1;
+                *project_totals.entry(*project_type).or_insert(0) += 1;
                 
                 if self.is_conversation_successful(conversation) {
-                    *success_by_project_type.entry(project_type.clone()).or_insert(0) += 1;
+                    *success_by_project_type.entry(*project_type).or_insert(0) += 1;
                 }
             }
         }
@@ -879,7 +878,7 @@ impl ConversationAnalyticsManager {
             
             while current_date <= end_date {
                 let daily_tokens: usize = conversations.iter()
-                    .filter(|c| c.created_at.date() == current_date.date())
+                    .filter(|c| c.created_at.date_naive() == current_date.date_naive())
                     .map(|c| c.messages.len() * 100) // Rough estimate
                     .sum();
                 
@@ -887,7 +886,7 @@ impl ConversationAnalyticsManager {
                     usage_trend.push((current_date, daily_tokens));
                 }
                 
-                current_date = current_date + Duration::days(1);
+                current_date += Duration::days(1);
             }
         }
         
@@ -988,8 +987,8 @@ impl ConversationAnalyticsManager {
         for conversation in conversations {
             if let Some(ref project_context) = conversation.project_context {
                 project_conversations
-                    .entry(project_context.project_type.clone())
-                    .or_insert_with(Vec::new)
+                    .entry(project_context.project_type)
+                    .or_default()
                     .push(conversation);
             }
         }
@@ -1157,8 +1156,8 @@ impl ConversationAnalyticsManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::conversation::types::Conversation;
-    use crate::agent::message::types::AgentMessage;
+    
+    
 
     #[test]
     fn test_analytics_manager_creation() {

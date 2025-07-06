@@ -2,7 +2,6 @@
 /// 
 /// This module provides fallback symbols for emojis that might not display properly
 /// depending on the system's font configuration.
-
 /// Brain/thinking symbols - alternatives to 🧠
 pub mod thinking {
     /// Simple brain representation using ASCII

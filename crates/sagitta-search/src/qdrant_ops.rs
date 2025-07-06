@@ -1,9 +1,9 @@
 /// Contains operations specific to Qdrant interactions, like deleting points.
 use crate::{
-    error::{Result as CoreResult, SagittaError},
+    error::Result as CoreResult,
     qdrant_client_trait::QdrantClientTrait,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use qdrant_client::{
     qdrant::{
         PointStruct, UpsertPointsBuilder,
@@ -38,15 +38,14 @@ pub async fn delete_all_points<C>(
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
-    log::info!("Deleting all points from collection: {}", collection_name);
+    log::info!("Deleting all points from collection: {collection_name}");
 
     let select_all_filter = Filter::default();
 
     let delete_request = DeletePointsBuilder::new(collection_name)
         .points(PointsSelectorOneOf::Filter(select_all_filter));
 
-    client.delete_points(delete_request.into()).await.map_err(SagittaError::from)
-}
+    client.delete_points(delete_request.into()).await}
 
 /// Deletes a Qdrant collection by its name.
 ///
@@ -63,21 +62,20 @@ pub async fn delete_collection_by_name<C>(
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
-    log::info!("Deleting collection: {}", collection_name);
+    log::info!("Deleting collection: {collection_name}");
     match client.delete_collection(collection_name.to_string()).await {
         Ok(success) => { // `success` is the boolean result from the QdrantClientTrait
             if success { // `success` is used directly as the boolean
-                log::info!("Successfully deleted collection: {}", collection_name);
+                log::info!("Successfully deleted collection: {collection_name}");
             } else {
                 log::warn!(
-                    "Delete collection operation for '{}' acknowledged by Qdrant but result was false (e.g., collection might not have existed).",
-                    collection_name
+                    "Delete collection operation for '{collection_name}' acknowledged by Qdrant but result was false (e.g., collection might not have existed)."
                 );
             }
             Ok(())
         }
         Err(core_err) => { // The trait method returns CoreResult (Result<T, SagittaError>)
-            log::error!("Qdrant client error while deleting collection '{}': {:?}", collection_name, core_err);
+            log::error!("Qdrant client error while deleting collection '{collection_name}': {core_err:?}");
             Err(core_err) // Propagate the SagittaError
         }
     }
@@ -98,25 +96,20 @@ pub async fn ensure_payload_index(
         Ok(info) => info,
         Err(e) => {
             return Err(anyhow::anyhow!(e).context(format!(
-                "Failed to get collection info for {}",
-                collection_name
+                "Failed to get collection info for {collection_name}"
             )));
         }
     };
 
     if collection_info.payload_schema.contains_key(field_name) {
         log::debug!(
-            "Payload index for '{}' on field '{}' already exists.",
-            collection_name,
-            field_name
+            "Payload index for '{collection_name}' on field '{field_name}' already exists."
         );
         return Ok(());
     }
 
     log::info!(
-        "Creating payload index for '{}' on field '{}'...",
-        collection_name,
-        field_name
+        "Creating payload index for '{collection_name}' on field '{field_name}'..."
     );
 
     let index_params = match field_type {
@@ -151,11 +144,11 @@ pub async fn ensure_payload_index(
             if let Some(result) = response.result {
                  match UpdateStatus::try_from(result.status) {
                      Ok(UpdateStatus::Completed) => {
-                         log::info!("Payload index created successfully for field '{}'.", field_name);
+                         log::info!("Payload index created successfully for field '{field_name}'.");
                          Ok(())
                      }
                      Ok(status) => {
-                         log::warn!("Payload index creation for field '{}' resulted in status: {:?}", field_name, status);
+                         log::warn!("Payload index creation for field '{field_name}' resulted in status: {status:?}");
                          Ok(())
                      }
                      Err(_) => {
@@ -164,12 +157,12 @@ pub async fn ensure_payload_index(
                      }
                  }
              } else {
-                  log::warn!("Payload index creation response for field '{}' did not contain a result.", field_name);
+                  log::warn!("Payload index creation response for field '{field_name}' did not contain a result.");
                   Ok(())
              }
         }
         Err(e) => {
-            log::error!("Failed to create payload index for field '{}': {}. Ignoring error.", field_name, e);
+            log::error!("Failed to create payload index for field '{field_name}': {e}. Ignoring error.");
             Ok(())
         }
     }

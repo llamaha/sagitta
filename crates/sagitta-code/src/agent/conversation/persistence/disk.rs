@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use anyhow::Result;
 use std::path::PathBuf;
 use tokio::fs;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 use super::ConversationPersistence;
@@ -43,12 +43,12 @@ impl DiskConversationPersistence {
     
     /// Get the file path for a conversation
     fn get_conversation_path(&self, id: Uuid) -> PathBuf {
-        self.conversations_dir.join(format!("{}.json", id))
+        self.conversations_dir.join(format!("{id}.json"))
     }
     
     /// Get the archive file path for a conversation
     fn get_archive_path(&self, id: Uuid) -> PathBuf {
-        self.archive_dir.join(format!("{}.json", id))
+        self.archive_dir.join(format!("{id}.json"))
     }
     
     /// Get the index file path
@@ -72,12 +72,12 @@ impl DiskConversationPersistence {
             match serde_json::from_str::<ConversationIndex>(&content) {
                 Ok(index) => Ok(index),
                 Err(e) => {
-                    log::error!("Failed to parse index JSON: {}", e);
+                    log::error!("Failed to parse index JSON: {e}");
                     
                     // Move corrupted index to backup location
                     let backup_path = self.storage_path.join("index.json.corrupted");
                     if let Err(backup_err) = fs::rename(&index_path, &backup_path).await {
-                        log::warn!("Failed to move corrupted index to backup: {}", backup_err);
+                        log::warn!("Failed to move corrupted index to backup: {backup_err}");
                     } else {
                         log::info!("Moved corrupted index file to: {}", backup_path.display());
                     }
@@ -197,21 +197,21 @@ impl ConversationPersistence for DiskConversationPersistence {
             match serde_json::from_str::<Conversation>(&content) {
                 Ok(conversation) => Ok(Some(conversation)),
                 Err(e) => {
-                    log::error!("Failed to parse conversation JSON for {}: {}", id, e);
+                    log::error!("Failed to parse conversation JSON for {id}: {e}");
                     
                     // Move corrupted file to backup location
-                    let backup_path = self.storage_path.join("corrupted").join(format!("{}.json.corrupted", id));
+                    let backup_path = self.storage_path.join("corrupted").join(format!("{id}.json.corrupted"));
                     if let Err(backup_err) = fs::create_dir_all(backup_path.parent().unwrap()).await {
-                        log::warn!("Failed to create corrupted backup directory: {}", backup_err);
+                        log::warn!("Failed to create corrupted backup directory: {backup_err}");
                     } else if let Err(backup_err) = fs::rename(&file_path, &backup_path).await {
-                        log::warn!("Failed to move corrupted file to backup: {}", backup_err);
+                        log::warn!("Failed to move corrupted file to backup: {backup_err}");
                     } else {
                         log::info!("Moved corrupted conversation file to: {}", backup_path.display());
                     }
                     
                     // Remove from index to prevent future load attempts
                     if let Err(index_err) = self.update_index_on_delete(id).await {
-                        log::warn!("Failed to update index after removing corrupted conversation: {}", index_err);
+                        log::warn!("Failed to update index after removing corrupted conversation: {index_err}");
                     }
                     
                     // Return None instead of error to allow the application to continue
@@ -246,7 +246,7 @@ impl ConversationPersistence for DiskConversationPersistence {
             .values()
             .filter(|entry| {
                 // Filter by workspace if specified
-                workspace_id.map_or(true, |ws_id| entry.workspace_id == Some(ws_id))
+                workspace_id.is_none_or(|ws_id| entry.workspace_id == Some(ws_id))
             })
             .map(|entry| ConversationSummary {
                 id: entry.id,
@@ -485,7 +485,7 @@ mod tests {
         assert!(result.is_none());
         
         // Check that corrupted file was moved to backup
-        let backup_path = storage_path.join("corrupted").join(format!("{}.json.corrupted", conversation_id));
+        let backup_path = storage_path.join("corrupted").join(format!("{conversation_id}.json.corrupted"));
         assert!(backup_path.exists());
         
         // Original file should be gone

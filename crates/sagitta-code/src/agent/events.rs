@@ -41,7 +41,7 @@ pub enum ToolExecutionEvent {
         error: String,
     },
 }
-use crate::llm::client::{LlmClient, Role};
+use crate::llm::client::Role;
 
 /// Type alias for tool run identification
 pub type ToolRunId = Uuid;
@@ -287,10 +287,10 @@ impl EventHandler {
         tokio::spawn(async move {
             info!("Tool event listener task started.");
             while let Some(event) = tool_event_receiver.recv().await {
-                debug!("Received tool execution event: {:?}", event);
+                debug!("Received tool execution event: {event:?}");
                 match event {
                     ToolExecutionEvent::Started { tool_call_id, tool_name, parameters } => {
-                        info!("Tool call ID: {} ({}) started. Args: {:?}", tool_call_id, tool_name, parameters);
+                        info!("Tool call ID: {tool_call_id} ({tool_name}) started. Args: {parameters:?}");
                     },
                     ToolExecutionEvent::Completed { tool_call_id, tool_name, result } => {
                         info!("Tool execution completed: {} (success: {})", tool_call_id, result.is_success());
@@ -327,12 +327,12 @@ impl EventHandler {
                         info!("Tool result added to history. Unified reasoning stream will handle continuation.");
                     },
                     ToolExecutionEvent::Failed { tool_call_id, tool_name, error } => {
-                        warn!("Tool call ID: {} ({}) failed. Error: {}", tool_call_id, tool_name, error);
+                        warn!("Tool call ID: {tool_call_id} ({tool_name}) failed. Error: {error}");
                         // Add the error to the message history
                         let error_value = serde_json::json!({ "error": error });
-                        debug!("Serialized tool error for history: {:?}", error_value);
+                        debug!("Serialized tool error for history: {error_value:?}");
                         let _ = history.add_tool_result(&tool_call_id, error_value.clone(), false).await;
-                        debug!("Added tool error for ID: {} to history. Error value: {:?}", tool_call_id, error_value);
+                        debug!("Added tool error for ID: {tool_call_id} to history. Error value: {error_value:?}");
                         
                         // --- PATCH: Add a new function response message for Gemini on error ---
                         let mut function_response_message = AgentMessage {
@@ -357,7 +357,7 @@ impl EventHandler {
                             execution_time: Some(chrono::Utc::now()),
                         });
                         history.add_message(function_response_message).await;
-                        debug!("Added Function role message to history for failed tool: {}", tool_name);
+                        debug!("Added Function role message to history for failed tool: {tool_name}");
                         // --- END PATCH ---
                         
                         // Emit an event about the tool failure

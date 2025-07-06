@@ -15,13 +15,11 @@ use tracing::{error, info, instrument, warn};
 use sagitta_search::{
     config::{self, get_repo_base_path, save_config, AppConfig, RepositoryConfig},
     EmbeddingPool, EmbeddingProcessor, // Use re-export
-    indexing::{self, gather_files, index_repo_files},
+    indexing::{self, gather_files, IndexRepoFilesParams},
     qdrant_client_trait::QdrantClientTrait,
-    repo_add::{handle_repo_add, AddRepoArgs, AddRepoError},
-    repo_helpers::{delete_repository_data, get_collection_name, get_branch_aware_collection_name},
-    error::SagittaError,
-    sync::{sync_repository, SyncOptions, SyncResult},
-    sync_progress::{SyncProgressReporter, SyncProgress},
+    repo_add::{handle_repo_add, AddRepoArgs},
+    repo_helpers::{delete_repository_data, get_branch_aware_collection_name},
+    sync::SyncOptions,
     fs_utils::{find_files_matching_pattern, read_file_range},
 };
 use crate::server::{map_add_repo_error, create_error_data};
@@ -29,10 +27,10 @@ use std::path::PathBuf;
 use git2::Repository;
 use crate::middleware::auth_middleware::AuthenticatedUser;
 use axum::Extension;
-use serde_json::json; // For creating JSON content
-use git_manager::GitRepository;
+// For creating JSON content
+#[cfg(test)]
+use serde_json::json;
 use git_manager::GitManager;
-use futures_util::TryFutureExt;
 use crate::progress::LoggingProgressReporter; // Added LoggingProgressReporter
 
 /// Helper function to save config with proper test isolation
@@ -89,7 +87,7 @@ pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>
         error!(error = %e, "Failed to create embedding pool for repo_add");
         ErrorObject {
             code: error_codes::INTERNAL_ERROR,
-            message: format!("Failed to initialize embedding pool: {}", e),
+            message: format!("Failed to initialize embedding pool: {e}"),
             data: None,
         }
     })?;
@@ -100,7 +98,7 @@ pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>
 
     let initial_base_path = get_repo_base_path(Some(&*config.read().await)).map_err(|e| ErrorObject {
         code: error_codes::INTERNAL_ERROR,
-        message: format!("Failed to determine repository base path: {}", e),
+        message: format!("Failed to determine repository base path: {e}"),
         data: None,
     })?;
     fs::create_dir_all(&initial_base_path).map_err(|e| ErrorObject {
@@ -164,13 +162,13 @@ pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>
 
             config_write_guard.repositories.push(repo_config.clone());
 
-            if let Err(e) = save_config_with_test_isolation(&*config_write_guard) {
+            if let Err(e) = save_config_with_test_isolation(&config_write_guard) {
                 error!(error = %e, repo_name=%repo_config.name, "Failed to save config after adding repository {} to memory", repo_config.name);
                 // Attempt to remove the repo we just added to memory if save fails
                 config_write_guard.repositories.pop();
                 return Err(ErrorObject {
                     code: error_codes::CONFIG_SAVE_FAILED,
-                    message: format!("Failed to save configuration after adding repository: {}", e),
+                    message: format!("Failed to save configuration after adding repository: {e}"),
                     data: None,
                 });
             }
@@ -218,7 +216,7 @@ pub async fn handle_repository_list(
             error!("Failed to get enhanced repository list: {}", e);
             ErrorObject {
                 code: error_codes::INTERNAL_ERROR,
-                message: format!("Failed to get repository list: {}", e),
+                message: format!("Failed to get repository list: {e}"),
                 data: None,
             }
         })?;
@@ -230,7 +228,7 @@ pub async fn handle_repository_list(
         .map(|enhanced_repo| {
             // Determine branch information
             let branch = enhanced_repo.active_branch
-                .or_else(|| Some(enhanced_repo.default_branch));
+                .or(Some(enhanced_repo.default_branch));
 
             // Create description with enhanced information
             let mut description_parts = Vec::new();
@@ -259,7 +257,7 @@ pub async fn handle_repository_list(
                 if let Some(size) = enhanced_repo.filesystem_status.size_bytes {
                     description_parts.push(format!("{} files ({})", file_count, format_bytes(size)));
                 } else {
-                    description_parts.push(format!("{} files", file_count));
+                    description_parts.push(format!("{file_count} files"));
                 }
             }
 
@@ -361,12 +359,12 @@ pub async fn handle_repository_remove<C: QdrantClientTrait + Send + Sync + 'stat
     config_write_guard.repositories.remove(repo_index);
 
     // Save updated config
-    if let Err(e) = save_config_with_test_isolation(&*config_write_guard) {
+    if let Err(e) = save_config_with_test_isolation(&config_write_guard) {
         error!(error = %e, "Failed to save config after removing repository");
         // TODO: Should we attempt to restore the removed repo in memory?
         return Err(ErrorObject {
             code: error_codes::CONFIG_SAVE_FAILED,
-            message: format!("Failed to save configuration after removal: {}", e),
+            message: format!("Failed to save configuration after removal: {e}"),
             data: None,
         });
     }
@@ -396,7 +394,7 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
             error!("Repository '{}' not found for sync", repo_name);
             ErrorObject {
                 code: error_codes::REPO_NOT_FOUND,
-                message: format!("Repository '{}' not found for sync", repo_name),
+                message: format!("Repository '{repo_name}' not found for sync"),
                 data: None,
             }
         })?
@@ -432,8 +430,8 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
     .await;
 
     let sync_message: String;
-    let mut actual_synced_commit: Option<String> = None;
-    let mut indexed_languages_from_sync: Vec<String> = Vec::new();
+    let actual_synced_commit: Option<String>;
+    let indexed_languages_from_sync: Vec<String>;
 
     match core_sync_result { // Match on the direct result
         Ok(core_success_result) => {
@@ -449,11 +447,11 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
                         // Use branch_to_sync_str (which is &str) for the key
                         repo_mut.last_synced_commits.insert(branch_to_sync_str.to_string(), commit.clone());
                         repo_mut.indexed_languages = Some(indexed_languages_from_sync.clone());
-                        save_config_with_test_isolation(&*config_write).map_err(|e| {
+                        save_config_with_test_isolation(&config_write).map_err(|e| {
                             error!(error = %e, "Failed to save config after repository sync update");
                             ErrorObject {
                                 code: error_codes::CONFIG_SAVE_FAILED,
-                                message: format!("Failed to save config after sync update: {}", e),
+                                message: format!("Failed to save config after sync update: {e}"),
                                 data: None,
                             }
                         })?;
@@ -495,7 +493,7 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
             .unwrap_or(false)
     };
 
-    let should_index = actual_synced_commit.as_ref().map_or(false, |s| !s.is_empty()) || !vocab_exists_before_sync;
+    let should_index = actual_synced_commit.as_ref().is_some_and(|s| !s.is_empty()) || !vocab_exists_before_sync;
 
     if !should_index {
         info!(repo_name = %repo_name, commit = ?actual_synced_commit, vocab_exists_before = %vocab_exists_before_sync, "Skipping indexing stage: No new commit and vocabulary already exists.");
@@ -507,16 +505,16 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
             error!(error = %e, "Failed to create embedding pool for indexing stage");
             ErrorObject {
                 code: error_codes::INTERNAL_ERROR,
-                message: format!("Failed to create embedding pool for indexing: {}", e),
+                message: format!("Failed to create embedding pool for indexing: {e}"),
                 data: None,
             }
         })?;
-        let embedding_dim = embedding_pool.dimension();
+        let _embedding_dim = embedding_pool.dimension();
         // >>>>>>>>>> End moved block <<<<<<<<<<
 
         let repo_root = &repo_config.local_path; // Use the initially cloned repo_config
 
-        let indexing_commit_hash = if actual_synced_commit.as_ref().map_or(true, |s| s.is_empty()) {
+        let indexing_commit_hash = if actual_synced_commit.as_ref().is_none_or(|s| s.is_empty()) {
             info!(repo_name=%repo_name, "Fetching current HEAD commit for forced indexing (sync returned no commit or vocab missing).");
             match Repository::open(repo_root) {
                 Ok(repo) => repo.head()
@@ -575,18 +573,18 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
         } else {
             info!(repo_name = %repo_name, count = files_to_index_rel.len(), commit=%indexing_commit_hash, "Found files to index, calling index_repo_files");
 
-            match indexing::index_repo_files(
-                &app_config_clone, 
+            match indexing::index_repo_files(IndexRepoFilesParams {
+                config: &app_config_clone, 
                 repo_root,
-                &files_to_index_rel,
-                &collection_name,
-                context_identifier, 
-                &indexing_commit_hash, // Use the potentially derived commit hash
-                qdrant_client.clone(),
-                Arc::new(embedding_pool),
-                None,
-                app_config_clone.indexing.max_concurrent_upserts,
-            )
+                relative_paths: &files_to_index_rel,
+                collection_name: &collection_name,
+                branch_name: context_identifier, 
+                commit_hash: &indexing_commit_hash, // Use the potentially derived commit hash
+                client: qdrant_client.clone(),
+                embedding_pool: Arc::new(embedding_pool),
+                progress_reporter: None,
+                max_concurrent_upserts: app_config_clone.indexing.max_concurrent_upserts,
+            })
             .await
             {
                 Ok(count) => {
@@ -639,7 +637,7 @@ fn get_repo_config_mcp<'a>(
         .find(|r| r.name == repo_name)
         .ok_or_else(|| ErrorObject {
             code: error_codes::REPO_NOT_FOUND,
-            message: format!("Repository '{}' not found in configuration.", repo_name),
+            message: format!("Repository '{repo_name}' not found in configuration."),
             data: None,
         })
 }
@@ -782,7 +780,7 @@ where
             error!("Repository '{}' not found for branch switch", repo_name);
             ErrorObject {
                 code: error_codes::REPO_NOT_FOUND,
-                message: format!("Repository '{}' not found for branch switch", repo_name),
+                message: format!("Repository '{repo_name}' not found for branch switch"),
                 data: None,
             }
         })?
@@ -795,7 +793,7 @@ where
         .unwrap_or_else(|| repo_config.default_branch.clone());
     
     // Drop the read lock before git operations
-    let app_config_clone = config_guard.clone();
+    let _app_config_clone = config_guard.clone();
     drop(config_guard);
 
     // Initialize git manager and perform branch switch
@@ -806,14 +804,14 @@ where
     let branches = git_manager.list_all_references(&repo_path)
         .map_err(|e| ErrorObject {
             code: error_codes::GIT_OPERATION_FAILED,
-            message: format!("Failed to list branches: {}", e),
+            message: format!("Failed to list branches: {e}"),
             data: None,
         })?;
     
         if !branches.contains(&target_ref_to_checkout) {
         return Err(ErrorObject {
             code: error_codes::GIT_OPERATION_FAILED,
-                message: format!("Branch '{}' not found in repository", target_ref_to_checkout),
+                message: format!("Branch '{target_ref_to_checkout}' not found in repository"),
             data: None,
         });
         }
@@ -824,14 +822,14 @@ where
     let repo = git_manager::GitRepository::open(&repo_path)
         .map_err(|e| ErrorObject {
             code: error_codes::GIT_OPERATION_FAILED,
-            message: format!("Failed to open repository: {}", e),
+            message: format!("Failed to open repository: {e}"),
             data: None,
         })?;
     
     let previous_branch = repo.switch_branch(&target_ref_to_checkout)
         .map_err(|e| ErrorObject {
             code: error_codes::GIT_OPERATION_FAILED,
-            message: format!("Failed to switch branch: {}", e),
+            message: format!("Failed to switch branch: {e}"),
             data: None,
         })?;
 
@@ -905,16 +903,16 @@ where
         }
         
         // Save configuration
-        save_config_with_test_isolation(&*config_write_guard)
+        save_config_with_test_isolation(&config_write_guard)
             .map_err(|e| ErrorObject {
                 code: error_codes::CONFIG_SAVE_FAILED,
-                message: format!("Failed to save configuration: {}", e),
+                message: format!("Failed to save configuration: {e}"),
                 data: None,
             })?;
     }
 
     Ok(RepositorySwitchBranchResult {
-        previous_branch: previous_branch,
+        previous_branch,
         new_branch: target_ref_to_checkout.clone(),
         sync_performed,
         files_changed,
@@ -943,7 +941,7 @@ pub async fn handle_repository_list_branches(
             error!("Repository '{}' not found for list branches", repo_name);
             ErrorObject {
                 code: error_codes::REPO_NOT_FOUND,
-                message: format!("Repository '{}' not found for list branches", repo_name),
+                message: format!("Repository '{repo_name}' not found for list branches"),
                 data: None,
             }
         })?
@@ -962,7 +960,7 @@ pub async fn handle_repository_list_branches(
     let repo = git_manager::GitRepository::open(&repo_path)
         .map_err(|e| ErrorObject {
             code: error_codes::GIT_OPERATION_FAILED,
-            message: format!("Failed to open repository: {}", e),
+            message: format!("Failed to open repository: {e}"),
             data: None,
         })?;
 
@@ -972,7 +970,7 @@ pub async fn handle_repository_list_branches(
     let local_branches = repo.list_branches(Some(git2::BranchType::Local))
         .map_err(|e| ErrorObject {
             code: error_codes::GIT_OPERATION_FAILED,
-            message: format!("Failed to list local branches: {}", e),
+            message: format!("Failed to list local branches: {e}"),
             data: None,
         })?;
     all_refs.extend(local_branches);
@@ -982,7 +980,7 @@ pub async fn handle_repository_list_branches(
         let remote_branches = repo.list_branches(Some(git2::BranchType::Remote))
             .map_err(|e| ErrorObject {
                 code: error_codes::GIT_OPERATION_FAILED,
-                message: format!("Failed to list remote branches: {}", e),
+                message: format!("Failed to list remote branches: {e}"),
                 data: None,
             })?;
         
@@ -1001,7 +999,7 @@ pub async fn handle_repository_list_branches(
         let tags = git_manager.list_tags(&repo_path)
             .map_err(|e| ErrorObject {
                 code: error_codes::GIT_OPERATION_FAILED,
-                message: format!("Failed to list tags: {}", e),
+                message: format!("Failed to list tags: {e}"),
                 data: None,
             })?;
         all_refs.extend(tags);
@@ -1257,7 +1255,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let repo_base = temp_dir.path().join("repos");
         let vocab_base = temp_dir.path().join("vocab");
-        let model_base = temp_dir.path().join("model");
+        let _model_base = temp_dir.path().join("model");
 
         let test_config = AppConfig {
             qdrant_url: "http://localhost:6334".to_string(),

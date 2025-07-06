@@ -45,7 +45,7 @@ pub async fn handle_status(
             if branch == &repo_info.current_branch {
                 println!("  {} {}", "*".green(), branch.green());
             } else {
-                println!("    {}", branch);
+                println!("    {branch}");
             }
         }
     }

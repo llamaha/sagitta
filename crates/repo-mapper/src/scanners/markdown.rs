@@ -18,7 +18,7 @@ pub fn scan_line(
         methods.push(MethodInfo {
             name: title,
             method_type: MethodType::MarkdownHeader,
-            params: format!("level {}", level),
+            params: format!("level {level}"),
             context: context.to_string(),
             docstring,
             calls: Vec::new(),

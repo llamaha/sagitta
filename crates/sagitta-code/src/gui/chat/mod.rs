@@ -6,7 +6,6 @@ use view::{StreamingMessage, MessageAuthor, MessageStatus, ToolCall, MessageType
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use chrono::{DateTime, Utc};
-use uuid::Uuid;
 use crate::agent::events::ToolRunId;
 
 /// Represents an item in the chat timeline
@@ -194,7 +193,7 @@ impl StreamingChatManager {
         let mut active_streams = self.active_streams.lock().unwrap();
         if let Some(message) = active_streams.get_mut(message_id) {
             if std::env::var("SAGITTA_STREAMING_DEBUG").is_ok() {
-                log::debug!("StreamingChatManager::append_content - Found active stream for ID: '{}'", message_id);
+                log::debug!("StreamingChatManager::append_content - Found active stream for ID: '{message_id}'");
             }
             // If we're thinking, switch to streaming but preserve thinking content
             if message.is_thinking() {
@@ -203,7 +202,7 @@ impl StreamingChatManager {
             }
             message.append_content(&chunk);
         } else {
-            log::warn!("StreamingChatManager::append_content - NO active stream found for ID: '{}'", message_id);
+            log::warn!("StreamingChatManager::append_content - NO active stream found for ID: '{message_id}'");
         }
     }
     
@@ -272,7 +271,7 @@ impl StreamingChatManager {
                     log::debug!("StreamingChatManager::add_tool_call - Added tool call inline to agent message");
                 }
             } else {
-                log::warn!("StreamingChatManager::add_tool_call - NO active stream found for message_id: '{}'", message_id);
+                log::warn!("StreamingChatManager::add_tool_call - NO active stream found for message_id: '{message_id}'");
                 
                 // Fallback: Check if the message is in completed messages and add tool call there
                 let mut messages = self.messages.lock().unwrap();
@@ -288,7 +287,7 @@ impl StreamingChatManager {
                     }
                 }
                 
-                log::warn!("StreamingChatManager::add_tool_call - Could not find message with ID: '{}'", message_id);
+                log::warn!("StreamingChatManager::add_tool_call - Could not find message with ID: '{message_id}'");
             }
         }
     }
@@ -606,6 +605,15 @@ impl Default for StreamingChatManager {
     }
 }
 
+/// Trait for rendering tool results in different formats
+pub trait ToolResultRenderer {
+    /// Render the tool result inline within the chat
+    fn render_inline(&self, ui: &mut egui::Ui, tool_name: &str, result: &serde_json::Value, app_theme: crate::gui::theme::AppTheme, max_width: f32);
+    
+    /// Get a preview of the result (for truncated display)
+    fn get_preview(&self, tool_name: &str, result: &serde_json::Value, max_lines: usize) -> String;
+}
+
 /// Example usage demonstrating proper streaming
 #[cfg(test)]
 mod tests {
@@ -869,14 +877,5 @@ mod tests {
         assert!(messages[3].timestamp > messages[1].timestamp, 
                 "Sagitta Code's second response should have a later timestamp than the first");
     }
-}
-
-/// Trait for rendering tool results in different formats
-pub trait ToolResultRenderer {
-    /// Render the tool result inline within the chat
-    fn render_inline(&self, ui: &mut egui::Ui, tool_name: &str, result: &serde_json::Value, app_theme: crate::gui::theme::AppTheme, max_width: f32);
-    
-    /// Get a preview of the result (for truncated display)
-    fn get_preview(&self, tool_name: &str, result: &serde_json::Value, max_lines: usize) -> String;
 }
 

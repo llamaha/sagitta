@@ -1,21 +1,15 @@
 // Event handling for the Sagitta Code application
 
-use std::sync::Arc;
-use tokio::sync::mpsc;
-use uuid::{self, Uuid};
+use uuid::{self};
 
-use crate::agent::Agent;
 use crate::agent::message::types::{AgentMessage, ToolCall};
 use crate::agent::state::types::AgentState;
 use crate::agent::events::{AgentEvent, ToolRunId};
 use crate::llm::client::Role;
-use super::super::chat::view::{ChatMessage, MessageAuthor, StreamingMessage, MessageStatus, ToolCall as ViewToolCall, MessageType};
+use super::super::chat::view::{ChatMessage, MessageAuthor, StreamingMessage, MessageStatus, ToolCall as ViewToolCall};
 use super::panels::{SystemEventType};
 use super::SagittaCodeApp;
-use crate::config::types::SagittaCodeConfig;
-use sagitta_search::AppConfig;
-use crate::gui::repository::manager::RepositoryManager;
-use serde_json::{Value, Map};
+use serde_json::Value;
 
 /// Application-specific UI events
 #[derive(Debug, Clone)]
@@ -33,6 +27,7 @@ pub enum AppEvent {
     },
     RepositoryListUpdated(Vec<String>),
     RefreshRepositoryList,
+    UpdateGitHistoryPath(std::path::PathBuf),
     CancelTool(ToolRunId),
     RenameConversation {
         conversation_id: uuid::Uuid,
@@ -94,7 +89,7 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                     } else {
                         // Active streaming - check if it's a duplicate or error recovery
                         if let Some(response_id) = &app.state.current_response_id {
-                            log::debug!("SagittaCodeApp: Received LlmMessage during active streaming (id: {}), likely from error recovery", response_id);
+                            log::debug!("SagittaCodeApp: Received LlmMessage during active streaming (id: {response_id}), likely from error recovery");
                         } else {
                             log::warn!("SagittaCodeApp: Unexpected state - streaming with response_id but shouldn't reach here");
                         }
@@ -130,7 +125,7 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                     app.state.active_tool_calls.insert(tool_call.id.clone(), message_id);
                 },
                 AgentEvent::ToolCallComplete { tool_call_id, tool_name, result } => {
-                    log::info!("Tool call {} ({}) completed", tool_call_id, tool_name);
+                    log::info!("Tool call {tool_call_id} ({tool_name}) completed");
                     
                     // Update the tool result in the message
                     if let Some(message_id) = app.state.active_tool_calls.get(&tool_call_id) {
@@ -152,7 +147,7 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                         // Clean up
                         app.state.active_tool_calls.remove(&tool_call_id);
                     } else {
-                        log::warn!("Received tool result for unknown tool call: {}", tool_call_id);
+                        log::warn!("Received tool result for unknown tool call: {tool_call_id}");
                     }
                 },
                 AgentEvent::ToolCallPending { tool_call } => {
@@ -163,38 +158,38 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                     );
                 },
                 AgentEvent::StateChanged(state) => {
-                    log::debug!("SagittaCodeApp: Agent state changed to: {:?}", state);
+                    log::debug!("SagittaCodeApp: Agent state changed to: {state:?}");
                     handle_state_change(app, state);
                 },
                 AgentEvent::ToolCallApproved { tool_call_id } => {
                     // Add to events panel instead of chat to save space
                     app.panels.events_panel.add_event(
                         SystemEventType::Info,
-                        format!("Tool call {} approved and executing", tool_call_id)
+                        format!("Tool call {tool_call_id} approved and executing")
                     );
                 },
                 AgentEvent::ToolCallRejected { tool_call_id, reason } => {
                     // Add to events panel instead of chat to save space
                     let message_text = if let Some(reason) = reason {
-                        format!("Tool call {} rejected: {}", tool_call_id, reason)
+                        format!("Tool call {tool_call_id} rejected: {reason}")
                     } else {
-                        format!("Tool call {} rejected", tool_call_id)
+                        format!("Tool call {tool_call_id} rejected")
                     };
                     app.panels.events_panel.add_event(SystemEventType::Error, message_text);
                 },
                 AgentEvent::ConversationStatusChanged(status) => {
-                    log::info!("SagittaCodeApp: Received ConversationStatusChanged event: {:?}", status);
+                    log::info!("SagittaCodeApp: Received ConversationStatusChanged event: {status:?}");
                     // Potentially refresh UI elements that depend on conversation status here
                 },
                 AgentEvent::ConversationCompleted { conversation_id } => {
-                    log::info!("SagittaCodeApp: Received ConversationCompleted event for conversation: {}", conversation_id);
+                    log::info!("SagittaCodeApp: Received ConversationCompleted event for conversation: {conversation_id}");
                     
                     // Update conversation title when conversation is completed
                     if let Some(title_updater) = &app.title_updater {
                         let title_updater_clone = title_updater.clone();
                         tokio::spawn(async move {
                             if let Err(e) = title_updater_clone.maybe_update_title(conversation_id).await {
-                                log::error!("Failed to update conversation title: {}", e);
+                                log::error!("Failed to update conversation title: {e}");
                             }
                         });
                     }
@@ -210,7 +205,7 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                     // Display error in a more prominent way, e.g., a toast or modal
                     // For now, add to events panel
                     app.panels.events_panel.add_event(SystemEventType::Error, err_msg.clone());
-                    log::error!("SagittaCodeApp received error event: {}", err_msg);
+                    log::error!("SagittaCodeApp received error event: {err_msg}");
                     // Potentially update state to indicate error
                     app.state.is_waiting_for_response = false; // Stop waiting indicator on error
                     app.state.thinking_message = None;
@@ -224,8 +219,7 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                 AgentEvent::ReasoningCompleted { session_id, success, duration_ms, steps, tools } => {
                     app.panels.events_panel.add_event(
                         SystemEventType::Info,
-                        format!("🧠 Reasoning session {} completed. Success: {}. Duration: {}ms, Steps: {}, Tools: {:?}", 
-                                 session_id, success, duration_ms, steps, tools)
+                        format!("🧠 Reasoning session {session_id} completed. Success: {success}. Duration: {duration_ms}ms, Steps: {steps}, Tools: {tools:?}")
                     );
                     // Signal that response processing is complete if it was a reasoning session
                     // This assumes reasoning completion means Sagitta Code can take new input.
@@ -235,35 +229,29 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                 AgentEvent::ReasoningStep { session_id, step, description } => {
                     app.panels.events_panel.add_event(
                         SystemEventType::Info,
-                        format!("🧠 Reasoning [{}][Step {}]: {}", session_id, step, description)
+                        format!("🧠 Reasoning [{session_id}][Step {step}]: {description}")
                     );
                 },
                 AgentEvent::ToolCompleted { tool_name, success, duration_ms } => {
                     app.panels.events_panel.add_event(
                         SystemEventType::ToolExecution, // Use ToolExecution type
-                        format!("🔧 Tool '{}' completed. Success: {}. Duration: {}ms", tool_name, success, duration_ms)
+                        format!("🔧 Tool '{tool_name}' completed. Success: {success}. Duration: {duration_ms}ms")
                     );
                 },
                 AgentEvent::DecisionMade { session_id, decision, confidence } => {
                     app.panels.events_panel.add_event(
                         SystemEventType::Info,
-                        format!("🧠 Reasoning [{}][Decision]: {}. Confidence: {:.2}", session_id, decision, confidence)
+                        format!("🧠 Reasoning [{session_id}][Decision]: {decision}. Confidence: {confidence:.2}")
                     );
                 },
                 AgentEvent::Log(log_msg) => {
                     // For now, just log it. Could also go to a specific app log view.
-                    log::info!("[AppEventLog]: {}", log_msg);
+                    log::info!("[AppEventLog]: {log_msg}");
                     app.panels.events_panel.add_event(SystemEventType::Info, log_msg);
                 },
                 AgentEvent::TokenUsageReport { conversation_id, model_name, prompt_tokens, completion_tokens, cached_tokens, total_tokens } => {
                     log::info!(
-                        "GUI: Received TokenUsageReport: convo_id={:?}, model={}, prompt={}, completion={}, cached={:?}, total={}",
-                        conversation_id,
-                        model_name,
-                        prompt_tokens,
-                        completion_tokens,
-                        cached_tokens,
-                        total_tokens
+                        "GUI: Received TokenUsageReport: convo_id={conversation_id:?}, model={model_name}, prompt={prompt_tokens}, completion={completion_tokens}, cached={cached_tokens:?}, total={total_tokens}"
                     );
                     
                     let conv_id_str = conversation_id
@@ -290,28 +278,24 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                 },
                 // Add catch-all for new/unhandled events to avoid non-exhaustive match error
                 AgentEvent::ToolRunStarted { run_id, tool } => {
-                    log::info!("SagittaCodeApp: Tool run started: {} ({})", tool, run_id);
+                    log::info!("SagittaCodeApp: Tool run started: {tool} ({run_id})");
                     handle_tool_run_started(app, run_id, tool);
                 },
                 AgentEvent::ToolRunCompleted { run_id, tool, success } => {
-                    log::info!("SagittaCodeApp: Tool run completed: {} ({}) - success: {}", tool, run_id, success);
+                    log::info!("SagittaCodeApp: Tool run completed: {tool} ({run_id}) - success: {success}");
                     handle_tool_run_completed(app, run_id, tool, success);
                 },
                 AgentEvent::ToolStream { run_id, event } => {
-                    log::debug!("SagittaCodeApp: Tool stream event for run {}: {:?}", run_id, event);
+                    log::debug!("SagittaCodeApp: Tool stream event for run {run_id}: {event:?}");
                     handle_tool_stream(app, run_id, event);
                 },
-                AgentEvent::ConversationCompleted { conversation_id } => {
-                    log::info!("SagittaCodeApp: Conversation completed: {}", conversation_id);
-                    handle_conversation_completed(app, conversation_id);
-                },
+                // Removed duplicate - already handled above
                 AgentEvent::ConversationSummarizing { conversation_id } => {
-                    log::info!("SagittaCodeApp: Conversation summarizing: {}", conversation_id);
+                    log::info!("SagittaCodeApp: Conversation summarizing: {conversation_id}");
                     // Could update UI to show summarizing status
                 },
                 AgentEvent::ConversationUpdated { conversation_id, old_status, new_status } => {
-                    log::info!("SagittaCodeApp: Conversation {} status updated from {:?} to {:?}", 
-                        conversation_id, old_status, new_status);
+                    log::info!("SagittaCodeApp: Conversation {conversation_id} status updated from {old_status:?} to {new_status:?}");
                     // Refresh conversation list to show updated status
                     force_refresh_conversation_data(app);
                 },
@@ -361,15 +345,15 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                 force_refresh_conversation_data(app);
             }
             AppEvent::SwitchToConversation(conversation_id) => {
-                log::info!("AppEvent: Received SwitchToConversation for {}", conversation_id);
+                log::info!("AppEvent: Received SwitchToConversation for {conversation_id}");
                 switch_to_conversation(app, conversation_id);
             }
             AppEvent::CheckpointSuggestionsReady { conversation_id, suggestions } => {
-                log::info!("Received CheckpointSuggestionsReady event for conversation {}", conversation_id);
+                log::info!("Received CheckpointSuggestionsReady event for conversation {conversation_id}");
                 app.handle_checkpoint_suggestions(conversation_id, suggestions);
             },
             AppEvent::BranchSuggestionsReady { conversation_id, suggestions } => {
-                log::info!("Received BranchSuggestionsReady event for conversation {}", conversation_id);
+                log::info!("Received BranchSuggestionsReady event for conversation {conversation_id}");
                 app.handle_branch_suggestions(conversation_id, suggestions);
             },
             AppEvent::RepositoryListUpdated(repo_list) => {
@@ -380,12 +364,16 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                 log::debug!("Received RefreshRepositoryList event, triggering manual refresh");
                 app.trigger_repository_list_refresh();
             },
+            AppEvent::UpdateGitHistoryPath(path) => {
+                log::debug!("Received UpdateGitHistoryPath event with path: {path:?}");
+                app.panels.set_git_repository(path);
+            },
             AppEvent::CancelTool(run_id) => {
-                log::info!("Received CancelTool event for run_id: {}", run_id);
+                log::info!("Received CancelTool event for run_id: {run_id}");
                 handle_tool_cancellation(app, run_id);
             },
             AppEvent::RenameConversation { conversation_id, new_title } => {
-                log::info!("Received RenameConversation event for conversation {} with new title: {}", conversation_id, new_title);
+                log::info!("Received RenameConversation event for conversation {conversation_id} with new title: {new_title}");
                 handle_rename_conversation(app, conversation_id, new_title);
             },
             AppEvent::SaveClaudeMdTemplate => {
@@ -397,7 +385,7 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                 handle_apply_claude_md_to_all_repos(app);
             },
             AppEvent::UpdateConversationTitle { conversation_id } => {
-                log::info!("Received UpdateConversationTitle event for conversation {}", conversation_id);
+                log::info!("Received UpdateConversationTitle event for conversation {conversation_id}");
                 handle_update_conversation_title(app, conversation_id);
             },
             AppEvent::CreateNewConversation => {
@@ -444,7 +432,7 @@ fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: bool, i
                 app.state.is_streaming_response = false;
                 app.state.is_waiting_for_response = false;
                 if std::env::var("SAGITTA_STREAMING_DEBUG").is_ok() {
-                    log::debug!("handle_llm_chunk: Completed streaming response for ID: '{}'", current_id);
+                    log::debug!("handle_llm_chunk: Completed streaming response for ID: '{current_id}'");
                 } else {
                     log::trace!("handle_llm_chunk: Completed streaming response");
                 }
@@ -478,7 +466,7 @@ pub fn handle_tool_call(app: &mut SagittaCodeApp, tool_call: ToolCall) {
     let preview = format_tool_arguments_for_display(&tool_call.name, &serde_json::to_string(&tool_call.arguments).unwrap_or_default());
     app.panels.events_panel.add_event(
         SystemEventType::ToolExecution,
-        format!("🔧 {}", preview)
+        format!("🔧 {preview}")
     );
     
     // Store pending tool call in state
@@ -528,10 +516,10 @@ pub fn handle_tool_call_result(app: &mut SagittaCodeApp, tool_call_id: String, t
     // Add to events panel
     let event_message = match &result {
         crate::tools::types::ToolResult::Success { .. } => {
-            format!("Tool {} completed successfully", tool_name)
+            format!("Tool {tool_name} completed successfully")
         },
         crate::tools::types::ToolResult::Error { error } => {
-            format!("Tool {} failed: {}", tool_name, error)
+            format!("Tool {tool_name} failed: {error}")
         }
     };
     
@@ -548,7 +536,7 @@ pub fn handle_tool_call_result(app: &mut SagittaCodeApp, tool_call_id: String, t
             output.clone()
         },
         crate::agent::events::ToolResult::Error { error } => {
-            format!("Error: {}", error)
+            format!("Error: {error}")
         }
     };
     
@@ -563,7 +551,7 @@ pub fn handle_tool_call_result(app: &mut SagittaCodeApp, tool_call_id: String, t
         let updated_by_name = app.chat_manager.update_tool_call_result_by_name(&tool_name, result_string.clone(), is_success);
         
         if !updated_by_name {
-            log::warn!("Could not find tool call to update: ID={}, Name={}", tool_call_id, tool_name);
+            log::warn!("Could not find tool call to update: ID={tool_call_id}, Name={tool_name}");
         }
     }
     
@@ -571,9 +559,9 @@ pub fn handle_tool_call_result(app: &mut SagittaCodeApp, tool_call_id: String, t
     app.state.tool_results.insert(tool_call_id.clone(), result_string);
     
     if std::env::var("SAGITTA_STREAMING_DEBUG").is_ok() {
-        log::debug!("Tool call {} ({}) completed with result stored", tool_call_id, tool_name);
+        log::debug!("Tool call {tool_call_id} ({tool_name}) completed with result stored");
     } else {
-        log::trace!("Tool call '{}' completed", tool_name);
+        log::trace!("Tool call '{tool_name}' completed");
     }
 }
 
@@ -604,7 +592,7 @@ pub fn handle_state_change(app: &mut SagittaCodeApp, state: AgentState) {
             // If we transitioned from a working state to Idle, the conversation is complete
             if was_working {
                 if let Some(conversation_id) = app.state.current_conversation_id {
-                    log::info!("Agent completed work, triggering ConversationCompleted event for conversation {}", conversation_id);
+                    log::info!("Agent completed work, triggering ConversationCompleted event for conversation {conversation_id}");
                     handle_conversation_completed(app, conversation_id);
                 }
             }
@@ -633,13 +621,13 @@ pub fn handle_state_change(app: &mut SagittaCodeApp, state: AgentState) {
         AgentState::ExecutingTool { tool_name, .. } => {
             // This specific log is now primarily handled by handle_tool_call
             // But we can still log the state transition if desired.
-            (format!("Agent state: Executing tool (events.rs) {}", tool_name), SystemEventType::StateChange)
+            (format!("Agent state: Executing tool (events.rs) {tool_name}"), SystemEventType::StateChange)
         },
         AgentState::InLoop { step, interruptible } => {
             if *interruptible {
-                (format!("Agent entered reasoning loop (step {}, interruptible)", step), SystemEventType::StateChange)
+                (format!("Agent entered reasoning loop (step {step}, interruptible)"), SystemEventType::StateChange)
             } else {
-                (format!("Agent entered reasoning loop (step {}, not interruptible)", step), SystemEventType::StateChange)
+                (format!("Agent entered reasoning loop (step {step}, not interruptible)"), SystemEventType::StateChange)
             }
         },
         AgentState::Error { message, .. } => {
@@ -648,7 +636,7 @@ pub fn handle_state_change(app: &mut SagittaCodeApp, state: AgentState) {
             app.state.is_thinking = false;
             app.state.is_responding = false;
             app.state.is_executing_tool = false;
-            (format!("Agent error: {}", message), SystemEventType::Error)
+            (format!("Agent error: {message}"), SystemEventType::Error)
         },
     };
     
@@ -703,7 +691,7 @@ pub fn process_conversation_events(app: &mut SagittaCodeApp) {
                 log::info!("Updated conversation cache with {} conversations, cleared loading state", app.state.conversation_list.len());
             },
             ConversationEvent::ConversationCreated(id) => {
-                log::info!("Conversation created: {}", id);
+                log::info!("Conversation created: {id}");
                 // Only refresh if it's been more than 5 seconds since last refresh
                 if app.state.last_conversation_refresh
                     .map(|last| last.elapsed().as_secs() >= 5)
@@ -712,12 +700,12 @@ pub fn process_conversation_events(app: &mut SagittaCodeApp) {
                 }
             },
             ConversationEvent::ConversationSwitched(id) => {
-                log::info!("Conversation switched: {}", id);
+                log::info!("Conversation switched: {id}");
                 // Don't force refresh on conversation switch - just update the current conversation
                 // The conversation list doesn't need to be refreshed when switching
             },
             ConversationEvent::ConversationMessagesLoaded { conversation_id, messages } => {
-                log::info!("Conversation messages loaded for conversation {}", conversation_id);
+                log::info!("Conversation messages loaded for conversation {conversation_id}");
                 app.handle_conversation_messages(conversation_id, messages);
             },
             ConversationEvent::AnalyticsReportReady(report) => {
@@ -754,7 +742,7 @@ pub fn refresh_conversation_data(app: &mut SagittaCodeApp) {
                 if let Some(sender) = sender {
                     // Refresh the service data first
                     if let Err(e) = service_clone.refresh().await {
-                        log::error!("Failed to refresh conversation service: {}", e);
+                        log::error!("Failed to refresh conversation service: {e}");
                         return;
                     }
                     
@@ -772,7 +760,7 @@ pub fn refresh_conversation_data(app: &mut SagittaCodeApp) {
                         current_title,
                         conversations: conversation_list,
                     }) {
-                        log::error!("Failed to send DataLoaded event: {}", e);
+                        log::error!("Failed to send DataLoaded event: {e}");
                     } else {
                         log::debug!("Successfully sent DataLoaded event");
                     }
@@ -803,7 +791,7 @@ pub fn refresh_conversation_data(app: &mut SagittaCodeApp) {
                         current_title,
                         conversations: conversation_list,
                     }) {
-                        log::error!("Failed to send DataLoaded event: {}", e);
+                        log::error!("Failed to send DataLoaded event: {e}");
                     } else {
                         log::debug!("Successfully sent DataLoaded event");
                     }
@@ -821,7 +809,7 @@ pub fn refresh_conversation_data(app: &mut SagittaCodeApp) {
                     current_title: None,
                     conversations: Vec::new(),
                 }) {
-                    log::error!("Failed to send empty DataLoaded event: {}", e);
+                    log::error!("Failed to send empty DataLoaded event: {e}");
                 } else {
                     log::debug!("Sent empty DataLoaded event to clear loading state");
                 }
@@ -855,7 +843,7 @@ pub fn force_refresh_conversation_data(app: &mut SagittaCodeApp) {
             if let Some(sender) = sender {
                 // Refresh the service data first
                 if let Err(e) = service_clone.refresh().await {
-                    log::error!("Failed to refresh conversation service: {}", e);
+                    log::error!("Failed to refresh conversation service: {e}");
                     return;
                 }
                 
@@ -873,7 +861,7 @@ pub fn force_refresh_conversation_data(app: &mut SagittaCodeApp) {
                     current_title,
                     conversations: conversation_list,
                 }) {
-                    log::error!("Failed to send DataLoaded event: {}", e);
+                    log::error!("Failed to send DataLoaded event: {e}");
                 } else {
                     log::debug!("Successfully sent DataLoaded event");
                 }
@@ -904,7 +892,7 @@ pub fn force_refresh_conversation_data(app: &mut SagittaCodeApp) {
                     current_title,
                     conversations: conversation_list,
                 }) {
-                    log::error!("Failed to send DataLoaded event: {}", e);
+                    log::error!("Failed to send DataLoaded event: {e}");
                 } else {
                     log::debug!("Successfully sent DataLoaded event");
                 }
@@ -922,7 +910,7 @@ pub fn force_refresh_conversation_data(app: &mut SagittaCodeApp) {
                 current_title: None,
                 conversations: Vec::new(),
             }) {
-                log::error!("Failed to send empty DataLoaded event: {}", e);
+                log::error!("Failed to send empty DataLoaded event: {e}");
             } else {
                 log::debug!("Sent empty DataLoaded event to clear loading state");
             }
@@ -932,7 +920,7 @@ pub fn force_refresh_conversation_data(app: &mut SagittaCodeApp) {
 
 /// Switch to a conversation and update the chat view
 pub fn switch_to_conversation(app: &mut SagittaCodeApp, conversation_id: uuid::Uuid) {
-    log::info!("switch_to_conversation: Starting switch to conversation {}", conversation_id);
+    log::info!("switch_to_conversation: Starting switch to conversation {conversation_id}");
     
     // Clear current chat state
     app.state.current_conversation_id = Some(conversation_id);
@@ -975,20 +963,20 @@ pub fn switch_to_conversation(app: &mut SagittaCodeApp, conversation_id: uuid::U
                             conversation_id,
                             messages: conversation.messages,
                         }) {
-                            log::error!("Failed to send ConversationMessagesLoaded event: {}", e);
+                            log::error!("Failed to send ConversationMessagesLoaded event: {e}");
                         }
                         
                         // Also send the switched event for other UI updates
                         if let Err(e) = sender.send(ConversationEvent::ConversationSwitched(conversation_id)) {
-                            log::error!("Failed to send ConversationSwitched event: {}", e);
+                            log::error!("Failed to send ConversationSwitched event: {e}");
                         }
                     }
                 },
                 Ok(None) => {
-                    log::warn!("Conversation {} not found", conversation_id);
+                    log::warn!("Conversation {conversation_id} not found");
                 },
                 Err(e) => {
-                    log::error!("Failed to load conversation {}: {}", conversation_id, e);
+                    log::error!("Failed to load conversation {conversation_id}: {e}");
                 }
             }
         });
@@ -1016,7 +1004,7 @@ pub fn analyze_conversation_for_suggestions(app: &mut SagittaCodeApp, conversati
                 let mut checkpoint_suggestions = Vec::new();
                 
                 // Create a branching manager
-                let mut branching_manager = crate::agent::conversation::branching::ConversationBranchingManager::with_default_config();
+                let branching_manager = crate::agent::conversation::branching::ConversationBranchingManager::with_default_config();
                 
                 // Try to use fast model if enabled
                 // Note: We can't access config from ConversationService directly
@@ -1031,7 +1019,7 @@ pub fn analyze_conversation_for_suggestions(app: &mut SagittaCodeApp, conversati
                         log::info!("Found {} branch suggestions using BranchingManager", branch_suggestions.len());
                     }
                     Err(e) => {
-                        log::error!("Failed to analyze branch opportunities: {}", e);
+                        log::error!("Failed to analyze branch opportunities: {e}");
                         // Fall back to simple detection
                         let recent_messages: Vec<_> = conversation.messages.iter()
                             .rev()
@@ -1106,40 +1094,38 @@ pub fn analyze_conversation_for_suggestions(app: &mut SagittaCodeApp, conversati
                 let branch_count = branch_suggestions.len();
                 
                 if checkpoint_count > 0 {
-                    log::info!("Found {} checkpoint suggestions for conversation {}", 
-                        checkpoint_count, conversation_id);
+                    log::info!("Found {checkpoint_count} checkpoint suggestions for conversation {conversation_id}");
                     
                     // Send checkpoint suggestions to UI
                     if let Err(e) = app_event_sender.send(AppEvent::CheckpointSuggestionsReady {
                         conversation_id,
                         suggestions: checkpoint_suggestions,
                     }) {
-                        log::error!("Failed to send checkpoint suggestions: {}", e);
+                        log::error!("Failed to send checkpoint suggestions: {e}");
                     } else {
                         log::debug!("Successfully sent checkpoint suggestions to UI");
                     }
                 }
                 
                 if branch_count > 0 {
-                    log::info!("Found {} branch suggestions for conversation {}", 
-                        branch_count, conversation_id);
+                    log::info!("Found {branch_count} branch suggestions for conversation {conversation_id}");
                     
                     // Send branch suggestions to UI
                     if let Err(e) = app_event_sender.send(AppEvent::BranchSuggestionsReady {
                         conversation_id,
                         suggestions: branch_suggestions,
                     }) {
-                        log::error!("Failed to send branch suggestions: {}", e);
+                        log::error!("Failed to send branch suggestions: {e}");
                     } else {
                         log::debug!("Successfully sent branch suggestions to UI");
                     }
                 }
                 
                 if checkpoint_count == 0 && branch_count == 0 {
-                    log::debug!("No suggestions found for conversation {}", conversation_id);
+                    log::debug!("No suggestions found for conversation {conversation_id}");
                 }
             } else {
-                log::warn!("Could not find conversation {} for analysis", conversation_id);
+                log::warn!("Could not find conversation {conversation_id} for analysis");
             }
         });
     } else {
@@ -1250,7 +1236,7 @@ impl SagittaCodeApp {
             // Clear loading state
             self.state.conversation_data_loading = false;
         } else {
-            log::warn!("Conversation {} is no longer current, skipping message loading", conversation_id);
+            log::warn!("Conversation {conversation_id} is no longer current, skipping message loading");
         }
     }
 
@@ -1277,9 +1263,9 @@ pub fn handle_tool_run_started(app: &mut SagittaCodeApp, run_id: ToolRunId, tool
     app.state.running_tools.insert(run_id, tool_info);
     
     // Store in tool results for backward compatibility
-    app.state.tool_results.insert(run_id.to_string(), format!("Tool {} started", tool));
+    app.state.tool_results.insert(run_id.to_string(), format!("Tool {tool} started"));
     
-    log::debug!("Started tracking tool run: {} ({})", tool, run_id);
+    log::debug!("Started tracking tool run: {tool} ({run_id})");
 }
 
 /// Handle tool run completed event
@@ -1287,13 +1273,12 @@ pub fn handle_tool_run_completed(app: &mut SagittaCodeApp, run_id: ToolRunId, to
     // Remove from running tools tracking
     if let Some(tool_info) = app.state.running_tools.remove(&run_id) {
         let duration = tool_info.start_time.elapsed();
-        log::debug!("Tool run completed: {} ({}) - success: {}, duration: {:?}", 
-            tool, run_id, success, duration);
+        log::debug!("Tool run completed: {tool} ({run_id}) - success: {success}, duration: {duration:?}");
     }
     
     // Update stored result
     let status = if success { "completed" } else { "failed" };
-    app.state.tool_results.insert(run_id.to_string(), format!("Tool {} {}", tool, status));
+    app.state.tool_results.insert(run_id.to_string(), format!("Tool {tool} {status}"));
     
     // Request focus on input after tool completion
     app.state.should_focus_input = true;
@@ -1302,9 +1287,9 @@ pub fn handle_tool_run_completed(app: &mut SagittaCodeApp, run_id: ToolRunId, to
 }
 
 /// Handle tool stream event (progress updates)
-pub fn handle_tool_stream(app: &mut SagittaCodeApp, run_id: ToolRunId, event: String) {
+pub fn handle_tool_stream(_app: &mut SagittaCodeApp, run_id: ToolRunId, event: String) {
     // Simplified tool stream handling without terminal_stream
-    log::debug!("Tool stream event for run {}: {}", run_id, event);
+    log::debug!("Tool stream event for run {run_id}: {event}");
 }
 
 /// Handle tool cancellation request
@@ -1323,14 +1308,14 @@ pub fn handle_tool_cancellation(app: &mut SagittaCodeApp, run_id: ToolRunId) {
     // 3. Drop the future or send a cancel signal to the tool execution
     
     // For now, we just log the cancellation request
-    log::warn!("Tool cancellation requested for run_id: {} - actual cancellation not yet implemented", run_id);
+    log::warn!("Tool cancellation requested for run_id: {run_id} - actual cancellation not yet implemented");
     
     // UI will update on next frame automatically
 }
 
 /// Handle conversation completed event - trigger title update
 pub fn handle_conversation_completed(app: &mut SagittaCodeApp, conversation_id: uuid::Uuid) {
-    log::info!("Handling conversation completed for {}", conversation_id);
+    log::info!("Handling conversation completed for {conversation_id}");
     
     // Trigger title update using the title updater
     if let Some(title_updater) = &app.title_updater {
@@ -1338,18 +1323,18 @@ pub fn handle_conversation_completed(app: &mut SagittaCodeApp, conversation_id: 
         let app_event_sender = app.app_event_sender.clone();
         
         tokio::spawn(async move {
-            log::info!("Spawning title update task for conversation {}", conversation_id);
+            log::info!("Spawning title update task for conversation {conversation_id}");
             match updater_clone.maybe_update_title(conversation_id).await {
                 Ok(_) => {
-                    log::info!("Successfully updated title for conversation {}", conversation_id);
+                    log::info!("Successfully updated title for conversation {conversation_id}");
                     
                     // Trigger a refresh of the conversation list to show the new title
                     if let Err(e) = app_event_sender.send(AppEvent::RefreshConversationList) {
-                        log::error!("Failed to send RefreshConversationList event: {}", e);
+                        log::error!("Failed to send RefreshConversationList event: {e}");
                     }
                 }
                 Err(e) => {
-                    log::error!("Failed to update title for conversation {}: {}", conversation_id, e);
+                    log::error!("Failed to update title for conversation {conversation_id}: {e}");
                 }
             }
         });
@@ -1372,15 +1357,15 @@ pub fn handle_rename_conversation(app: &mut SagittaCodeApp, conversation_id: uui
         tokio::spawn(async move {
             match service_clone.rename_conversation(conversation_id, new_title_clone.clone()).await {
                 Ok(_) => {
-                    log::info!("Successfully renamed conversation {} to '{}'", conversation_id, new_title_clone);
+                    log::info!("Successfully renamed conversation {conversation_id} to '{new_title_clone}'");
                     
                     // Trigger a refresh of the conversation list to update UI
                     if let Err(e) = app_event_sender.send(AppEvent::RefreshConversationList) {
-                        log::error!("Failed to send RefreshConversationList event: {}", e);
+                        log::error!("Failed to send RefreshConversationList event: {e}");
                     }
                 }
                 Err(e) => {
-                    log::error!("Failed to rename conversation {}: {}", conversation_id, e);
+                    log::error!("Failed to rename conversation {conversation_id}: {e}");
                 }
             }
         });
@@ -1391,7 +1376,7 @@ pub fn handle_rename_conversation(app: &mut SagittaCodeApp, conversation_id: uui
         for conv in &mut app.state.conversation_list {
             if conv.id == conversation_id {
                 conv.title = new_title.clone();
-                log::info!("Updated conversation title locally (fallback): {} -> '{}'", conversation_id, new_title);
+                log::info!("Updated conversation title locally (fallback): {conversation_id} -> '{new_title}'");
                 break;
             }
         }
@@ -1405,7 +1390,7 @@ pub fn handle_rename_conversation(app: &mut SagittaCodeApp, conversation_id: uui
 
 /// Handle manual conversation title update request
 pub fn handle_update_conversation_title(app: &mut SagittaCodeApp, conversation_id: uuid::Uuid) {
-    log::info!("Handling manual title update request for conversation {}", conversation_id);
+    log::info!("Handling manual title update request for conversation {conversation_id}");
     
     // Use the title updater to regenerate the title
     if let Some(title_updater) = &app.title_updater {
@@ -1413,18 +1398,18 @@ pub fn handle_update_conversation_title(app: &mut SagittaCodeApp, conversation_i
         let app_event_sender = app.app_event_sender.clone();
         
         tokio::spawn(async move {
-            log::info!("Spawning manual title update task for conversation {}", conversation_id);
+            log::info!("Spawning manual title update task for conversation {conversation_id}");
             match updater_clone.maybe_update_title(conversation_id).await {
                 Ok(_) => {
-                    log::info!("Successfully updated title for conversation {} (manual request)", conversation_id);
+                    log::info!("Successfully updated title for conversation {conversation_id} (manual request)");
                     
                     // Trigger a refresh of the conversation list to show the new title
                     if let Err(e) = app_event_sender.send(AppEvent::RefreshConversationList) {
-                        log::error!("Failed to send RefreshConversationList event: {}", e);
+                        log::error!("Failed to send RefreshConversationList event: {e}");
                     }
                 }
                 Err(e) => {
-                    log::error!("Failed to update title for conversation {} (manual request): {}", conversation_id, e);
+                    log::error!("Failed to update title for conversation {conversation_id} (manual request): {e}");
                 }
             }
         });
@@ -1459,16 +1444,205 @@ pub fn handle_create_new_conversation(app: &mut SagittaCodeApp) {
     
     // Force a UI refresh
     if let Err(e) = app.app_event_sender.send(AppEvent::RefreshConversationList) {
-        log::error!("Failed to send RefreshConversationList event after creating new conversation: {}", e);
+        log::error!("Failed to send RefreshConversationList event after creating new conversation: {e}");
     }
     
     log::info!("New conversation state prepared - ready for first message");
 }
 
+/// Format tool arguments for user-friendly display
+pub fn format_tool_arguments_for_display(tool_name: &str, arguments: &str) -> String {
+    // Try to parse as JSON first
+    let parsed: Result<Value, _> = serde_json::from_str(arguments);
+    
+    match parsed {
+        Ok(json) => {
+            // Format based on tool type
+            match tool_name {
+                name if name.contains("repository_list") || name.contains("list_repositories") => {
+                    "Listing available repositories".to_string()
+                },
+                name if name.contains("query") || name.contains("search") => {
+                    if let Some(query_text) = json.get("queryText").and_then(|v| v.as_str()) {
+                        format!("Searching for: \"{}\"", query_text.chars().take(50).collect::<String>())
+                    } else if let Some(query_text) = json.get("query").and_then(|v| v.as_str()) {
+                        format!("Searching for: \"{}\"", query_text.chars().take(50).collect::<String>())
+                    } else {
+                        "Performing search".to_string()
+                    }
+                },
+                name if name.contains("view_file") || name.contains("read_file") => {
+                    if let Some(file_path) = json.get("filePath").and_then(|v| v.as_str()) {
+                        format!("Reading file: {file_path}")
+                    } else if let Some(file_path) = json.get("file_path").and_then(|v| v.as_str()) {
+                        format!("Reading file: {file_path}")
+                    } else {
+                        "Reading file".to_string()
+                    }
+                },
+                name if name.contains("edit_file") || name.contains("write_file") => {
+                    if let Some(file_path) = json.get("filePath").and_then(|v| v.as_str()) {
+                        format!("Editing file: {file_path}")
+                    } else if let Some(file_path) = json.get("file_path").and_then(|v| v.as_str()) {
+                        format!("Editing file: {file_path}")
+                    } else {
+                        "Editing file".to_string()
+                    }
+                },
+                name if name.contains("shell") || name.contains("execution") => {
+                    if let Some(command) = json.get("command").and_then(|v| v.as_str()) {
+                        format!("Running: {}", command.chars().take(60).collect::<String>())
+                    } else {
+                        "Executing command".to_string()
+                    }
+                },
+                name if name.contains("repository_add") || name.contains("add_repository") => {
+                    if let Some(name) = json.get("name").and_then(|v| v.as_str()) {
+                        format!("Adding repository: {name}")
+                    } else {
+                        "Adding repository".to_string()
+                    }
+                },
+                name if name.contains("repository_sync") || name.contains("sync_repository") => {
+                    if let Some(name) = json.get("name").and_then(|v| v.as_str()) {
+                        format!("Syncing repository: {name}")
+                    } else {
+                        "Syncing repository".to_string()
+                    }
+                },
+                name if name.contains("search_file") => {
+                    if let Some(pattern) = json.get("pattern").and_then(|v| v.as_str()) {
+                        format!("Searching files for: {pattern}")
+                    } else {
+                        "Searching files".to_string()
+                    }
+                },
+                name if name.contains("repository_map") => {
+                    if let Some(repo_name) = json.get("repositoryName").and_then(|v| v.as_str()) {
+                        format!("Mapping repository: {repo_name}")
+                    } else {
+                        "Mapping repository structure".to_string()
+                    }
+                },
+                name if name.contains("switch_branch") => {
+                    if let Some(branch) = json.get("branchName").and_then(|v| v.as_str()) {
+                        format!("Switching to branch: {branch}")
+                    } else {
+                        "Switching branch".to_string()
+                    }
+                },
+                _ => {
+                    // Generic formatting for unknown tools
+                    if let Some(obj) = json.as_object() {
+                        // Show key parameters
+                        let key_params: Vec<String> = obj.iter()
+                            .take(2) // Limit to first 2 parameters
+                            .map(|(k, v)| {
+                                let value_str = match v {
+                                    Value::String(s) => s.chars().take(30).collect::<String>(),
+                                    Value::Number(n) => n.to_string(),
+                                    Value::Bool(b) => b.to_string(),
+                                    _ => "...".to_string(),
+                                };
+                                format!("{k}={value_str}")
+                            })
+                            .collect();
+                        
+                        if key_params.is_empty() {
+                            format!("Executing {tool_name}")
+                        } else {
+                            format!("Executing {} with {}", tool_name, key_params.join(", "))
+                        }
+                    } else {
+                        format!("Executing {tool_name}")
+                    }
+                }
+            }
+        },
+        Err(_) => {
+            // Fallback for non-JSON arguments
+            if arguments.is_empty() {
+                format!("Executing {tool_name}")
+            } else {
+                let preview = arguments.chars().take(50).collect::<String>();
+                format!("Executing {tool_name} with: {preview}")
+            }
+        }
+    }
+}
+
+/// Handle saving the CLAUDE.md template
+fn handle_save_claude_md_template(app: &mut SagittaCodeApp) {
+    let config_clone = app.config.clone();
+    let template_content = app.claude_md_modal.get_template_content().to_string();
+    let auto_create_enabled = app.claude_md_modal.is_auto_create_enabled();
+    
+    let rt = tokio::runtime::Handle::current();
+    rt.spawn(async move {
+        let mut config_guard = config_clone.lock().await;
+        config_guard.ui.claude_md_template = template_content;
+        config_guard.ui.auto_create_claude_md = auto_create_enabled;
+        
+        let config_to_save = config_guard.clone();
+        drop(config_guard);
+        
+        match crate::config::save_config(&config_to_save) {
+            Ok(_) => {
+                log::info!("CLAUDE.md template saved successfully");
+            },
+            Err(e) => {
+                log::error!("Failed to save CLAUDE.md template: {e}");
+            }
+        }
+    });
+}
+
+/// Handle applying CLAUDE.md template to all repositories
+fn handle_apply_claude_md_to_all_repos(app: &mut SagittaCodeApp) {
+    let repo_manager = app.repo_panel.get_repo_manager();
+    let template_content = app.claude_md_modal.get_template_content().to_string();
+    let auto_create_enabled = app.claude_md_modal.is_auto_create_enabled();
+    
+    if !auto_create_enabled {
+        log::info!("Auto-create CLAUDE.md is disabled, skipping apply to all repos");
+        return;
+    }
+    
+    let rt = tokio::runtime::Handle::current();
+    rt.spawn(async move {
+        match repo_manager.lock().await.list_repositories().await {
+            Ok(repos) => {
+                let mut success_count = 0;
+                let mut error_count = 0;
+                
+                for repo in repos {
+                    let claude_md_path = repo.local_path.join("CLAUDE.md");
+                    
+                    match tokio::fs::write(&claude_md_path, &template_content).await {
+                        Ok(_) => {
+                            success_count += 1;
+                            log::info!("Updated CLAUDE.md for repository '{}'", repo.name);
+                        },
+                        Err(e) => {
+                            error_count += 1;
+                            log::error!("Failed to update CLAUDE.md for repository '{}': {}", repo.name, e);
+                        }
+                    }
+                }
+                
+                log::info!("CLAUDE.md template applied to {success_count} repositories successfully, {error_count} errors");
+            },
+            Err(e) => {
+                log::error!("Failed to list repositories for CLAUDE.md application: {e}");
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::state::types::{AgentMode, ConversationStatus, AgentStateInfo};
+    use crate::agent::state::types::{AgentMode, ConversationStatus};
     use crate::agent::message::types::{AgentMessage, ToolCall as AgentToolCall};
     use crate::tools::types::ToolResult as ToolResultType;
     use crate::config::types::SagittaCodeConfig;
@@ -1542,6 +1716,7 @@ mod tests {
             AppEvent::ApplyClaudeMdToAllRepos => assert!(true),
             AppEvent::UpdateConversationTitle { .. } => assert!(true),
             AppEvent::CreateNewConversation => assert!(true),
+            AppEvent::UpdateGitHistoryPath(_) => assert!(true),
         }
         
         // Test the other variant too
@@ -1560,6 +1735,7 @@ mod tests {
             AppEvent::ApplyClaudeMdToAllRepos => assert!(true),
             AppEvent::UpdateConversationTitle { .. } => assert!(true),
             AppEvent::CreateNewConversation => assert!(true),
+            AppEvent::UpdateGitHistoryPath(_) => assert!(true),
         }
     }
 
@@ -1598,7 +1774,7 @@ mod tests {
     #[test]
     fn test_make_chat_message_from_agent_message() {
         use crate::llm::client::Role;
-        use crate::gui::chat::view::{ChatMessage, MessageAuthor};
+        use crate::gui::chat::view::MessageAuthor;
         
         // Test user message
         let user_msg = create_test_agent_message(Role::User, "Hello, world!");
@@ -2018,7 +2194,7 @@ mod tests {
 
     #[test]
     fn test_switch_to_conversation_event() {
-        let mut app = create_test_app();
+        let app = create_test_app();
         let conversation_id = Uuid::new_v4();
         
         // Test the new AppEvent variant
@@ -2217,193 +2393,4 @@ mod tests {
         assert_eq!(app.chat_manager.get_all_messages().len(), 2);
         assert!(!app.state.conversation_data_loading);
     }
-}
-
-/// Format tool arguments for user-friendly display
-pub fn format_tool_arguments_for_display(tool_name: &str, arguments: &str) -> String {
-    // Try to parse as JSON first
-    let parsed: Result<Value, _> = serde_json::from_str(arguments);
-    
-    match parsed {
-        Ok(json) => {
-            // Format based on tool type
-            match tool_name {
-                name if name.contains("repository_list") || name.contains("list_repositories") => {
-                    "Listing available repositories".to_string()
-                },
-                name if name.contains("query") || name.contains("search") => {
-                    if let Some(query_text) = json.get("queryText").and_then(|v| v.as_str()) {
-                        format!("Searching for: \"{}\"", query_text.chars().take(50).collect::<String>())
-                    } else if let Some(query_text) = json.get("query").and_then(|v| v.as_str()) {
-                        format!("Searching for: \"{}\"", query_text.chars().take(50).collect::<String>())
-                    } else {
-                        "Performing search".to_string()
-                    }
-                },
-                name if name.contains("view_file") || name.contains("read_file") => {
-                    if let Some(file_path) = json.get("filePath").and_then(|v| v.as_str()) {
-                        format!("Reading file: {}", file_path)
-                    } else if let Some(file_path) = json.get("file_path").and_then(|v| v.as_str()) {
-                        format!("Reading file: {}", file_path)
-                    } else {
-                        "Reading file".to_string()
-                    }
-                },
-                name if name.contains("edit_file") || name.contains("write_file") => {
-                    if let Some(file_path) = json.get("filePath").and_then(|v| v.as_str()) {
-                        format!("Editing file: {}", file_path)
-                    } else if let Some(file_path) = json.get("file_path").and_then(|v| v.as_str()) {
-                        format!("Editing file: {}", file_path)
-                    } else {
-                        "Editing file".to_string()
-                    }
-                },
-                name if name.contains("shell") || name.contains("execution") => {
-                    if let Some(command) = json.get("command").and_then(|v| v.as_str()) {
-                        format!("Running: {}", command.chars().take(60).collect::<String>())
-                    } else {
-                        "Executing command".to_string()
-                    }
-                },
-                name if name.contains("repository_add") || name.contains("add_repository") => {
-                    if let Some(name) = json.get("name").and_then(|v| v.as_str()) {
-                        format!("Adding repository: {}", name)
-                    } else {
-                        "Adding repository".to_string()
-                    }
-                },
-                name if name.contains("repository_sync") || name.contains("sync_repository") => {
-                    if let Some(name) = json.get("name").and_then(|v| v.as_str()) {
-                        format!("Syncing repository: {}", name)
-                    } else {
-                        "Syncing repository".to_string()
-                    }
-                },
-                name if name.contains("search_file") => {
-                    if let Some(pattern) = json.get("pattern").and_then(|v| v.as_str()) {
-                        format!("Searching files for: {}", pattern)
-                    } else {
-                        "Searching files".to_string()
-                    }
-                },
-                name if name.contains("repository_map") => {
-                    if let Some(repo_name) = json.get("repositoryName").and_then(|v| v.as_str()) {
-                        format!("Mapping repository: {}", repo_name)
-                    } else {
-                        "Mapping repository structure".to_string()
-                    }
-                },
-                name if name.contains("switch_branch") => {
-                    if let Some(branch) = json.get("branchName").and_then(|v| v.as_str()) {
-                        format!("Switching to branch: {}", branch)
-                    } else {
-                        "Switching branch".to_string()
-                    }
-                },
-                _ => {
-                    // Generic formatting for unknown tools
-                    if let Some(obj) = json.as_object() {
-                        // Show key parameters
-                        let key_params: Vec<String> = obj.iter()
-                            .take(2) // Limit to first 2 parameters
-                            .map(|(k, v)| {
-                                let value_str = match v {
-                                    Value::String(s) => s.chars().take(30).collect::<String>(),
-                                    Value::Number(n) => n.to_string(),
-                                    Value::Bool(b) => b.to_string(),
-                                    _ => "...".to_string(),
-                                };
-                                format!("{}={}", k, value_str)
-                            })
-                            .collect();
-                        
-                        if key_params.is_empty() {
-                            format!("Executing {}", tool_name)
-                        } else {
-                            format!("Executing {} with {}", tool_name, key_params.join(", "))
-                        }
-                    } else {
-                        format!("Executing {}", tool_name)
-                    }
-                }
-            }
-        },
-        Err(_) => {
-            // Fallback for non-JSON arguments
-            if arguments.is_empty() {
-                format!("Executing {}", tool_name)
-            } else {
-                let preview = arguments.chars().take(50).collect::<String>();
-                format!("Executing {} with: {}", tool_name, preview)
-            }
-        }
-    }
-}
-
-/// Handle saving the CLAUDE.md template
-fn handle_save_claude_md_template(app: &mut SagittaCodeApp) {
-    let config_clone = app.config.clone();
-    let template_content = app.claude_md_modal.get_template_content().to_string();
-    let auto_create_enabled = app.claude_md_modal.is_auto_create_enabled();
-    
-    let rt = tokio::runtime::Handle::current();
-    rt.spawn(async move {
-        let mut config_guard = config_clone.lock().await;
-        config_guard.ui.claude_md_template = template_content;
-        config_guard.ui.auto_create_claude_md = auto_create_enabled;
-        
-        let config_to_save = config_guard.clone();
-        drop(config_guard);
-        
-        match crate::config::save_config(&config_to_save) {
-            Ok(_) => {
-                log::info!("CLAUDE.md template saved successfully");
-            },
-            Err(e) => {
-                log::error!("Failed to save CLAUDE.md template: {}", e);
-            }
-        }
-    });
-}
-
-/// Handle applying CLAUDE.md template to all repositories
-fn handle_apply_claude_md_to_all_repos(app: &mut SagittaCodeApp) {
-    let repo_manager = app.repo_panel.get_repo_manager();
-    let template_content = app.claude_md_modal.get_template_content().to_string();
-    let auto_create_enabled = app.claude_md_modal.is_auto_create_enabled();
-    
-    if !auto_create_enabled {
-        log::info!("Auto-create CLAUDE.md is disabled, skipping apply to all repos");
-        return;
-    }
-    
-    let rt = tokio::runtime::Handle::current();
-    rt.spawn(async move {
-        match repo_manager.lock().await.list_repositories().await {
-            Ok(repos) => {
-                let mut success_count = 0;
-                let mut error_count = 0;
-                
-                for repo in repos {
-                    let claude_md_path = repo.local_path.join("CLAUDE.md");
-                    
-                    match tokio::fs::write(&claude_md_path, &template_content).await {
-                        Ok(_) => {
-                            success_count += 1;
-                            log::info!("Updated CLAUDE.md for repository '{}'", repo.name);
-                        },
-                        Err(e) => {
-                            error_count += 1;
-                            log::error!("Failed to update CLAUDE.md for repository '{}': {}", repo.name, e);
-                        }
-                    }
-                }
-                
-                log::info!("CLAUDE.md template applied to {} repositories successfully, {} errors", success_count, error_count);
-            },
-            Err(e) => {
-                log::error!("Failed to list repositories for CLAUDE.md application: {}", e);
-            }
-        }
-    });
 } 

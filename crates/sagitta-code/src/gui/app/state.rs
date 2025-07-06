@@ -1,6 +1,6 @@
 // Application state management for the Sagitta Code
 
-use crate::agent::state::types::{AgentMode, AgentState, ConversationStatus};
+use crate::agent::state::types::{AgentMode, AgentState};
 use crate::agent::message::types::{ToolCall, AgentMessage};
 use crate::agent::events::ToolRunId;
 use crate::gui::conversation::sidebar::SidebarAction;
@@ -9,7 +9,6 @@ use super::super::theme::AppTheme;
 use egui_notify::Toasts;
 use uuid::Uuid;
 use std::collections::{HashMap, VecDeque};
-use tokio::sync::mpsc;
 
 /// Information about a currently running tool
 #[derive(Debug, Clone)]
@@ -40,6 +39,7 @@ pub struct AppState {
     pub current_repository_context: Option<String>,
     pub available_repositories: Vec<String>,
     pub pending_repository_context_change: Option<String>,
+    pub pending_git_repository_path: Option<std::path::PathBuf>,
     
     // Agent operational state flags for UI
     pub current_agent_state: AgentState,
@@ -121,6 +121,7 @@ impl AppState {
             current_repository_context: None,
             available_repositories: Vec::new(),
             pending_repository_context_change: None,
+            pending_git_repository_path: None,
             
             // Agent operational state flags for UI
             current_agent_state: AgentState::default(),
@@ -244,7 +245,7 @@ impl AppState {
 
     /// Update available repositories list
     pub fn update_available_repositories(&mut self, repositories: Vec<String>) {
-        log::info!("Updating available repositories: {:?}", repositories);
+        log::info!("Updating available repositories: {repositories:?}");
         self.available_repositories = repositories;
         log::info!("Available repositories updated. Current list: {:?}", self.available_repositories);
     }
@@ -257,7 +258,7 @@ impl AppState {
     /// Get current repository context display name
     pub fn get_repository_context_display(&self) -> String {
         match &self.current_repository_context {
-            Some(repo) => format!("📁 {}", repo),
+            Some(repo) => format!("📁 {repo}"),
             None => "📁 No Repository".to_string(),
         }
     }

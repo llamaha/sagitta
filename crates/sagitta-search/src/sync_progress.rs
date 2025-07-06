@@ -7,24 +7,87 @@ use std::time::{Duration, Instant};
 /// Defines the different stages of a repository synchronization process.
 #[derive(Debug, Clone)]
 pub enum SyncStage {
-    GitFetch { message: String, progress: Option<(u32, u32)> }, // (received_objects, total_objects)
-    DiffCalculation { message: String },
-    IndexFile { current_file: Option<PathBuf>, total_files: usize, current_file_num: usize, files_per_second: Option<f64>, message: Option<String> },
-    DeleteFile { current_file: Option<PathBuf>, total_files: usize, current_file_num: usize, files_per_second: Option<f64>, message: Option<String> },
-    CollectFiles { total_files: usize, message: String },
-    QueryLanguages { message: String },
-    VerifyingCollection { message: String },
-    Completed { message: String },
-    Error { message: String },
-    Idle, // Default state or before sync starts
-    Heartbeat { message: String }, // Periodic heartbeat to indicate progress is still happening
+    /// Git fetch operation in progress
+    GitFetch { 
+        /// Status message describing the current fetch operation
+        message: String, 
+        /// Progress as (received_objects, total_objects) if available
+        progress: Option<(u32, u32)> 
+    },
+    /// Calculating differences between local and remote repository
+    DiffCalculation { 
+        /// Status message describing the diff calculation
+        message: String 
+    },
+    /// Indexing individual files
+    IndexFile { 
+        /// Path of the file currently being indexed
+        current_file: Option<PathBuf>, 
+        /// Total number of files to index
+        total_files: usize, 
+        /// Index of the current file being processed (1-based)
+        current_file_num: usize, 
+        /// Current indexing speed in files per second
+        files_per_second: Option<f64>, 
+        /// Optional status message
+        message: Option<String> 
+    },
+    /// Deleting files from the index
+    DeleteFile { 
+        /// Path of the file currently being deleted
+        current_file: Option<PathBuf>, 
+        /// Total number of files to delete
+        total_files: usize, 
+        /// Index of the current file being deleted (1-based)
+        current_file_num: usize, 
+        /// Current deletion speed in files per second
+        files_per_second: Option<f64>, 
+        /// Optional status message
+        message: Option<String> 
+    },
+    /// Collecting files from the repository
+    CollectFiles { 
+        /// Number of files collected so far
+        total_files: usize, 
+        /// Status message describing the collection process
+        message: String 
+    },
+    /// Querying languages from the indexed data
+    QueryLanguages { 
+        /// Status message describing the query operation
+        message: String 
+    },
+    /// Verifying the integrity of the collection
+    VerifyingCollection { 
+        /// Status message describing the verification process
+        message: String 
+    },
+    /// Synchronization completed successfully
+    Completed { 
+        /// Completion message with summary information
+        message: String 
+    },
+    /// An error occurred during synchronization
+    Error { 
+        /// Error message describing what went wrong
+        message: String 
+    },
+    /// Default state before sync starts or when idle
+    Idle,
+    /// Periodic heartbeat to indicate progress is still happening
+    Heartbeat { 
+        /// Heartbeat message indicating current activity
+        message: String 
+    },
 }
 
 /// Represents a progress update during repository synchronization.
 #[derive(Debug, Clone)]
 pub struct SyncProgress {
+    /// Current stage of the synchronization process
     pub stage: SyncStage,
-    pub timestamp: Option<Instant>, // Timestamp when this progress was created
+    /// Timestamp when this progress update was created
+    pub timestamp: Option<Instant>,
     // Potentially overall progress if calculable easily
     // pub overall_progress: Option<(usize, usize)>,
 }
@@ -156,8 +219,8 @@ pub trait SyncProgressReporter: Send + Sync {
     async fn report(&self, progress: SyncProgress);
 }
 
-// Example of a No-Op reporter for when no specific reporter is provided.
-// This can be useful for default behavior or in contexts where progress reporting is not needed.
+/// Example of a No-Op reporter for when no specific reporter is provided.
+/// This can be useful for default behavior or in contexts where progress reporting is not needed.
 #[derive(Debug, Clone)]
 pub struct NoOpProgressReporter;
 
@@ -241,19 +304,46 @@ impl<T: SyncProgressReporter> SyncProgressReporter for WatchdogProgressReporter<
 /// Defines the different stages of a repository addition process.
 #[derive(Debug, Clone)]
 pub enum RepoAddStage {
-    Clone { message: String, progress: Option<(u32, u32)> }, // (received_objects, total_objects)
-    Fetch { message: String, progress: Option<(u32, u32)> }, // (received_objects, total_objects)
-    Checkout { message: String },
-    Completed { message: String },
-    Error { message: String },
-    Idle, // Default state or before add starts
+    /// Repository clone operation in progress
+    Clone { 
+        /// Status message describing the clone operation
+        message: String, 
+        /// Progress as (received_objects, total_objects) if available
+        progress: Option<(u32, u32)> 
+    },
+    /// Repository fetch operation in progress
+    Fetch { 
+        /// Status message describing the fetch operation
+        message: String, 
+        /// Progress as (received_objects, total_objects) if available
+        progress: Option<(u32, u32)> 
+    },
+    /// Checking out the repository to specific branch or commit
+    Checkout { 
+        /// Status message describing the checkout operation
+        message: String 
+    },
+    /// Repository addition completed successfully
+    Completed { 
+        /// Completion message with summary information
+        message: String 
+    },
+    /// An error occurred during repository addition
+    Error { 
+        /// Error message describing what went wrong
+        message: String 
+    },
+    /// Default state before add starts or when idle
+    Idle,
 }
 
 /// Represents a progress update during repository addition.
 #[derive(Debug, Clone)]
 pub struct AddProgress {
+    /// Current stage of the repository addition process
     pub stage: RepoAddStage,
-    pub timestamp: Option<Instant>, // Timestamp when this progress was created
+    /// Timestamp when this progress update was created
+    pub timestamp: Option<Instant>,
 }
 
 impl AddProgress {
@@ -282,7 +372,7 @@ pub trait AddProgressReporter: Send + Sync {
     async fn report(&self, progress: AddProgress);
 }
 
-// Example of a No-Op reporter for when no specific reporter is provided.
+/// Example of a No-Op reporter for when no specific reporter is provided.
 #[derive(Debug, Clone)]
 pub struct NoOpAddProgressReporter;
 

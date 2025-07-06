@@ -1170,7 +1170,7 @@ impl ConversationTree {
     
     /// Render the conversation tree with UI interactions
     pub fn render(&mut self, ui: &mut egui::Ui, theme: &crate::gui::theme::AppTheme) -> Result<Option<TreeAction>> {
-        use egui::{Color32, Pos2, Rect, Stroke, Vec2};
+        use egui::{Pos2, Rect, Vec2};
         
         let mut action = None;
         
@@ -1246,7 +1246,7 @@ impl ConversationTree {
                         ui.close_menu();
                     }
                 },
-                NodeId::BranchMessage(branch_id, message_id) => {
+                NodeId::BranchMessage(_branch_id, message_id) => {
                     if ui.button("📍 Create Checkpoint").clicked() {
                         action = Some(TreeAction::CreateCheckpoint(*message_id));
                         ui.close_menu();
@@ -1256,7 +1256,7 @@ impl ConversationTree {
                         ui.close_menu();
                     }
                 },
-                NodeId::BranchRoot(branch_id) => {
+                NodeId::BranchRoot(_branch_id) => {
                     if ui.button("🌳 Expand/Collapse").clicked() {
                         action = Some(TreeAction::ToggleExpansion(node_id.clone()));
                         ui.close_menu();
@@ -1292,8 +1292,8 @@ impl ConversationTree {
     }
     
     /// Draw a node
-    fn draw_node(&self, painter: &egui::Painter, node: &TreeNode, theme: &crate::gui::theme::AppTheme, hovered: bool) {
-        use egui::{Color32, FontId, Pos2, Rect, Rounding, Stroke, Vec2};
+    fn draw_node(&self, painter: &egui::Painter, node: &TreeNode, _theme: &crate::gui::theme::AppTheme, hovered: bool) {
+        use egui::{Color32, FontId, Pos2, Rect, CornerRadius, Stroke, Vec2};
         
         let rect = Rect::from_min_size(
             Pos2::new(node.position.x, node.position.y),
@@ -1325,10 +1325,10 @@ impl ConversationTree {
         };
         
         // Draw node background
-        painter.rect_filled(rect, Rounding::same(4), final_bg_color);
+        painter.rect_filled(rect, CornerRadius::same(4), final_bg_color);
         
         // Draw node border
-        painter.rect_stroke(rect, Rounding::same(4), Stroke::new(2.0, final_border_color), egui::StrokeKind::Outside);
+        painter.rect_stroke(rect, CornerRadius::same(4), Stroke::new(2.0, final_border_color), egui::StrokeKind::Outside);
         
         // Draw node label
         let text_color = Color32::WHITE;
@@ -1343,7 +1343,7 @@ impl ConversationTree {
         );
         
         // Draw indicators
-        for (i, indicator) in node.display.indicators.iter().enumerate() {
+        for (_i, indicator) in node.display.indicators.iter().enumerate() {
             let indicator_pos = match indicator.position {
                 IndicatorPosition::TopLeft => rect.min + Vec2::new(2.0, 2.0),
                 IndicatorPosition::TopRight => rect.min + Vec2::new(rect.width() - 12.0, 2.0),

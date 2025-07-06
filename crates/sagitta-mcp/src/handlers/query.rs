@@ -10,28 +10,23 @@ use sagitta_search::{
     constants::{
         FIELD_BRANCH, FIELD_CHUNK_CONTENT, FIELD_END_LINE, FIELD_FILE_PATH, FIELD_START_LINE,
     },
-    EmbeddingPool, EmbeddingProcessor,
-    app_config_to_embedding_config,
+    EmbeddingPool,
     error::SagittaError,
     qdrant_client_trait::QdrantClientTrait,
-    repo_helpers::{get_collection_name, get_branch_aware_collection_name},
-    search_impl::search_collection,
+    repo_helpers::get_branch_aware_collection_name,
+    search_impl::{search_collection, SearchParams},
 };
 use qdrant_client::qdrant::{value::Kind, Condition, Filter};
 use anyhow::Result;
 use axum::Extension;
 use crate::middleware::auth_middleware::AuthenticatedUser;
-use qdrant_client::qdrant::{SearchPoints, SearchResponse, HealthCheckReply, CollectionInfo, CountPoints, CountResponse, PointsSelector, ScrollPoints, ScrollResponse, UpsertPoints, PointsOperationResponse, CreateCollection, DeletePoints, QueryPoints, QueryResponse};
-use async_trait::async_trait;
-use tempfile::tempdir;
-use serde_json::json;
 
-#[instrument(skip(config, qdrant_client, auth_user_ext), fields(repo_name = %params.repository_name, query = %params.query_text))]
+#[instrument(skip(config, qdrant_client, _auth_user_ext), fields(repo_name = %params.repository_name, query = %params.query_text))]
 pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
     params: QueryParams,
     config: Arc<RwLock<AppConfig>>,
     qdrant_client: Arc<C>,
-    auth_user_ext: Option<Extension<AuthenticatedUser>>,
+    _auth_user_ext: Option<Extension<AuthenticatedUser>>,
 ) -> Result<QueryResult, ErrorObject> {
     let query_text = params.query_text.clone();
     let limit = params.limit;
@@ -95,33 +90,33 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
         error!(error = %e, "Failed to create embedding pool for query");
         ErrorObject {
             code: error_codes::INTERNAL_ERROR,
-            message: format!("Failed to initialize embedding pool: {}", e),
+            message: format!("Failed to initialize embedding pool: {e}"),
             data: None,
         }
     })?;
 
-    let search_response = search_collection(
-        qdrant_client,
-        &collection_name,
-        &embedding_pool,
-        &query_text,
+    let search_response = search_collection(SearchParams {
+        client: qdrant_client,
+        collection_name: &collection_name,
+        embedding_pool: &embedding_pool,
+        query_text: &query_text,
         limit,
         filter,
-        &config_read_guard,
-        None,
-    )
+        config: &config_read_guard,
+        search_config: None,
+    })
     .await
     .map_err(|e| {
         error!(error = %e, collection=%collection_name, "Core search failed");
         match e {
             SagittaError::EmbeddingError(_) => ErrorObject {
                 code: error_codes::EMBEDDING_ERROR,
-                message: format!("Failed to generate embedding for query: {}", e),
+                message: format!("Failed to generate embedding for query: {e}"),
                 data: None,
             },
             _ => ErrorObject {
                 code: error_codes::QUERY_EXECUTION_FAILED,
-                message: format!("Failed to execute query: {}", e),
+                message: format!("Failed to execute query: {e}"),
                 data: None,
             },
         }

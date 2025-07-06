@@ -1,11 +1,11 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{Args, Subcommand};
 use colored::*;
 use sagitta_search::{
-    config::{AppConfig, save_config, load_config, get_repo_base_path},
+    config::{AppConfig, save_config},
     scan_for_orphaned_repositories, reclone_missing_repository,
     add_orphaned_repository, remove_orphaned_repository,
-    get_enhanced_repository_list, OrphanedRepository,
+    get_enhanced_repository_list,
 };
 use std::path::PathBuf;
 use std::io::{self, Write};
@@ -190,7 +190,7 @@ async fn handle_list_orphaned(args: ListOrphanedArgs, config: &AppConfig) -> Res
     Ok(())
 }
 
-async fn handle_reclone(args: RecloneArgs, config: &AppConfig, override_path: Option<&PathBuf>) -> Result<()> {
+async fn handle_reclone(args: RecloneArgs, config: &AppConfig, _override_path: Option<&PathBuf>) -> Result<()> {
     let enhanced_list = get_enhanced_repository_list(config).await?;
     
     let missing_repos: Vec<_> = enhanced_list.repositories
@@ -260,11 +260,11 @@ async fn handle_reclone(args: RecloneArgs, config: &AppConfig, override_path: Op
     
     // Summary
     println!("\n{}", "Reclone Summary:".bold());
-    println!("  {} repositories successfully recloned", success_count);
+    println!("  {success_count} repositories successfully recloned");
     if !failures.is_empty() {
         println!("  {} repositories failed:", failures.len());
         for (name, error) in failures {
-            println!("    - {}: {}", name, error);
+            println!("    - {name}: {error}");
         }
     }
     
@@ -286,7 +286,7 @@ async fn handle_add_orphaned(args: AddOrphanedArgs, config: &mut AppConfig, over
         println!("  Name: {}", orphan.name);
         println!("  Path: {}", orphan.local_path.display());
         if let Some(url) = &orphan.remote_url {
-            println!("  Remote URL: {}", url);
+            println!("  Remote URL: {url}");
         }
         
         print!("Add this repository to configuration? (yes/No): ");
@@ -328,7 +328,7 @@ async fn handle_remove_orphaned(args: RemoveOrphanedArgs, config: &AppConfig) ->
         println!("  Name: {}", orphan.name);
         println!("  Path: {}", orphan.local_path.display());
         if let Some(file_count) = orphan.file_count {
-            println!("  Files: {}", file_count);
+            println!("  Files: {file_count}");
         }
         
         print!("Are you sure you want to delete this directory? (yes/No): ");
@@ -396,11 +396,11 @@ async fn handle_clean_orphaned(args: CleanOrphanedArgs, config: &AppConfig) -> R
     
     // Summary
     println!("\n{}", "Clean Summary:".bold());
-    println!("  {} orphaned repositories removed", success_count);
+    println!("  {success_count} orphaned repositories removed");
     if !failures.is_empty() {
         println!("  {} repositories failed:", failures.len());
         for (name, error) in failures {
-            println!("    - {}: {}", name, error);
+            println!("    - {name}: {error}");
         }
     }
     

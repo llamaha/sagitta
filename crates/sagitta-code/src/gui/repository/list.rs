@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use egui::{Ui, RichText, Color32, Grid, TextEdit, ScrollArea, Response, Sense, Rect, Pos2};
+use egui::{Ui, RichText, Color32, Grid, ScrollArea};
 use tokio::sync::Mutex;
 use super::manager::RepositoryManager;
 
@@ -76,7 +76,7 @@ fn show_repo_status_tooltip(ui: &mut Ui, enhanced_repo: &EnhancedRepoInfo) {
             .map(|count| count.to_string())
             .unwrap_or_else(|| "unknown".to_string()),
         enhanced_repo.size_bytes
-            .map(|size| format_bytes(size))
+            .map(format_bytes)
             .unwrap_or_else(|| "unknown".to_string()),
         enhanced_repo.indexed_languages.as_ref()
             .map(|langs| langs.join(", "))
@@ -91,7 +91,7 @@ pub fn render_repo_list(
     ui: &mut Ui, 
     state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>,
     repo_manager: Arc<Mutex<RepositoryManager>>,
-    theme: crate::gui::theme::AppTheme,
+    _theme: crate::gui::theme::AppTheme,
 ) {
     ui.horizontal(|ui| {
         ui.label("Filter:");
@@ -154,7 +154,7 @@ pub fn render_repo_list(
                 
                 for enhanced_repo in repos_to_display {
                     // Name column
-                    let is_selected = state.selected_repo.as_ref().map_or(false, |s| s == &enhanced_repo.name);
+                    let is_selected = state.selected_repo.as_ref() == Some(&enhanced_repo.name);
                     
                     // Style the name differently if the repository is missing
                     let name_text = if !enhanced_repo.filesystem_status.exists {
@@ -198,7 +198,7 @@ pub fn render_repo_list(
                     };
                     
                     let source = if let Some(branch) = &enhanced_repo.branch {
-                        format!("{} ({})", source_text, branch)
+                        format!("{source_text} ({branch})")
                     } else {
                         source_text
                     };
@@ -224,7 +224,7 @@ pub fn render_repo_list(
                             let size_text = enhanced_repo.size_bytes
                                 .map(|size| format!(" ({})", format_bytes(size)))
                                 .unwrap_or_default();
-                            ui.label(format!("{} files{}", files, size_text));
+                            ui.label(format!("{files} files{size_text}"));
                         }
                     });
                     
@@ -333,7 +333,7 @@ pub fn render_repo_list(
                                 ui.colored_label(Color32::from_rgb(46, 160, 67), "Git");
                             }
                             if let Some(file_count) = orphan.file_count {
-                                ui.label(format!("{} files", file_count));
+                                ui.label(format!("{file_count} files"));
                             }
                             if let Some(size) = orphan.size_bytes {
                                 ui.label(format_bytes(size));
@@ -408,7 +408,7 @@ fn render_basic_repos(
 ) {
     for repo in repos {
         // Name column
-        let is_selected = state.selected_repo.as_ref().map_or(false, |s| s == &repo.name);
+        let is_selected = state.selected_repo.as_ref() == Some(&repo.name);
         
         if ui.selectable_label(is_selected, &repo.name).clicked() {
             if is_selected {
@@ -442,7 +442,7 @@ fn render_basic_repos(
         };
         
         let source = if let Some(branch) = &repo.branch {
-            format!("{} ({})", source_text, branch)
+            format!("{source_text} ({branch})")
         } else {
             source_text
         };

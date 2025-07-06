@@ -58,8 +58,7 @@ pub fn validate_text_batch(texts: &[&str]) -> Result<()> {
     for (i, text) in texts.iter().enumerate() {
         if text.trim().is_empty() {
             return Err(SagittaEmbedError::invalid_input(format!(
-                "Text at index {} is empty or whitespace-only",
-                i
+                "Text at index {i} is empty or whitespace-only"
             )));
         }
     }
@@ -72,7 +71,7 @@ pub fn validate_embedding_dimensions(
     embeddings: &[Vec<f32>],
     expected_dimension: usize,
 ) -> Result<()> {
-    for (i, embedding) in embeddings.iter().enumerate() {
+    for embedding in embeddings.iter() {
         if embedding.len() != expected_dimension {
             return Err(SagittaEmbedError::dimension_mismatch(
                 expected_dimension,

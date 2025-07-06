@@ -1,4 +1,4 @@
-use crate::mcp::types::{TodoReadParams, TodoReadResult, TodoItem, TodoStatus, TodoPriority, ErrorObject};
+use crate::mcp::types::{TodoReadParams, TodoReadResult, TodoItem, TodoStatus, ErrorObject};
 use crate::middleware::auth_middleware::AuthenticatedUser;
 use sagitta_search::config::AppConfig;
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;
@@ -6,7 +6,6 @@ use axum::Extension;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::fs;
-use std::path::Path;
 use serde_json;
 
 // Import the shared function from todo_write module
@@ -30,7 +29,7 @@ pub async fn handle_todo_read<C: QdrantClientTrait + Send + Sync + 'static>(
                     Err(e) => {
                         return Err(ErrorObject {
                             code: -32603,
-                            message: format!("Failed to parse todos file: {}", e),
+                            message: format!("Failed to parse todos file: {e}"),
                             data: None,
                         });
                     }
@@ -39,7 +38,7 @@ pub async fn handle_todo_read<C: QdrantClientTrait + Send + Sync + 'static>(
             Err(e) => {
                 return Err(ErrorObject {
                     code: -32603,
-                    message: format!("Failed to read todos file: {}", e),
+                    message: format!("Failed to read todos file: {e}"),
                     data: None,
                 });
             }
@@ -58,7 +57,7 @@ pub async fn handle_todo_read<C: QdrantClientTrait + Send + Sync + 'static>(
     let summary = if total == 0 {
         "No todos found".to_string()
     } else {
-        format!("{} todos: {} completed, {} in progress, {} pending", total, completed, in_progress, pending)
+        format!("{total} todos: {completed} completed, {in_progress} in progress, {pending} pending")
     };
     
     Ok(TodoReadResult {
@@ -71,8 +70,9 @@ pub async fn handle_todo_read<C: QdrantClientTrait + Send + Sync + 'static>(
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    use std::path::PathBuf;
+    // use std::path::PathBuf;
     use crate::handlers::test_utils::TODO_TEST_MUTEX;
+    use crate::mcp::types::{TodoItem, TodoPriority};
     
     async fn create_test_config() -> (Arc<RwLock<AppConfig>>, TempDir, std::sync::MutexGuard<'static, ()>) {
         // Handle poisoned mutex by clearing the poison

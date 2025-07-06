@@ -143,7 +143,7 @@ impl ConversationSidebar {
         let mut status_groups: HashMap<ConversationStatus, Vec<ConversationSummary>> = HashMap::new();
         
         for conv in conversations {
-            status_groups.entry(conv.status.clone()).or_insert_with(Vec::new).push(conv.clone());
+            status_groups.entry(conv.status.clone()).or_default().push(conv.clone());
         }
         
         let mut groups = Vec::new();
@@ -158,7 +158,7 @@ impl ConversationSidebar {
         for (status, name, priority) in status_order {
             if let Some(mut convs) = status_groups.remove(&status) {
                 convs.sort_by(|a, b| b.last_active.cmp(&a.last_active));
-                let group_id = format!("status_{:?}", status).to_lowercase();
+                let group_id = format!("status_{status:?}").to_lowercase();
                 groups.push(self.create_group(&group_id, name, convs, priority)?);
             }
         }
@@ -247,7 +247,7 @@ impl ConversationSidebar {
                 untagged.push(conv.clone());
             } else {
                 for tag in &conv.tags {
-                    tag_groups.entry(tag.clone()).or_insert_with(Vec::new).push(conv.clone());
+                    tag_groups.entry(tag.clone()).or_default().push(conv.clone());
                 }
             }
         }
@@ -444,7 +444,7 @@ impl ConversationSidebar {
             indicators.push(VisualIndicator {
                 indicator_type: IndicatorType::Tag,
                 display: tag.clone(),
-                tooltip: Some(format!("Tag: {}", tag)),
+                tooltip: Some(format!("Tag: {tag}")),
                 style: Some("tag".to_string()),
             });
         }

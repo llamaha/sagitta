@@ -5,22 +5,26 @@ use crate::model::EmbeddingModelType;
 use crate::provider::EmbeddingProvider;
 use crate::provider::onnx::memory_pool::{TensorMemoryPool, MemoryPoolStats};
 use crate::provider::onnx::io_binding::{AdvancedIOBinding, IOBindingStats};
-use anyhow::{anyhow, Error};
 use log::{debug, warn, info};
-use ndarray::Array;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+#[cfg(feature = "cuda")]
+use ort::execution_providers::CUDAExecutionProvider;
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "onnx")]
 use ort::{
-    execution_providers::{CPUExecutionProvider, CUDAExecutionProvider},
-    session::{builder::GraphOptimizationLevel, Session},
+    execution_providers::CPUExecutionProvider,
+    session::Session,
     value::Value,
 };
 
 #[cfg(feature = "onnx")]
 use tokenizers::Tokenizer;
+
+// Type aliases for complex return types
+type TokenizedInputs = (Vec<i64>, Vec<i64>, Option<Vec<i64>>);
+type BatchTokenizedInputs = (Vec<i64>, Vec<i64>, Option<Vec<i64>>, usize);
 
 /// ONNX-based embedding model with memory management
 #[derive(Debug)]
@@ -98,18 +102,18 @@ impl OnnxEmbeddingModel {
         // Auto-detect sequence length from model if possible, otherwise try tokenizer, then use config
         let max_seq_length = match Self::get_max_sequence_length_from_session(&session) {
             Ok(detected_length) => {
-                info!("Auto-detected maximum sequence length from model: {}", detected_length);
-                debug!("Auto-detection successful, using detected length: {}", detected_length);
+                info!("Auto-detected maximum sequence length from model: {detected_length}");
+                debug!("Auto-detection successful, using detected length: {detected_length}");
                 detected_length
             }
             Err(e) => {
-                debug!("Model auto-detection failed: {}", e);
+                debug!("Model auto-detection failed: {e}");
                 
                 // Try to detect from tokenizer
                 match Self::get_max_sequence_length_from_tokenizer(&tokenizer) {
                     Some(tokenizer_length) => {
-                        info!("Auto-detected maximum sequence length from tokenizer behavior: {}", tokenizer_length);
-                        debug!("Tokenizer detection successful, using detected length: {}", tokenizer_length);
+                        info!("Auto-detected maximum sequence length from tokenizer behavior: {tokenizer_length}");
+                        debug!("Tokenizer detection successful, using detected length: {tokenizer_length}");
                         tokenizer_length
                     }
                     None => {
@@ -121,7 +125,7 @@ impl OnnxEmbeddingModel {
             }
         };
 
-        debug!("Final max_seq_length that will be used: {}", max_seq_length);
+        debug!("Final max_seq_length that will be used: {max_seq_length}");
         
         // Check if model expects token_type_ids
         let expects_token_type_ids = session.inputs.iter()
@@ -175,7 +179,7 @@ impl OnnxEmbeddingModel {
         let tokenizer_json_path = if tokenizer_path.is_file()
             && tokenizer_path
                 .file_name()
-                .map_or(false, |name| name == "tokenizer.json")
+                .is_some_and(|name| name == "tokenizer.json")
         {
             tokenizer_path.to_path_buf()
         } else if tokenizer_path.is_dir() {
@@ -217,8 +221,8 @@ impl OnnxEmbeddingModel {
         // Configure with BatchLongest padding strategy
         tokenizer.with_padding(Some(PaddingParams {
             strategy: PaddingStrategy::BatchLongest,
-            pad_token: pad_token,
-            pad_id: pad_id,
+            pad_token,
+            pad_id,
             pad_type_id: 0,
             direction: tokenizers::PaddingDirection::Right,
             pad_to_multiple_of: None,
@@ -279,7 +283,7 @@ impl OnnxEmbeddingModel {
 
         // Build session using Session::builder() with performance optimizations
         let mut session_builder = Session::builder()
-            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create session builder: {}", e)))?;
+            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create session builder: {e}")))?;
 
         // Apply graph optimization level
         let opt_level = match config.graph_optimization_level {
@@ -290,50 +294,50 @@ impl OnnxEmbeddingModel {
         };
         session_builder = session_builder
             .with_optimization_level(opt_level)
-            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to set optimization level: {}", e)))?;
+            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to set optimization level: {e}")))?;
 
         // Configure threading
         if let Some(intra_threads) = config.intra_op_num_threads {
             session_builder = session_builder
                 .with_intra_threads(intra_threads)
-                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to set intra-op threads: {}", e)))?;
+                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to set intra-op threads: {e}")))?;
         }
 
         if let Some(inter_threads) = config.inter_op_num_threads {
             session_builder = session_builder
                 .with_inter_threads(inter_threads)
-                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to set inter-op threads: {}", e)))?;
+                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to set inter-op threads: {e}")))?;
         }
 
         // Enable memory patterns for better GPU memory reuse
         session_builder = session_builder
             .with_memory_pattern(true)
-            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to enable memory pattern: {}", e)))?;
+            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to enable memory pattern: {e}")))?;
         
         // Configure parallel execution
         if config.enable_parallel_execution {
             session_builder = session_builder
                 .with_parallel_execution(true)
-                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to enable parallel execution: {}", e)))?;
+                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to enable parallel execution: {e}")))?;
         }
 
         // Configure memory pattern optimization
         session_builder = session_builder
             .with_memory_pattern(config.enable_memory_pattern)
-            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to configure memory pattern: {}", e)))?;
+            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to configure memory pattern: {e}")))?;
 
         // Configure deterministic compute
         if config.enable_deterministic_compute {
             session_builder = session_builder
                 .with_deterministic_compute(true)
-                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to enable deterministic compute: {}", e)))?;
+                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to enable deterministic compute: {e}")))?;
         }
 
         // Configure profiling if specified
         if let Some(ref profiling_path) = config.profiling_file_path {
             session_builder = session_builder
                 .with_profiling(profiling_path)
-                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to enable profiling: {}", e)))?;
+                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to enable profiling: {e}")))?;
         }
 
         // Commit the session
@@ -383,7 +387,7 @@ impl OnnxEmbeddingModel {
                 .ok_or_else(|| {
                     let available_outputs: Vec<&str> = session.outputs.iter().map(|o| o.name.as_str()).collect();
                     SagittaEmbedError::model(
-                        format!("Could not find a suitable output. Available outputs: {:?}", available_outputs)
+                        format!("Could not find a suitable output. Available outputs: {available_outputs:?}")
                     )
                 })?
         };
@@ -401,8 +405,7 @@ impl OnnxEmbeddingModel {
             })
             .ok_or_else(|| {
                 SagittaEmbedError::model(format!(
-                    "Failed to get model dimension from output: {}",
-                    target_output_name
+                    "Failed to get model dimension from output: {target_output_name}"
                 ))
             })
     }
@@ -427,7 +430,7 @@ impl OnnxEmbeddingModel {
 
         match input_ids_input.input_type {
             ort::value::ValueType::Tensor { ref dimensions, .. } => {
-                debug!("Input tensor dimensions: {:?}", dimensions);
+                debug!("Input tensor dimensions: {dimensions:?}");
                 
                 // For transformer models, input shape is typically [batch_size, sequence_length]
                 // The sequence length is usually the second dimension
@@ -445,7 +448,7 @@ impl OnnxEmbeddingModel {
                         // If it's a fixed dimension, use it
                         seq_len if seq_len > 0 => {
                             let detected_length = seq_len as usize;
-                            info!("Auto-detected maximum sequence length from model: {}", detected_length);
+                            info!("Auto-detected maximum sequence length from model: {detected_length}");
                             debug!("Successfully detected fixed sequence length from model dimensions");
                             Ok(detected_length)
                         }
@@ -484,7 +487,7 @@ impl OnnxEmbeddingModel {
         
         if let Ok(encoding) = tokenizer.encode(very_long_text.as_str(), true) {
             let token_count = encoding.get_ids().len();
-            debug!("Tokenizer produced {} tokens for very long text", token_count);
+            debug!("Tokenizer produced {token_count} tokens for very long text");
             
             // Common sequence lengths for transformer models
             let common_lengths = [512, 1024, 2048, 4096];
@@ -492,7 +495,7 @@ impl OnnxEmbeddingModel {
             // If the tokenizer truncated to a common length, that's likely the max
             for &length in &common_lengths {
                 if token_count == length {
-                    info!("Detected max sequence length from tokenizer behavior: {}", length);
+                    info!("Detected max sequence length from tokenizer behavior: {length}");
                     return Some(length);
                 }
             }
@@ -507,7 +510,7 @@ impl OnnxEmbeddingModel {
             // If we got a reasonable token count that's not a standard length,
             // round up to the nearest power of 2 or common length
             if token_count > 256 && token_count <= 600 {
-                info!("Tokenizer produced {} tokens, assuming max length is 512", token_count);
+                info!("Tokenizer produced {token_count} tokens, assuming max length is 512");
                 return Some(512);
             }
         }
@@ -532,15 +535,15 @@ impl OnnxEmbeddingModel {
 
     /// Tokenizes input text and prepares model inputs
     #[cfg(feature = "onnx")]
-    fn prepare_inputs(&self, text: &str) -> Result<(Vec<i64>, Vec<i64>, Option<Vec<i64>>)> {
+    fn prepare_inputs(&self, text: &str) -> Result<TokenizedInputs> {
         debug!("Preparing inputs with max_seq_length: {}", self.max_seq_length);
         
         let encoding = self
             .tokenizer
             .lock()
-            .map_err(|e| SagittaEmbedError::thread_safety(format!("Failed to lock tokenizer: {}", e)))?
+            .map_err(|e| SagittaEmbedError::thread_safety(format!("Failed to lock tokenizer: {e}")))?
             .encode(text, true)
-            .map_err(|e| SagittaEmbedError::tokenization(format!("Failed to encode text: {}", e)))?;
+            .map_err(|e| SagittaEmbedError::tokenization(format!("Failed to encode text: {e}")))?;
 
         let mut input_ids: Vec<i64> = encoding.get_ids().iter().map(|&id| id as i64).collect();
         let mut attention_mask: Vec<i64> = encoding
@@ -635,16 +638,16 @@ impl OnnxEmbeddingModel {
     ) -> Result<std::collections::HashMap<String, ort::value::DynValue>> {
         use ort::memory::{MemoryInfo, AllocationDevice, AllocatorType, MemoryType};
         
-        debug!("PROFILE: Starting I/O binding setup for batch size {}", batch_size);
+        debug!("PROFILE: Starting I/O binding setup for batch size {batch_size}");
         let total_setup_start = Instant::now();
         
         // Create GPU memory info for CUDA device 0
-        let gpu_memory_info = MemoryInfo::new(
+        let _gpu_memory_info = MemoryInfo::new(
             AllocationDevice::CUDA,
             0, // CUDA device ID
             AllocatorType::Device,
             MemoryType::Default,
-        ).map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create GPU memory info: {}", e)))?;
+        ).map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create GPU memory info: {e}")))?;
         
         // Check if we're using GPU for this session
         let default_allocator = self.session.allocator();
@@ -659,7 +662,7 @@ impl OnnxEmbeddingModel {
         // Create I/O binding
         let binding_start = Instant::now();
         let mut io_binding = self.session.create_binding()
-            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create I/O binding: {}", e)))?;
+            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create I/O binding: {e}")))?;
         debug!("PROFILE: I/O binding creation took {:?}", binding_start.elapsed());
 
         // Create input tensors directly on GPU using GPU allocator for maximum performance
@@ -671,30 +674,29 @@ impl OnnxEmbeddingModel {
         let alloc_start = Instant::now();
         let total_elements = batch_size * seq_length;
         let input_size_bytes = total_elements * std::mem::size_of::<i64>();
-        debug!("PROFILE: About to allocate tensors on GPU for shape [{}, {}] = {} elements = {} bytes per tensor", 
-               batch_size, seq_length, total_elements, input_size_bytes);
+        debug!("PROFILE: About to allocate tensors on GPU for shape [{batch_size}, {seq_length}] = {total_elements} elements = {input_size_bytes} bytes per tensor");
 
         // Create tensors - note: in ort 2.0.0-rc.9, tensors are created on CPU first
         // The IO binding will handle the GPU transfer efficiently
         let input_tensor_start = Instant::now();
         let input_ids_tensor = Value::from_array((input_ids_shape.clone(), all_input_ids))
-            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create input_ids tensor: {}", e)))?;
+            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create input_ids tensor: {e}")))?;
         let input_tensor_elapsed = input_tensor_start.elapsed();
-        debug!("PROFILE: input_ids tensor creation took {:?}", input_tensor_elapsed);
+        debug!("PROFILE: input_ids tensor creation took {input_tensor_elapsed:?}");
 
         let mask_tensor_start = Instant::now();
         let attention_mask_tensor = Value::from_array((attention_mask_shape.clone(), all_attention_masks))
-            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create attention_mask tensor: {}", e)))?;
+            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create attention_mask tensor: {e}")))?;
         let mask_tensor_elapsed = mask_tensor_start.elapsed();
-        debug!("PROFILE: attention_mask tensor creation took {:?}", mask_tensor_elapsed);
+        debug!("PROFILE: attention_mask tensor creation took {mask_tensor_elapsed:?}");
         
         let token_type_ids_tensor = if let Some(token_type_ids) = all_token_type_ids {
             let token_type_tensor_start = Instant::now();
             let token_type_ids_shape = vec![batch_size, seq_length];
             let tensor = Value::from_array((token_type_ids_shape.clone(), token_type_ids))
-                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create token_type_ids tensor: {}", e)))?;
+                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create token_type_ids tensor: {e}")))?;
             let token_type_tensor_elapsed = token_type_tensor_start.elapsed();
-            debug!("PROFILE: token_type_ids tensor creation took {:?}", token_type_tensor_elapsed);
+            debug!("PROFILE: token_type_ids tensor creation took {token_type_tensor_elapsed:?}");
             Some(tensor)
         } else {
             None
@@ -711,18 +713,18 @@ impl OnnxEmbeddingModel {
         let bind_start = Instant::now();
         let input_bind_start = Instant::now();
         io_binding.bind_input("input_ids", &input_ids_tensor)
-            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to bind input_ids: {}", e)))?;
+            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to bind input_ids: {e}")))?;
         debug!("PROFILE: input_ids binding took {:?}", input_bind_start.elapsed());
 
         let mask_bind_start = Instant::now();
         io_binding.bind_input("attention_mask", &attention_mask_tensor)
-            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to bind attention_mask: {}", e)))?;
+            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to bind attention_mask: {e}")))?;
         debug!("PROFILE: attention_mask binding took {:?}", mask_bind_start.elapsed());
         
         if let Some(ref token_type_ids_tensor) = token_type_ids_tensor {
             let token_type_bind_start = Instant::now();
             io_binding.bind_input("token_type_ids", token_type_ids_tensor)
-                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to bind token_type_ids: {}", e)))?;
+                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to bind token_type_ids: {e}")))?;
             debug!("PROFILE: token_type_ids binding took {:?}", token_type_bind_start.elapsed());
         }
         
@@ -740,48 +742,47 @@ impl OnnxEmbeddingModel {
             0,
             AllocatorType::Device,
             MemoryType::CPUOutput,
-        ).map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create CPU memory info: {}", e)))?;
+        ).map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create CPU memory info: {e}")))?;
         
         // Try output names in order of precedence (matching fastembed-rs)
         if self.session.outputs.len() == 1 {
             // If there's only one output, use it
             let output_name = &self.session.outputs[0].name;
             io_binding.bind_output_to_device(output_name, &cpu_memory_info)
-                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to bind single output '{}': {}", output_name, e)))?;
+                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to bind single output '{output_name}': {e}")))?;
         } else {
             // Try multiple output names in order of precedence
             io_binding.bind_output_to_device("last_hidden_state", &cpu_memory_info)
                 .or_else(|e1| {
-                    debug!("PROFILE: last_hidden_state bind failed: {}, trying sentence_embedding", e1);
+                    debug!("PROFILE: last_hidden_state bind failed: {e1}, trying sentence_embedding");
                     io_binding.bind_output_to_device("sentence_embedding", &cpu_memory_info)
                 })
                 .or_else(|e2| {
-                    debug!("PROFILE: sentence_embedding bind failed: {}, trying pooler_output", e2);
+                    debug!("PROFILE: sentence_embedding bind failed: {e2}, trying pooler_output");
                     io_binding.bind_output_to_device("pooler_output", &cpu_memory_info)
                 })
                 .or_else(|e3| {
-                    debug!("PROFILE: pooler_output bind failed: {}, trying embeddings", e3);
+                    debug!("PROFILE: pooler_output bind failed: {e3}, trying embeddings");
                     io_binding.bind_output_to_device("embeddings", &cpu_memory_info)
                 })
-                .map_err(|e| {
+                .map_err(|_e| {
                     let available_outputs: Vec<&str> = self.session.outputs.iter().map(|o| o.name.as_str()).collect();
-                    SagittaEmbedError::onnx_runtime(format!("Failed to bind any output. Available outputs: {:?}", available_outputs))
+                    SagittaEmbedError::onnx_runtime(format!("Failed to bind any output. Available outputs: {available_outputs:?}"))
                 })?;
         }
         
         debug!("PROFILE: Output binding took {:?}", output_bind_start.elapsed());
         
         let setup_elapsed = total_setup_start.elapsed();
-        debug!("PROFILE: Total I/O binding setup took {:?}", setup_elapsed);
+        debug!("PROFILE: Total I/O binding setup took {setup_elapsed:?}");
         
         // Performance analysis
         let setup_overhead_pct = (setup_elapsed.as_nanos() as f64 / 1_000_000.0) / 1000.0 * 100.0; // as % of 1 second
-        debug!("PROFILE: Setup overhead: {:.3}% of 1 second", setup_overhead_pct);
+        debug!("PROFILE: Setup overhead: {setup_overhead_pct:.3}% of 1 second");
         
         // Log warning if setup is taking too long
         if setup_elapsed.as_millis() > 50 {
-            warn!("PROFILE: Slow I/O binding setup detected - total setup took {:?} for batch_size={}, seq_length={}", 
-                  setup_elapsed, batch_size, seq_length);
+            warn!("PROFILE: Slow I/O binding setup detected - total setup took {setup_elapsed:?} for batch_size={batch_size}, seq_length={seq_length}");
         }
 
         // Run inference with I/O binding
@@ -800,49 +801,44 @@ impl OnnxEmbeddingModel {
         let pre_run_time = Instant::now();
         
         let session_outputs = io_binding.run()
-            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("I/O binding inference failed: {}", e)))?;
+            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("I/O binding inference failed: {e}")))?;
         
         let run_elapsed = pre_run_time.elapsed();
-        debug!("PROFILE: io_binding.run() completed in {:?}", run_elapsed);
+        debug!("PROFILE: io_binding.run() completed in {run_elapsed:?}");
         
         let inference_elapsed = inference_start.elapsed();
-        debug!("PROFILE: Actual inference execution took {:?}", inference_elapsed);
+        debug!("PROFILE: Actual inference execution took {inference_elapsed:?}");
 
         // Performance analysis
         let throughput_elements_per_sec = total_elements as f64 / run_elapsed.as_secs_f64();
         let throughput_tokens_per_sec = (batch_size * self.max_seq_length) as f64 / run_elapsed.as_secs_f64();
-        debug!("PROFILE: Inference throughput: {:.0} elements/sec, {:.0} tokens/sec", 
-               throughput_elements_per_sec, throughput_tokens_per_sec);
+        debug!("PROFILE: Inference throughput: {throughput_elements_per_sec:.0} elements/sec, {throughput_tokens_per_sec:.0} tokens/sec");
 
         // GPU vs CPU execution pattern analysis
         let seconds_per_token = run_elapsed.as_secs_f64() / (batch_size * self.max_seq_length) as f64;
         let ms_per_token = seconds_per_token * 1000.0;
-        debug!("PROFILE: Timing per token: {:.4} ms/token", ms_per_token);
+        debug!("PROFILE: Timing per token: {ms_per_token:.4} ms/token");
         
         // Expected performance baselines (rough estimates for BGE-small)
         let expected_gpu_ms_per_token = 0.02; // ~50K tokens/sec on modern GPU
         let expected_cpu_ms_per_token = 0.15; // ~6.7K tokens/sec on decent CPU
         
         if ms_per_token > expected_cpu_ms_per_token * 0.8 {
-            warn!("PROFILE: Performance suggests CPU execution ({:.4} ms/token, expected GPU: ~{:.4}, CPU: ~{:.4})", 
-                  ms_per_token, expected_gpu_ms_per_token, expected_cpu_ms_per_token);
+            warn!("PROFILE: Performance suggests CPU execution ({ms_per_token:.4} ms/token, expected GPU: ~{expected_gpu_ms_per_token:.4}, CPU: ~{expected_cpu_ms_per_token:.4})");
         } else if ms_per_token > expected_gpu_ms_per_token * 3.0 {
-            warn!("PROFILE: Performance slower than expected for GPU ({:.4} ms/token, expected ~{:.4})", 
-                  ms_per_token, expected_gpu_ms_per_token);
+            warn!("PROFILE: Performance slower than expected for GPU ({ms_per_token:.4} ms/token, expected ~{expected_gpu_ms_per_token:.4})");
         } else {
-            debug!("PROFILE: Performance suggests efficient GPU execution ({:.4} ms/token)", ms_per_token);
+            debug!("PROFILE: Performance suggests efficient GPU execution ({ms_per_token:.4} ms/token)");
         }
 
         // Detect potential performance issues
         if run_elapsed.as_millis() > 100 {
-            warn!("PROFILE: Slow inference detected - io_binding.run() took {:?} for batch_size={}, seq_length={}", 
-                  run_elapsed, batch_size, seq_length);
+            warn!("PROFILE: Slow inference detected - io_binding.run() took {run_elapsed:?} for batch_size={batch_size}, seq_length={seq_length}");
             
             // Additional diagnostics for slow inference
             let expected_tokens_per_ms = 30.0; // Rough baseline for BGE-small on modern GPU
             let actual_tokens_per_ms = (batch_size * self.max_seq_length) as f64 / run_elapsed.as_millis() as f64;
-            debug!("PROFILE: Token processing rate: {:.1} tokens/ms (expected ~{:.1} tokens/ms)", 
-                   actual_tokens_per_ms, expected_tokens_per_ms);
+            debug!("PROFILE: Token processing rate: {actual_tokens_per_ms:.1} tokens/ms (expected ~{expected_tokens_per_ms:.1} tokens/ms)");
                     
             if actual_tokens_per_ms < expected_tokens_per_ms * 0.5 {
                 warn!("PROFILE: Significantly slower than expected - possible GPU memory transfer or compute bottleneck");
@@ -853,7 +849,7 @@ impl OnnxEmbeddingModel {
         let conversion_start = Instant::now();
         let mut outputs = std::collections::HashMap::new();
         for (name, value) in session_outputs.into_iter() {
-            debug!("PROFILE: Processing output tensor: {}", name);
+            debug!("PROFILE: Processing output tensor: {name}");
             outputs.insert(name.to_string(), value);
         }
         debug!("PROFILE: Output conversion took {:?}", conversion_start.elapsed());
@@ -873,7 +869,7 @@ impl OnnxEmbeddingModel {
     ) -> Result<std::collections::HashMap<String, ort::value::DynValue>> {
         use ndarray::Array;
 
-        debug!("PROFILE: Starting standard inference setup for batch size {}", batch_size);
+        debug!("PROFILE: Starting standard inference setup for batch size {batch_size}");
         let total_setup_start = Instant::now();
 
         let array_start = Instant::now();
@@ -881,13 +877,13 @@ impl OnnxEmbeddingModel {
                batch_size, seq_length, batch_size * seq_length);
                
         let input_ids_array = Array::from_shape_vec((batch_size, seq_length), all_input_ids)
-            .map_err(|e| SagittaEmbedError::embedding_generation(format!("Input ID batch shape error: {}", e)))?;
+            .map_err(|e| SagittaEmbedError::embedding_generation(format!("Input ID batch shape error: {e}")))?;
         let attention_mask_array = Array::from_shape_vec((batch_size, seq_length), all_attention_masks)
-            .map_err(|e| SagittaEmbedError::embedding_generation(format!("Attention mask batch shape error: {}", e)))?;
+            .map_err(|e| SagittaEmbedError::embedding_generation(format!("Attention mask batch shape error: {e}")))?;
         
         let token_type_ids_array = if let Some(token_type_ids) = all_token_type_ids {
             Some(Array::from_shape_vec((batch_size, seq_length), token_type_ids)
-                .map_err(|e| SagittaEmbedError::embedding_generation(format!("Token type IDs batch shape error: {}", e)))?)
+                .map_err(|e| SagittaEmbedError::embedding_generation(format!("Token type IDs batch shape error: {e}")))?)
         } else {
             None
         };
@@ -902,18 +898,18 @@ impl OnnxEmbeddingModel {
         // Add memory allocation profiling
         let alloc_start = Instant::now();
         let input_ids_value = Value::from_array((input_ids_shape.clone(), input_ids_vec.clone()))
-            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create input ID tensor: {}", e)))?;
+            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create input ID tensor: {e}")))?;
 
         let attention_mask_shape = attention_mask_array.shape().to_vec();
         let attention_mask_vec = attention_mask_array.into_raw_vec_and_offset().0;
         let attention_mask_value = Value::from_array((attention_mask_shape.clone(), attention_mask_vec.clone()))
-            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create attention mask tensor: {}", e)))?;
+            .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create attention mask tensor: {e}")))?;
         
         let token_type_ids_value = if let Some(array) = token_type_ids_array {
             let token_type_ids_shape = array.shape().to_vec();
             let token_type_ids_vec = array.into_raw_vec_and_offset().0;
             Some(Value::from_array((token_type_ids_shape.clone(), token_type_ids_vec.clone()))
-                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create token type IDs tensor: {}", e)))?)
+                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create token type IDs tensor: {e}")))?)
         } else {
             None
         };
@@ -922,12 +918,11 @@ impl OnnxEmbeddingModel {
         debug!("PROFILE: Tensor conversion took {:?}", tensor_start.elapsed());
         
         let setup_elapsed = total_setup_start.elapsed();
-        debug!("PROFILE: Total standard inference setup took {:?}", setup_elapsed);
+        debug!("PROFILE: Total standard inference setup took {setup_elapsed:?}");
         
         // Log warning if setup is taking too long
         if setup_elapsed.as_millis() > 50 {
-            warn!("PROFILE: Slow standard inference setup detected - total setup took {:?} for batch_size={}, seq_length={}", 
-                  setup_elapsed, batch_size, seq_length);
+            warn!("PROFILE: Slow standard inference setup detected - total setup took {setup_elapsed:?} for batch_size={batch_size}, seq_length={seq_length}");
         }
 
         // Run inference with standard session
@@ -935,7 +930,7 @@ impl OnnxEmbeddingModel {
         let inference_start = Instant::now();
         
         // Add pre-run profiling
-        debug!("PROFILE: About to call session.run() with batch_size={}, seq_length={}", batch_size, seq_length);
+        debug!("PROFILE: About to call session.run() with batch_size={batch_size}, seq_length={seq_length}");
         let pre_run_time = Instant::now();
         
         let outputs = if let Some(token_type_ids_value) = token_type_ids_value {
@@ -947,9 +942,9 @@ impl OnnxEmbeddingModel {
                         "attention_mask" => attention_mask_value,
                         "token_type_ids" => token_type_ids_value,
                     ]
-                    .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create ONNX inputs: {}", e)))?,
+                    .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create ONNX inputs: {e}")))?,
                 )
-                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("ONNX session batch run failed: {}", e)))?
+                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("ONNX session batch run failed: {e}")))?
         } else {
             // 2-input model
             self.session
@@ -958,24 +953,23 @@ impl OnnxEmbeddingModel {
                         "input_ids" => input_ids_value,
                         "attention_mask" => attention_mask_value,
                     ]
-                    .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create ONNX inputs: {}", e)))?,
+                    .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to create ONNX inputs: {e}")))?,
                 )
-                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("ONNX session batch run failed: {}", e)))?
+                .map_err(|e| SagittaEmbedError::onnx_runtime(format!("ONNX session batch run failed: {e}")))?
         }
             .into_iter()
             .map(|(k, v)| (k.to_string(), v))
             .collect();
         
         let run_elapsed = pre_run_time.elapsed();
-        debug!("PROFILE: session.run() completed in {:?}", run_elapsed);
+        debug!("PROFILE: session.run() completed in {run_elapsed:?}");
         
         let inference_elapsed = inference_start.elapsed();
-        debug!("PROFILE: Standard inference execution took {:?}", inference_elapsed);
+        debug!("PROFILE: Standard inference execution took {inference_elapsed:?}");
 
         // Add more detailed breakdown
         if run_elapsed.as_millis() > 100 {
-            warn!("PROFILE: Slow standard inference detected - session.run() took {:?} for batch_size={}, seq_length={}", 
-                  run_elapsed, batch_size, seq_length);
+            warn!("PROFILE: Slow standard inference detected - session.run() took {run_elapsed:?} for batch_size={batch_size}, seq_length={seq_length}");
         }
 
         Ok(outputs)
@@ -985,15 +979,15 @@ impl OnnxEmbeddingModel {
 impl OnnxEmbeddingModel {
     /// Prepare batch inputs using tokenizer's BatchLongest padding
     #[cfg(feature = "onnx")]
-    fn prepare_batch_inputs_dynamic(&self, texts: &[&str]) -> Result<(Vec<i64>, Vec<i64>, Option<Vec<i64>>, usize)> {
+    fn prepare_batch_inputs_dynamic(&self, texts: &[&str]) -> Result<BatchTokenizedInputs> {
         debug!("Preparing batch inputs with tokenizer's BatchLongest padding for {} texts", texts.len());
         
         let tokenizer = self.tokenizer.lock()
-            .map_err(|e| SagittaEmbedError::thread_safety(format!("Failed to lock tokenizer: {}", e)))?;
+            .map_err(|e| SagittaEmbedError::thread_safety(format!("Failed to lock tokenizer: {e}")))?;
         
         // Use encode_batch which will apply BatchLongest padding automatically
         let encodings = tokenizer.encode_batch(texts.to_vec(), true)
-            .map_err(|e| SagittaEmbedError::tokenization(format!("Failed to batch encode texts: {}", e)))?;
+            .map_err(|e| SagittaEmbedError::tokenization(format!("Failed to batch encode texts: {e}")))?;
         
         // Get the actual padded length from the first encoding, but cap at model's max
         let padded_length = encodings[0].get_ids().len().min(self.max_seq_length);
@@ -1061,7 +1055,7 @@ impl OnnxEmbeddingModel {
         
         // Log efficiency gain
         let efficiency = (padded_length as f32 / self.max_seq_length as f32) * 100.0;
-        debug!("Dynamic padding efficiency - using {:.1}% of tokens compared to fixed padding", efficiency);
+        debug!("Dynamic padding efficiency - using {efficiency:.1}% of tokens compared to fixed padding");
         
         Ok((all_input_ids, all_attention_masks, all_token_type_ids, padded_length))
     }
@@ -1091,8 +1085,7 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
 
         let batch_size = texts.len();
         debug!(
-            "PROFILE: ONNX provider received batch of {} items",
-            batch_size
+            "PROFILE: ONNX provider received batch of {batch_size} items"
         );
 
         let token_start = Instant::now();
@@ -1129,8 +1122,7 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
         
         let token_elapsed = token_start.elapsed();
         debug!(
-            "PROFILE: ONNX batch tokenization for {} items with seq_length {}: {:?}",
-            batch_size, actual_seq_length, token_elapsed
+            "PROFILE: ONNX batch tokenization for {batch_size} items with seq_length {actual_seq_length}: {token_elapsed:?}"
         );
 
         // No need to modify max_seq_length anymore since we cap at model max
@@ -1147,14 +1139,14 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
             let io_binding_start = Instant::now();
             let result = self.run_optimized_io_binding(batch_size, all_input_ids, all_attention_masks, all_token_type_ids, actual_seq_length)?;
             let io_binding_elapsed = io_binding_start.elapsed();
-            debug!("PROFILE: I/O binding inference completed in {:?}", io_binding_elapsed);
+            debug!("PROFILE: I/O binding inference completed in {io_binding_elapsed:?}");
             result
         } else {
             debug!("PROFILE: Using standard ONNX inference");
             let standard_start = Instant::now();
             let result = self.run_standard_inference(batch_size, all_input_ids, all_attention_masks, all_token_type_ids, actual_seq_length)?;
             let standard_elapsed = standard_start.elapsed();
-            debug!("PROFILE: Standard inference completed in {:?}", standard_elapsed);
+            debug!("PROFILE: Standard inference completed in {standard_elapsed:?}");
             result
         };
         
@@ -1169,7 +1161,7 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
         };
         
         let onnx_elapsed = onnx_start.elapsed();
-        debug!("PROFILE: Total ONNX inference for {} items: {:?}", batch_size, onnx_elapsed);
+        debug!("PROFILE: Total ONNX inference for {batch_size} items: {onnx_elapsed:?}");
 
 
         // Check for output in order of precedence (matching fastembed-rs)
@@ -1187,7 +1179,7 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
                 .ok_or_else(|| {
                     let available_outputs: Vec<&str> = outputs.keys().map(|k| k.as_str()).collect();
                     SagittaEmbedError::embedding_generation(
-                        format!("Model did not return expected output. Available outputs: {:?}", available_outputs)
+                        format!("Model did not return expected output. Available outputs: {available_outputs:?}")
                     )
                 })?
         };
@@ -1199,7 +1191,7 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
         // Since we're binding outputs to CPU memory, extraction should work directly
         let (shape, data) = output_value
             .try_extract_raw_tensor::<f32>()
-            .map_err(|e| SagittaEmbedError::embedding_generation(format!("Failed to extract raw tensor data: {}", e)))?;
+            .map_err(|e| SagittaEmbedError::embedding_generation(format!("Failed to extract raw tensor data: {e}")))?;
         
         debug!("PROFILE: Tensor extraction took {:?} for shape {:?}", extraction_start.elapsed(), shape);
 
@@ -1219,7 +1211,7 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
         } else if shape.len() == 3 && shape[0] as usize == batch_size && shape[2] == expected_dim as i64 {
             // Shape is [batch_size, sequence_length, embedding_dim] - last_hidden_state
             // Need to perform mean pooling to get sentence embeddings
-            debug!("Received token embeddings (shape: {:?}), performing mean pooling", shape);
+            debug!("Received token embeddings (shape: {shape:?}), performing mean pooling");
             
             let seq_length = shape[1] as usize;
             let mut embeddings = Vec::with_capacity(batch_size);
@@ -1235,8 +1227,8 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
                 let sample_attention_mask = &attention_masks_for_pooling[attention_mask_start..attention_mask_end];
                 
                 // Compute mean pooling over non-padding tokens
-                for token_idx in 0..seq_length.min(actual_seq_length) {
-                    if sample_attention_mask[token_idx] == 1 {
+                for (token_idx, &mask_value) in sample_attention_mask.iter().enumerate().take(seq_length.min(actual_seq_length)) {
+                    if mask_value == 1 {
                         non_padding_tokens += 1;
                         let token_start = batch_idx * seq_length * expected_dim + token_idx * expected_dim;
                         for dim_idx in 0..expected_dim {
@@ -1267,8 +1259,7 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
         } else {
             // Unexpected shape
             Err(SagittaEmbedError::embedding_generation(format!(
-                "Unexpected batch output shape: got {:?}, expected compatible with [{}, {}]",
-                shape, batch_size, expected_dim
+                "Unexpected batch output shape: got {shape:?}, expected compatible with [{batch_size}, {expected_dim}]"
             )))
         };
         debug!("PROFILE: Final processing took {:?}", processing_start.elapsed());
@@ -1278,8 +1269,7 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
         let elements_processed = batch_size * actual_seq_length;
         let throughput = elements_processed as f64 / total_batch_time.as_secs_f64();
         
-        info!("PROFILE: BATCH SUMMARY - batch_size={}, actual_seq_length={}, total_elements={}, total_time={:?}, throughput={:.0} elements/sec", 
-              batch_size, actual_seq_length, elements_processed, total_batch_time, throughput);
+        info!("PROFILE: BATCH SUMMARY - batch_size={batch_size}, actual_seq_length={actual_seq_length}, total_elements={elements_processed}, total_time={total_batch_time:?}, throughput={throughput:.0} elements/sec");
         
         // Compare with fixed padding performance
         let fixed_padding_elements = batch_size * self.max_seq_length;
@@ -1405,15 +1395,15 @@ mod tests {
             .with_cpu_optimization();
         
         // Should enable CPU optimizations
-        assert_eq!(config.io_binding_config.enable_io_binding, false);
-        assert_eq!(config.io_binding_config.enable_pre_allocated_buffers, false);
-        assert_eq!(config.io_binding_config.enable_zero_copy, false);
-        assert_eq!(config.io_binding_config.enable_batch_optimization, false);
-        assert_eq!(config.enable_cuda_memory_streams, false);
-        assert_eq!(config.cpu_config.enable_arena, true);
-        assert_eq!(config.cpu_config.enable_numa, true);
-        assert_eq!(config.cpu_config.enable_cache_optimization, true);
-        assert_eq!(config.cpu_config.enable_simd, true);
+        assert!(!config.io_binding_config.enable_io_binding);
+        assert!(!config.io_binding_config.enable_pre_allocated_buffers);
+        assert!(!config.io_binding_config.enable_zero_copy);
+        assert!(!config.io_binding_config.enable_batch_optimization);
+        assert!(!config.enable_cuda_memory_streams);
+        assert!(config.cpu_config.enable_arena);
+        assert!(config.cpu_config.enable_numa);
+        assert!(config.cpu_config.enable_cache_optimization);
+        assert!(config.cpu_config.enable_simd);
     }
 
     #[test]

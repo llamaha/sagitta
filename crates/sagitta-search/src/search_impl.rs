@@ -33,9 +33,12 @@ pub struct SearchConfig {
     pub score_threshold: Option<f32>,
 }
 
+/// Method used for fusing dense and sparse search results
 #[derive(Clone, Debug)]
 pub enum FusionMethod {
+    /// Reciprocal Rank Fusion - combines rankings from multiple search methods
     Rrf,
+    /// Distribution-Based Score Fusion - uses score distributions for fusion
     Dbsf,
 }
 
@@ -88,6 +91,26 @@ fn is_filename_term(term: &str, query_text: &str) -> bool {
     (filename_context && (looks_like_filename || is_filename_related_term))
 }
 
+/// Parameters for search collection function
+pub struct SearchParams<'a, C> {
+    /// Qdrant client instance
+    pub client: Arc<C>,
+    /// Name of the collection to search
+    pub collection_name: &'a str,
+    /// Embedding pool for generating query embeddings
+    pub embedding_pool: &'a EmbeddingPool,
+    /// Query text to search for
+    pub query_text: &'a str,
+    /// Maximum number of results to return
+    pub limit: u64,
+    /// Optional filter to apply to search results
+    pub filter: Option<Filter>,
+    /// Application configuration
+    pub config: &'a AppConfig,
+    /// Optional search configuration overrides
+    pub search_config: Option<SearchConfig>,
+}
+
 /// Performs a hybrid vector search in a specified Qdrant collection using improved scoring approach.
 ///
 /// # Arguments
@@ -102,37 +125,25 @@ fn is_filename_term(term: &str, query_text: &str) -> bool {
 ///
 /// # Returns
 /// * `Result<QueryResponse>` - The search results from Qdrant.
-pub async fn search_collection<C>(
-    client: Arc<C>,
-    collection_name: &str,
-    embedding_pool: &EmbeddingPool,
-    query_text: &str,
-    limit: u64,
-    filter: Option<Filter>,
-    config: &AppConfig,
-    search_config: Option<SearchConfig>,
-) -> Result<QueryResponse>
+pub async fn search_collection<C>(params: SearchParams<'_, C>) -> Result<QueryResponse>
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
-    let search_config = search_config.unwrap_or_default();
+    let search_config = params.search_config.unwrap_or_default();
     
     log::debug!(
         "Core: Hybrid searching collection \"{}\" for query: \"{}\" with limit {} and filter: {:?}",
-        collection_name,
-        query_text,
-        limit,
-        filter
+        params.collection_name, params.query_text, params.limit, params.filter
     );
 
     // --- Load Vocabulary --- 
     // Use helper function to get the correct path
-    let vocab_path = config::get_vocabulary_path(config, collection_name)?;
-    log::info!("Attempting to load vocabulary for collection '{}' from path: {}", collection_name, vocab_path.display());
+    let vocab_path = config::get_vocabulary_path(params.config, params.collection_name)?;
+    log::info!("Attempting to load vocabulary for collection '{}' from path: {}", params.collection_name, vocab_path.display());
     let vocabulary_manager = match VocabularyManager::load(&vocab_path) {
         Ok(vm) => {
             if vm.is_empty() {
-                log::warn!("Vocabulary for collection '{}' is empty. Performing dense-only search.", collection_name);
+                log::warn!("Vocabulary for collection '{}' is empty. Performing dense-only search.", params.collection_name);
             }
             Some(vm)
         },
@@ -145,7 +156,7 @@ where
 
     // 1. Generate dense embedding for the query using EmbeddingPool
     let query_chunk = ProcessedChunk {
-        content: query_text.to_string(),
+        content: params.query_text.to_string(),
         metadata: ChunkMetadata {
             file_path: std::path::PathBuf::from("query"),
             start_line: 0,
@@ -158,7 +169,7 @@ where
         id: "query".to_string(),
     };
     
-    let embedded_chunks = embedding_pool.process_chunks(vec![query_chunk]).await
+    let embedded_chunks = params.embedding_pool.process_chunks(vec![query_chunk]).await
         .map_err(|e| SagittaError::EmbeddingError(e.to_string()))?;
     
     let dense_query_embedding = embedded_chunks.into_iter().next()
@@ -170,7 +181,7 @@ where
     // 1b. Generate Sparse Query Vector with improved tokenization and scoring
     let sparse_query_vec = if let Some(ref vocab_manager) = vocabulary_manager {
         let tokenizer_config = TokenizerConfig::default();
-        let query_tokens = tokenizer::tokenize_code(query_text, &tokenizer_config);
+        let query_tokens = tokenizer::tokenize_code(params.query_text, &tokenizer_config);
         
         // Build term frequency map for the query
         let mut query_term_freq: HashMap<String, u32> = HashMap::new();
@@ -192,7 +203,7 @@ where
                 };
                 
                 // Boost score for filename matches
-                let final_score = if is_filename_term(&term, query_text) {
+                let final_score = if is_filename_term(&term, params.query_text) {
                     tf_score * search_config.filename_boost
                 } else {
                     tf_score
@@ -206,26 +217,26 @@ where
         log::debug!("Core: Generated sparse query vector with {} unique terms using improved scoring.", sparse_vec.len());
         sparse_vec
     } else {
-        log::info!("No vocabulary available for collection '{}'. Performing dense-only search.", collection_name);
+        log::info!("No vocabulary available for collection '{}'. Performing dense-only search.", params.collection_name);
         Vec::new()
     };
 
     // Define prefetch parameters with adaptive sizing
-    let dense_prefetch_limit = limit * search_config.dense_prefetch_multiplier;
-    let sparse_prefetch_limit = limit * search_config.sparse_prefetch_multiplier;
+    let dense_prefetch_limit = params.limit * search_config.dense_prefetch_multiplier;
+    let sparse_prefetch_limit = params.limit * search_config.sparse_prefetch_multiplier;
 
     // 2. Build hybrid search request using improved fusion
     let mut dense_prefetch_builder = PrefetchQueryBuilder::default()
         .query(Query::new_nearest(dense_query_embedding.clone())) // Use dense vector
         .using("dense") // Specify dense vector name
         .limit(dense_prefetch_limit);
-    if let Some(f) = filter.clone() { // Clone filter for dense prefetch
+    if let Some(f) = params.filter.clone() { // Clone filter for dense prefetch
         dense_prefetch_builder = dense_prefetch_builder.filter(f);
     }
     let dense_prefetch = dense_prefetch_builder;
 
     // Only add sparse prefetch if the query vector is not empty
-    let mut query_builder = QueryPointsBuilder::new(collection_name)
+    let mut query_builder = QueryPointsBuilder::new(params.collection_name)
         .add_prefetch(dense_prefetch); // Always add dense prefetch
     
     if !sparse_query_vec.is_empty() {
@@ -233,7 +244,7 @@ where
             .query(sparse_query_vec) // Pass Vec<(u32, f32)> directly
             .using("sparse_tf") 
             .limit(sparse_prefetch_limit);
-        if let Some(f) = filter { // Use original filter for sparse prefetch
+        if let Some(f) = params.filter { // Use original filter for sparse prefetch
             sparse_prefetch_builder = sparse_prefetch_builder.filter(f);
         }
         let sparse_prefetch = sparse_prefetch_builder;
@@ -241,7 +252,7 @@ where
         log::debug!("Core: Using hybrid search (dense + sparse) with {} fusion.", 
                    match search_config.fusion_method { FusionMethod::Rrf => "RRF", FusionMethod::Dbsf => "DBSF" });
     } else {
-        log::info!("Performing dense-only search for query: '{}'", query_text);
+        log::info!("Performing dense-only search for query: '{}'", params.query_text);
     }
 
     // Choose fusion method based on config
@@ -251,7 +262,7 @@ where
     };
 
     query_builder = query_builder.query(Query::new_fusion(fusion)) // Use configured fusion
-        .limit(limit) // Apply final limit after fusion
+        .limit(params.limit) // Apply final limit after fusion
         .with_payload(true); // Include payload in final results
 
     // Apply score threshold if configured
@@ -264,7 +275,7 @@ where
     // 3. Perform search using query endpoint
     log::debug!("Core: Executing hybrid search request with {} fusion...", 
                match search_config.fusion_method { FusionMethod::Rrf => "RRF", FusionMethod::Dbsf => "DBSF" });
-    let search_response = client.query(query_request).await?; // Use query method
+    let search_response = params.client.query(query_request).await?; // Use query method
     log::info!("Found {} search results after {} fusion.", search_response.result.len(),
               match search_config.fusion_method { FusionMethod::Rrf => "RRF", FusionMethod::Dbsf => "DBSF" });
     Ok(search_response)
@@ -294,7 +305,10 @@ pub fn document_search_config() -> SearchConfig {
     }
 }
 
-// Legacy function for backward compatibility
+/// Legacy function for backward compatibility with the old search API.
+/// 
+/// This function wraps the new `search_collection` function to maintain
+/// compatibility with existing code that uses the old parameter structure.
 pub async fn search_collection_legacy<C>(
     client: Arc<C>,
     collection_name: &str,
@@ -307,7 +321,16 @@ pub async fn search_collection_legacy<C>(
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
-    search_collection(client, collection_name, embedding_pool, query_text, limit, filter, config, None).await
+    search_collection(SearchParams {
+        client,
+        collection_name,
+        embedding_pool,
+        query_text,
+        limit,
+        filter,
+        config,
+        search_config: None,
+    }).await
 }
 
 // Potential future function specifically for repositories?
@@ -409,16 +432,16 @@ mod tests {
         manual_mock_client.expect_query(expected_response);
 
         // Act
-        let result = search_collection(
-            client_arc,
+        let result = search_collection(SearchParams {
+            client: client_arc,
             collection_name,
-            &embedder_pool, // Changed from embedder_handler to embedder_pool
+            embedding_pool: &embedder_pool, // Changed from embedder_handler to embedder_pool
             query_text,
             limit,
-            None,
-            &dummy_config, // Pass config
-            None, // Pass None for default search config
-        ).await;
+            filter: None,
+            config: &dummy_config, // Pass config
+            search_config: None, // Pass None for default search config
+        }).await;
 
         // Assert
         // assert!(result.is_ok(), "search_collection failed: {:?}", result.err()); // Too strict, dummy ONNX may fail

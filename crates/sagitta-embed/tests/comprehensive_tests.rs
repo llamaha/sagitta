@@ -1,9 +1,9 @@
 //! Comprehensive tests for sagitta-embed crate functionality
 
 use sagitta_embed::{
-    EmbeddingConfig, EmbeddingHandler, EmbeddingPool,
+    EmbeddingConfig, EmbeddingPool,
     EmbeddingModelType, ProcessingConfig, DefaultFileProcessor, FileProcessor,
-    EmbeddingProcessor, SagittaEmbedError, Result
+    EmbeddingProcessor, SagittaEmbedError
 };
 use sagitta_embed::config::EmbeddingConfigBuilder;
 use std::path::PathBuf;
@@ -151,7 +151,7 @@ fn test_embedding_config_dimension_validation() {
             expected_dimension: Some(dim),
             ..Default::default()
         };
-        assert!(config.validate().is_ok(), "Dimension {} should be valid", dim);
+        assert!(config.validate().is_ok(), "Dimension {dim} should be valid");
     }
 
     // Test zero dimension - should also be valid since there's no validation
@@ -211,7 +211,7 @@ async fn test_file_processor_error_handling() {
         SagittaEmbedError::InvalidInput { .. } => {
             // Expected error type
         }
-        other => panic!("Expected InvalidInput error, got: {:?}", other),
+        other => panic!("Expected InvalidInput error, got: {other:?}"),
     }
 }
 
@@ -228,7 +228,7 @@ async fn test_file_processor_nonexistent_file() {
         SagittaEmbedError::FileSystem { .. } => {
             // Expected error type
         }
-        other => panic!("Expected FileSystem error, got: {:?}", other),
+        other => panic!("Expected FileSystem error, got: {other:?}"),
     }
 }
 
@@ -284,12 +284,12 @@ async fn test_file_processor_different_languages() {
             if !chunks.is_empty() {
                 // Check that language detection works
                 assert_eq!(chunks[0].metadata.language, expected_lang, 
-                          "Language detection failed for {}", filename);
+                          "Language detection failed for {filename}");
                 
                 // Check that file extension is captured
-                let expected_ext = filename.split('.').last().unwrap();
+                let expected_ext = filename.split('.').next_back().unwrap();
                 assert_eq!(chunks[0].metadata.file_extension, expected_ext,
-                          "File extension detection failed for {}", filename);
+                          "File extension detection failed for {filename}");
             }
         }
     }
@@ -344,7 +344,7 @@ fn test_constants() {
     
     assert_eq!(DEFAULT_EMBEDDING_DIMENSION, 384);
     assert_eq!(DEFAULT_SESSION_TIMEOUT_SECONDS, 300);
-    assert_eq!(DEFAULT_ENABLE_SESSION_CLEANUP, true);
+    assert!(DEFAULT_ENABLE_SESSION_CLEANUP);
     assert_eq!(DEFAULT_EMBEDDING_BATCH_SIZE, 256);
 }
 

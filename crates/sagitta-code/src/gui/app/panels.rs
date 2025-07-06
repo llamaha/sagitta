@@ -1,10 +1,10 @@
 // Panel management for the Sagitta Code application
 
-use std::sync::Arc;
-use egui::{Context, ScrollArea, Window, RichText, Color32, TextEdit, ComboBox, Button, Vec2, Rounding, TextFormat, TextStyle};
+use egui::{Context, ScrollArea, RichText, Color32, ComboBox, Button, TextFormat};
 use egui_plot::{Line, Plot, Bar, BarChart, Legend, PlotPoints};
 use super::super::theme::AppTheme;
 use super::super::theme_customizer::ThemeCustomizer;
+use super::super::git_history::GitHistoryModal;
 use crate::agent::conversation::types::ProjectType;
 use crate::agent::conversation::analytics::AnalyticsReport;
 use std::path::PathBuf;
@@ -21,11 +21,11 @@ static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
 static THEME_SET: OnceLock<ThemeSet> = OnceLock::new();
 
 fn get_syntax_set() -> &'static SyntaxSet {
-    SYNTAX_SET.get_or_init(|| SyntaxSet::load_defaults_newlines())
+    SYNTAX_SET.get_or_init(SyntaxSet::load_defaults_newlines)
 }
 
 fn get_theme_set() -> &'static ThemeSet {
-    THEME_SET.get_or_init(|| ThemeSet::load_defaults())
+    THEME_SET.get_or_init(ThemeSet::load_defaults)
 }
 
 /// Get file extension from path
@@ -56,6 +56,7 @@ pub enum ActivePanel {
     Analytics,
     ThemeCustomizer,
     ModelSelection,
+    GitHistory,
 }
 
 
@@ -64,6 +65,12 @@ pub struct PreviewPanel {
     pub visible: bool,
     pub content: String,
     pub title: String,
+}
+
+impl Default for PreviewPanel {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PreviewPanel {
@@ -92,7 +99,7 @@ impl PreviewPanel {
         egui::SidePanel::right("preview_panel")
             .resizable(true)
             .default_width(400.0)
-            .frame(egui::Frame::none().fill(theme.panel_background()))
+            .frame(egui::Frame::NONE.fill(theme.panel_background()))
             .show(ctx, |ui| {
                 ui.vertical(|ui| {
                     ui.heading("Preview Panel");
@@ -161,7 +168,7 @@ impl PreviewPanel {
     }
     
     /// Render formatted content (for non-file content or fallback)
-    fn render_formatted_content(&self, ui: &mut egui::Ui, theme: AppTheme) {
+    fn render_formatted_content(&self, ui: &mut egui::Ui, _theme: AppTheme) {
         // Use monospace font for better readability
         let font_id = egui::FontId::monospace(12.0);
         ui.label(egui::RichText::new(&self.content).font(font_id));
@@ -234,7 +241,7 @@ impl PreviewPanel {
         let font_id = egui::FontId::monospace(12.0);
         
         // Show file path header
-        ui.label(egui::RichText::new(&format!("File: {}", file_path))
+        ui.label(egui::RichText::new(format!("File: {file_path}"))
             .font(font_id.clone())
             .color(theme.accent_color()));
         ui.separator();
@@ -275,6 +282,12 @@ pub struct LoggingPanel {
     pub filter_sagitta_code_only: bool,
 }
 
+impl Default for LoggingPanel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LoggingPanel {
     pub fn new() -> Self {
         Self {
@@ -313,21 +326,21 @@ impl LoggingPanel {
         egui::SidePanel::right("logging_panel")
             .resizable(true)
             .default_width(500.0)
-            .frame(egui::Frame::none().fill(theme.panel_background()))
+            .frame(egui::Frame::NONE.fill(theme.panel_background()))
             .show(ctx, |ui| {
                 ui.heading("Sagitta Code Logs");
                 ui.horizontal(|ui| {
                     if ui.button("Copy 10s").clicked() {
                         let logs = self.get_recent_logs(10);
-                        ui.output_mut(|o| o.copied_text = logs);
+                        ui.ctx().copy_text(logs);
                     }
                     if ui.button("Copy 30s").clicked() {
                         let logs = self.get_recent_logs(30);
-                        ui.output_mut(|o| o.copied_text = logs);
+                        ui.ctx().copy_text(logs);
                     }
                     if ui.button("Copy 60s").clicked() {
                         let logs = self.get_recent_logs(60);
-                        ui.output_mut(|o| o.copied_text = logs);
+                        ui.ctx().copy_text(logs);
                     }
                 });
                 ui.separator();
@@ -362,6 +375,12 @@ pub struct EventsPanel {
     pub visible: bool,
     pub events: Vec<SystemEvent>,
     pub max_events: usize,
+}
+
+impl Default for EventsPanel {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl EventsPanel {
@@ -401,7 +420,7 @@ impl EventsPanel {
             .default_width(400.0)
             .default_height(300.0)
             .resizable(true)
-            .frame(egui::Frame::none().fill(theme.panel_background()))
+            .frame(egui::Frame::NONE.fill(theme.panel_background()))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Recent system events and tool executions");
@@ -429,7 +448,7 @@ impl EventsPanel {
                                     let elapsed = now.saturating_sub(secs);
                                     
                                     if elapsed < 60 {
-                                        format!("{}s ago", elapsed)
+                                        format!("{elapsed}s ago")
                                     } else if elapsed < 3600 {
                                         format!("{}m ago", elapsed / 60)
                                     } else {
@@ -473,6 +492,13 @@ pub struct PanelManager {
     pub analytics_panel: AnalyticsPanel,
     pub theme_customizer: ThemeCustomizer,
     pub model_selection_panel: ModelSelectionPanel,
+    pub git_history_modal: GitHistoryModal,
+}
+
+impl Default for PanelManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PanelManager {
@@ -485,6 +511,7 @@ impl PanelManager {
             analytics_panel: AnalyticsPanel::new(),
             theme_customizer: ThemeCustomizer::new(),
             model_selection_panel: ModelSelectionPanel::new(),
+            git_history_modal: GitHistoryModal::new(),
         }
     }
 
@@ -497,6 +524,11 @@ impl PanelManager {
     /// Get the current model from the model selection panel
     pub fn get_current_model(&self) -> &str {
         self.model_selection_panel.get_current_model()
+    }
+
+    /// Set the repository path for git history modal
+    pub fn set_git_repository(&mut self, path: PathBuf) {
+        self.git_history_modal.set_repository(path);
     }
 
     /// Render the model selection panel and return any selected model
@@ -517,7 +549,7 @@ impl PanelManager {
     }
 
     pub fn show_preview(&mut self, title: &str, content: &str) {
-        log::debug!("show_preview called with title: {}", title);
+        log::debug!("show_preview called with title: {title}");
         self.preview_panel.set_content(title, content);
         
         // Automatically open the preview panel if it's not already open
@@ -605,6 +637,16 @@ impl PanelManager {
                     self.active_panel = ActivePanel::ModelSelection;
                 }
             },
+            ActivePanel::GitHistory => {
+                if matches!(self.active_panel, ActivePanel::GitHistory) {
+                    self.git_history_modal.toggle(); // Close
+                    self.active_panel = ActivePanel::None;
+                } else {
+                    self.close_all_panels();
+                    self.git_history_modal.toggle(); // Open
+                    self.active_panel = ActivePanel::GitHistory;
+                }
+            },
             ActivePanel::None => {
                 self.close_all_panels();
             }
@@ -636,6 +678,11 @@ impl PanelManager {
             ActivePanel::ModelSelection => {
                 if self.model_selection_panel.visible {
                     self.model_selection_panel.toggle(); // Close
+                }
+            },
+            ActivePanel::GitHistory => {
+                if self.git_history_modal.visible {
+                    self.git_history_modal.toggle(); // Close
                 }
             },
             _ => {}
@@ -761,6 +808,12 @@ pub enum AnalyticsAction {
     FilterByDateRange(DateRangeFilter),
 }
 
+impl Default for AnalyticsPanel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AnalyticsPanel {
     pub fn new() -> Self {
         Self {
@@ -866,13 +919,13 @@ impl AnalyticsPanel {
             .default_width(900.0)
             .min_width(600.0)
             .resizable(true)
-            .frame(egui::Frame::none()
+            .frame(egui::Frame::NONE
                 .fill(theme.panel_background())
                 .inner_margin(egui::Margin::same(10)))
             .show(ctx, |ui| {
                 // Main scrollable area for the entire panel
                 egui::ScrollArea::vertical()
-                    .id_source("analytics_main_scroll")
+                    .id_salt("analytics_main_scroll")
                     .show(ui, |ui| {
                 // Header with title and controls
                 ui.horizontal(|ui| {
@@ -913,7 +966,7 @@ impl AnalyticsPanel {
                     ComboBox::from_label("Project")
                         .selected_text(match &self.project_filter {
                             ProjectFilter::All => "All Projects".to_string(),
-                            ProjectFilter::Specific(project_type) => format!("{:?}", project_type),
+                            ProjectFilter::Specific(project_type) => format!("{project_type:?}"),
                         })
                         .show_ui(ui, |ui| {
                             ui.selectable_value(&mut self.project_filter, ProjectFilter::All, "All Projects");
@@ -1023,11 +1076,11 @@ impl AnalyticsPanel {
         
         ui.heading("Overall Summary (Filtered)");
         ui.label(format!("Total API Calls: {}", filtered_entries.len()));
-        ui.label(format!("Total Input Tokens: {}", total_input_tokens));
-        ui.label(format!("Total Output Tokens: {}", total_output_tokens));
+        ui.label(format!("Total Input Tokens: {total_input_tokens}"));
+        ui.label(format!("Total Output Tokens: {total_output_tokens}"));
         ui.label(format!("Total Combined Tokens: {}", total_input_tokens + total_output_tokens));
-        ui.label(format!("Estimated Total Cost: ${:.6}", total_cost));
-        ui.label(RichText::new(format!("(Prices based on Gemini 1.5 Flash: Input ${}/1M, Output ${}/1M tokens)", GEMINI_1_5_FLASH_INPUT_COST_PER_MILLION_TOKENS, GEMINI_1_5_FLASH_OUTPUT_COST_PER_MILLION_TOKENS)).small().weak());
+        ui.label(format!("Estimated Total Cost: ${total_cost:.6}"));
+        ui.label(RichText::new(format!("(Prices based on Gemini 1.5 Flash: Input ${GEMINI_1_5_FLASH_INPUT_COST_PER_MILLION_TOKENS}/1M, Output ${GEMINI_1_5_FLASH_OUTPUT_COST_PER_MILLION_TOKENS}/1M tokens)")).small().weak());
         
         ui.separator();
 
@@ -1038,7 +1091,7 @@ impl AnalyticsPanel {
             let current_selected_id = selected_id_val.clone();
 
             // --- Detailed Conversation View ---
-            ui.heading(format!("Details for Conversation: {}", current_selected_id));
+            ui.heading(format!("Details for Conversation: {current_selected_id}"));
             if ui.button("⬅ Back to Summary").clicked() {
                 clear_selection = true;
             }
@@ -1053,7 +1106,7 @@ impl AnalyticsPanel {
                 ui.label("No token usage entries found for this conversation.");
             } else {
                 ScrollArea::vertical().show(ui, |ui| {
-                    egui::Grid::new(format!("details_{}", current_selected_id)).striped(true).show(ui, |ui| {
+                    egui::Grid::new(format!("details_{current_selected_id}")).striped(true).show(ui, |ui| {
                         // Header
                         ui.label(RichText::new("Time").strong());
                         ui.label(RichText::new("Model").strong());
@@ -1153,7 +1206,7 @@ impl AnalyticsPanel {
 
             for (i, conv_id) in conv_ids.iter().enumerate() {
                 if let Some(summary) = self.conversation_summaries.get(conv_id) {
-                    bars.push(Bar::new(i as f64 + 0.5, summary.total_cost).width(0.95).name(format!("{}", &conv_id[..conv_id.len().min(10)]))); // Truncate name for legend
+                    bars.push(Bar::new(i as f64 + 0.5, summary.total_cost).width(0.95).name(conv_id[..conv_id.len().min(10)].to_string())); // Truncate name for legend
                 }
             }
 
@@ -1205,7 +1258,7 @@ impl AnalyticsPanel {
                         Color32::from_rgb(255, 100, 100)
                     };
                     
-                    if ui.add(Button::new(RichText::new(format!("{:.1}%", success_rate))
+                    if ui.add(Button::new(RichText::new(format!("{success_rate:.1}%"))
                         .size(24.0).color(success_color))).clicked() {
                         action = self.handle_success_rate_click();
                     }
@@ -1251,7 +1304,7 @@ impl AnalyticsPanel {
                 ui.label("🕐 Peak Activity Hours:");
                 let peak_hours: Vec<String> = report.overall_metrics.peak_activity_hours
                     .iter()
-                    .map(|h| format!("{}:00", h))
+                    .map(|h| format!("{h}:00"))
                     .collect();
                 ui.label(peak_hours.join(", "));
             });
@@ -1304,7 +1357,7 @@ impl AnalyticsPanel {
                     ui.set_min_width(140.0);
                     ui.vertical(|ui| {
                         ui.label(RichText::new("Est. Cost").strong());
-                        ui.label(RichText::new(format!("${:.2}", cost))
+                        ui.label(RichText::new(format!("${cost:.2}"))
                             .size(20.0).color(theme.accent_color()));
                     });
                 });
@@ -1323,8 +1376,8 @@ impl AnalyticsPanel {
             ui.label("Token Distribution by Role:");
             for (role, tokens) in &report.token_usage_metrics.tokens_by_role {
                 ui.horizontal(|ui| {
-                    ui.label(format!("{}: ", role));
-                    ui.label(RichText::new(format!("{} tokens", tokens)).color(theme.accent_color()));
+                    ui.label(format!("{role}: "));
+                    ui.label(RichText::new(format!("{tokens} tokens")).color(theme.accent_color()));
                 });
             }
         }
@@ -1342,7 +1395,7 @@ impl AnalyticsPanel {
             for (i, (project_type, count)) in project_types.iter().enumerate() {
                 bars.push(Bar::new(i as f64 + 0.5, **count as f64)
                     .width(0.8)
-                    .name(format!("{:?}", project_type)));
+                    .name(format!("{project_type:?}")));
             }
             
             let chart = BarChart::new(bars)
@@ -1361,7 +1414,7 @@ impl AnalyticsPanel {
     }
 
     /// Render the success tab
-    fn render_success_tab(&mut self, ui: &mut egui::Ui, report: &AnalyticsReport, theme: AppTheme) -> Option<AnalyticsAction> {
+    fn render_success_tab(&mut self, ui: &mut egui::Ui, report: &AnalyticsReport, _theme: AppTheme) -> Option<AnalyticsAction> {
         let mut action = None;
         
         ui.horizontal(|ui| {
@@ -1382,7 +1435,7 @@ impl AnalyticsPanel {
             ui.vertical(|ui| {
                 ui.label(RichText::new("Overall Success Rate").strong());
                 let success_rate = report.success_metrics.overall_success_rate * 100.0;
-                ui.label(RichText::new(format!("{:.1}%", success_rate)).size(20.0));
+                ui.label(RichText::new(format!("{success_rate:.1}%")).size(20.0));
                 
                 if self.show_success_details {
                     ui.separator();
@@ -1405,7 +1458,7 @@ impl AnalyticsPanel {
             
             for (project_type, success_rate) in project_success {
                 ui.horizontal(|ui| {
-                    ui.label(format!("{:?}:", project_type));
+                    ui.label(format!("{project_type:?}:"));
                     let rate_percent = success_rate * 100.0;
                     let color = if rate_percent >= 80.0 {
                         Color32::from_rgb(0, 200, 0)
@@ -1414,7 +1467,7 @@ impl AnalyticsPanel {
                     } else {
                         Color32::from_rgb(255, 100, 100)
                     };
-                    ui.colored_label(color, format!("{:.1}%", rate_percent));
+                    ui.colored_label(color, format!("{rate_percent:.1}%"));
                 });
             }
         }
@@ -1450,7 +1503,7 @@ impl AnalyticsPanel {
                         if !failure_point.mitigations.is_empty() {
                             ui.label("Suggested mitigations:");
                             for mitigation in &failure_point.mitigations {
-                                ui.label(format!("  • {}", mitigation));
+                                ui.label(format!("  • {mitigation}"));
                             }
                         }
                     });
@@ -1534,7 +1587,7 @@ impl AnalyticsPanel {
                         if !pattern.characteristics.is_empty() {
                             ui.label("Characteristics:");
                             for characteristic in &pattern.characteristics {
-                                ui.label(format!("  • {}", characteristic));
+                                ui.label(format!("  • {characteristic}"));
                             }
                         }
                     });
@@ -1560,7 +1613,7 @@ impl AnalyticsPanel {
                         if !flow.states.is_empty() {
                             ui.label("Flow States:");
                             for state in &flow.states {
-                                ui.label(format!("  → {}", state));
+                                ui.label(format!("  → {state}"));
                             }
                         }
                     });
@@ -1635,7 +1688,7 @@ impl AnalyticsPanel {
                         if !anomaly.investigation_steps.is_empty() {
                             ui.label("Investigation Steps:");
                             for step in &anomaly.investigation_steps {
-                                ui.label(format!("  • {}", step));
+                                ui.label(format!("  • {step}"));
                             }
                         }
                     });
@@ -1670,7 +1723,7 @@ impl AnalyticsPanel {
                         } else {
                             Color32::from_rgb(255, 100, 100)
                         };
-                        ui.colored_label(color, format!("Success: {:.1}%", success_rate));
+                        ui.colored_label(color, format!("Success: {success_rate:.1}%"));
                     });
                     
                     ui.separator();
@@ -1685,7 +1738,7 @@ impl AnalyticsPanel {
                     if !insight.typical_patterns.is_empty() {
                         ui.label("Typical Patterns:");
                         for pattern in &insight.typical_patterns {
-                            ui.label(format!("  • {}", pattern));
+                            ui.label(format!("  • {pattern}"));
                         }
                     }
                     
@@ -1693,7 +1746,7 @@ impl AnalyticsPanel {
                     if !insight.recommendations.is_empty() {
                         ui.label("Recommendations:");
                         for recommendation in &insight.recommendations {
-                            ui.colored_label(theme.accent_color(), format!("  → {}", recommendation));
+                            ui.colored_label(theme.accent_color(), format!("  → {recommendation}"));
                         }
                     }
                 });
@@ -1704,7 +1757,7 @@ impl AnalyticsPanel {
     }
 
     /// Render the trends tab
-    fn render_trends_tab(&mut self, ui: &mut egui::Ui, report: &AnalyticsReport, theme: AppTheme) {
+    fn render_trends_tab(&mut self, ui: &mut egui::Ui, report: &AnalyticsReport, _theme: AppTheme) {
         ui.heading("📈 Trending Topics");
         ui.add_space(10.0);
         
@@ -1737,14 +1790,14 @@ impl AnalyticsPanel {
                     } else {
                         Color32::from_rgb(255, 100, 100)
                     };
-                    ui.colored_label(success_color, format!("Success: {:.1}%", success_rate));
+                    ui.colored_label(success_color, format!("Success: {success_rate:.1}%"));
                 });
                 
                 // Associated project types
                 if !topic.project_types.is_empty() {
                     ui.label(format!("Projects: {}", 
                         topic.project_types.iter()
-                            .map(|pt| format!("{:?}", pt))
+                            .map(|pt| format!("{pt:?}"))
                             .collect::<Vec<_>>()
                             .join(", ")));
                 }
@@ -1783,7 +1836,7 @@ impl AnalyticsPanel {
                         if !recommendation.evidence.is_empty() {
                             ui.label("Evidence:");
                             for evidence in &recommendation.evidence {
-                                ui.label(format!("  • {}", evidence));
+                                ui.label(format!("  • {evidence}"));
                             }
                         }
                     });
@@ -1801,6 +1854,12 @@ pub struct ModelSelectionPanel {
     pub current_model: String,
 }
 
+
+impl Default for ModelSelectionPanel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ModelSelectionPanel {
     pub fn new() -> Self {
@@ -1822,7 +1881,7 @@ impl ModelSelectionPanel {
         &self.current_model
     }
 
-    pub fn render(&mut self, ui: &mut egui::Ui, theme: &crate::gui::theme::AppTheme) -> bool {
+    pub fn render(&mut self, ui: &mut egui::Ui, _theme: &crate::gui::theme::AppTheme) -> bool {
         let mut model_changed = false;
         
         if self.visible {

@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Test with a sample text
             let test_text = "This is a test sentence to check the model.";
             println!("\n🧪 Testing inference with sample text:");
-            println!("  Text: \"{}\"", test_text);
+            println!("  Text: \"{test_text}\"");
             
             match model.embed_batch(&[test_text]) {
                 Ok(embeddings) => {
@@ -57,12 +57,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 Err(e) => {
-                    println!("  ❌ Inference failed: {}", e);
+                    println!("  ❌ Inference failed: {e}");
                 }
             }
         }
         Err(e) => {
-            println!("❌ Failed to load model: {}", e);
+            println!("❌ Failed to load model: {e}");
             std::process::exit(1);
         }
     }

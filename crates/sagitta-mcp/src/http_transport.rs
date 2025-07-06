@@ -1,7 +1,7 @@
 use axum::{
     routing::{get, post},
     Router,
-    extract::{State, Query, Extension},
+    extract::{State, Extension},
     response::{sse::Sse, sse::Event, IntoResponse},
     http::{StatusCode, HeaderMap},
     Json,
@@ -12,17 +12,15 @@ use std::convert::Infallible;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, broadcast};
+use tokio::sync::mpsc;
 use tracing::{error, info, warn, instrument};
 use uuid::Uuid;
 use serde_json::json;
 use serde::Deserialize;
 use async_stream;
-use std::sync::RwLock;
 use crate::api_key::InMemoryApiKeyStore;
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
-use sagitta_search::config::AppConfig;
 
 use crate::server::Server;
 use qdrant_client::Qdrant;
@@ -31,10 +29,12 @@ use crate::mcp::error_codes;
 use crate::api_key::ApiKeyStore;
 use crate::handlers::api_key_handler::{create_api_key_handler, list_api_keys_handler, delete_api_key_handler};
 use crate::middleware::auth_middleware::{auth_layer, AuthenticatedUser};
-use axum::middleware;
 use crate::middleware::secure_headers_middleware;
 use std::net::SocketAddr;
 use anyhow::Context;
+
+// Type alias for the SSE stream return type
+type SseStream = Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>;
 
 // Shared state for the Axum application
 #[derive(Clone)]
@@ -49,7 +49,7 @@ pub async fn run_http_server(
     addr_str: String,
     mcp_server_concrete: Server<Qdrant>,
 ) -> anyhow::Result<()> {
-    let config = mcp_server_concrete.get_config().await?;
+    let _config = mcp_server_concrete.get_config().await?;
 
     // Use the concrete type for bootstrapping, then cast to trait object
     let api_key_store_concrete = Arc::new(InMemoryApiKeyStore::default());
@@ -81,10 +81,10 @@ pub async fn run_http_server(
     };
 
     // Initialize streaming progress reports for this server instance
-    let _ = tokio::spawn(start_progress_broadcaster(active_connections.clone()));
+    tokio::spawn(start_progress_broadcaster(active_connections.clone()));
 
     // Extract host and port from the addr string
-    let server_url = format!("http://{}", addr_str);
+    let server_url = format!("http://{addr_str}");
     info!(server_url = %server_url, "Server URL for SSE endpoint");
 
     // Define API Key Management Routes with explicit prefix
@@ -117,7 +117,7 @@ pub async fn run_http_server(
             (StatusCode::NOT_FOUND, format!("Not found: {} {}", req.method(), req.uri().path()))
         });
 
-    let bind_addr: SocketAddr = addr_str.parse().context(format!("Invalid bind address: {}", addr_str))?;
+    let bind_addr: SocketAddr = addr_str.parse().context(format!("Invalid bind address: {addr_str}"))?;
     info!(address = %bind_addr, "Preparing to start HTTP server");
 
     info!(address = %bind_addr, "Starting HTTP server");
@@ -150,7 +150,7 @@ impl Drop for ConnectionGuard {
 async fn sse_handler(
     State(app_state): State<AppState>, 
     headers: HeaderMap, 
-) -> Sse<Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>> {
+) -> Sse<SseStream> {
     let session_id = Uuid::new_v4(); 
     info!(%session_id, "New SSE connection (/sse), establishing session.");
     info!(%session_id, headers = ?headers, "SSE connection headers");
@@ -161,7 +161,7 @@ async fn sse_handler(
         .and_then(|h| h.to_str().ok())
         .unwrap_or("localhost:8080");
     
-    let server_url = format!("http://{}", host);
+    let server_url = format!("http://{host}");
     info!(%session_id, server_url = %server_url, "Using server URL from request headers");
 
     // Create a channel for this connection
@@ -177,7 +177,7 @@ async fn sse_handler(
     // Send initial connection confirmation with session ID in both content and custom headers
     let initial_event = Event::default()
         .event("connection")
-        .id(&session_id.to_string())
+        .id(session_id.to_string())
         .data(json!({
             "type": "connection",
             SESSION_ID_HEADER: session_id.to_string(),
@@ -215,7 +215,7 @@ async fn start_progress_broadcaster(active_connections: Arc<DashMap<Uuid, mpsc::
         if let Some(messages) = crate::progress::take_pending_messages() {
             for msg in messages {
                 // Broadcast to all active connections
-                let connections: Vec<_> = active_connections.iter().map(|item| item.key().clone()).collect();
+                let connections: Vec<_> = active_connections.iter().map(|item| *item.key()).collect();
                 for session_id in connections {
                     if let Some(tx) = active_connections.get(&session_id) {
                         let _ = tx.send(msg.clone()).await;
@@ -303,8 +303,8 @@ async fn mcp_json_rpc_handler(
 }
 
 #[derive(Deserialize)]
-struct ApiKeyQuery {
-    key: String,
+struct _ApiKeyQuery {
+    _key: String,
 }
 
 async fn health_check_handler() -> impl IntoResponse {

@@ -11,9 +11,8 @@ pub struct PythonParser {
     query: Query,
 }
 
-impl PythonParser {
-    /// Creates a new `PythonParser` with the Python grammar and queries.
-    pub fn new() -> Self {
+impl Default for PythonParser {
+    fn default() -> Self {
         let mut parser = Parser::new();
         let language = tree_sitter_python::language();
         parser
@@ -42,6 +41,13 @@ impl PythonParser {
         .expect("Error creating Python query");
 
         PythonParser { parser, query }
+    }
+}
+
+impl PythonParser {
+    /// Creates a new `PythonParser` with the Python grammar and queries.
+    pub fn new() -> Self {
+        Self::default()
     }
 
     fn node_to_chunk(
@@ -139,12 +145,10 @@ impl SyntaxParser for PythonParser {
                 // }
 
                 // Apply filters based on node type and content (e.g., for top-level items)
-                if node.parent().map_or(false, |p| p.kind() == "module") {
-                    if capture_name == "expr_stmt" {
-                        if is_docstring(node) || is_pass_stmt(node, code_bytes) {
-                            continue; // Skip docstrings and top-level 'pass'
-                        }
-                    }
+                if node.parent().is_some_and(|p| p.kind() == "module") 
+                    && capture_name == "expr_stmt" 
+                    && (is_docstring(node) || is_pass_stmt(node, code_bytes)) {
+                    continue; // Skip docstrings and top-level 'pass'
                 }
 
                 if let Some(chunk) = self.node_to_chunk(node, code, file_path, capture_name) {
@@ -162,8 +166,7 @@ impl SyntaxParser for PythonParser {
         // Fallback: If no chunks found, split into fallback chunks
         if chunks.is_empty() && !code.trim().is_empty() {
             log::debug!(
-                "No Python items found in {}, splitting into fallback chunks.",
-                file_path
+                "No Python items found in {file_path}, splitting into fallback chunks."
             );
             let lines: Vec<&str> = code.lines().collect();
             let num_lines = lines.len();
@@ -184,7 +187,7 @@ impl SyntaxParser for PythonParser {
                     start_line,
                     end_line,
                     language: "python".to_string(),
-                    element_type: format!("fallback_chunk_{}", i),
+                    element_type: format!("fallback_chunk_{i}"),
                 });
             }
         }

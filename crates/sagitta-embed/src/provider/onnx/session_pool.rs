@@ -61,7 +61,7 @@ impl EmbeddingProvider for OnnxSessionPool {
         EmbeddingModelType::Onnx
     }
 
-    fn embed_batch<'a>(&self, texts: &[&'a str]) -> Result<Vec<Vec<f32>>> {
+    fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         let session = self.get_session()?;
         session.embed_batch(texts)
     }
@@ -114,9 +114,9 @@ impl OnnxSessionPool {
             match OnnxEmbeddingModel::new(&self.model_path, &self.tokenizer_path) {
                 Ok(session) => new_sessions.push(session),
                 Err(e) => {
-                    log::error!("Failed to create new ONNX session during reconnect: {}", e);
+                    log::error!("Failed to create new ONNX session during reconnect: {e}");
                     return Err(SagittaEmbedError::model(format!(
-                        "Failed to reconnect ONNX sessions: {}", e
+                        "Failed to reconnect ONNX sessions: {e}"
                     )));
                 }
             }
@@ -171,7 +171,7 @@ impl ThreadSafeSessionPool {
     /// If a pool already exists for the current thread, it is returned.
     /// Otherwise, a new pool is created, added to the central list, and returned.
     pub fn get_pool(&self) -> Result<OnnxSessionPool> {
-        let thread_id = thread::current().id();
+        let _thread_id = thread::current().id();
         let mut pools = self.thread_pools.lock().unwrap();
         
         // Try to find existing pool for this thread
@@ -236,7 +236,7 @@ impl EmbeddingProvider for ThreadSafeSessionPool {
         EmbeddingModelType::Onnx
     }
 
-    fn embed_batch<'a>(&self, texts: &[&'a str]) -> Result<Vec<Vec<f32>>> {
+    fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         self.embed_batch(texts)
     }
 }

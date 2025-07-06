@@ -6,7 +6,7 @@ use qdrant_client::qdrant::{
     UpsertPoints, PointsOperationResponse, CreateCollection, Distance,
     VectorParamsBuilder, QueryPoints, QueryResponse,
     VectorsConfig, VectorParamsMap, vectors_config::Config as VectorsConfig_oneof_config,
-    SparseVectorParams, SparseVectorConfig, Modifier, ListCollectionsRequest
+    SparseVectorParams, SparseVectorConfig, Modifier
 };
 use qdrant_client::Qdrant;
 // Import our custom error type instead
@@ -54,41 +54,41 @@ pub trait QdrantClientTrait: Send + Sync {
 #[async_trait]
 impl QdrantClientTrait for Qdrant {
     async fn health_check(&self) -> Result<HealthCheckReply> {
-        self.health_check().await.map_err(|e| SagittaError::QdrantError(e))
+        self.health_check().await.map_err(|e| SagittaError::QdrantError(Box::new(e)))
     }
 
     async fn delete_collection(&self, collection_name: String) -> Result<bool> {
         let request = DeleteCollection {
-            collection_name: collection_name,
+            collection_name,
             ..Default::default()
         };
-        Ok(self.delete_collection(request).await.map_err(|e| SagittaError::QdrantError(e))?.result)
+        Ok(self.delete_collection(request).await.map_err(|e| SagittaError::QdrantError(Box::new(e)))?.result)
     }
 
     async fn search_points(&self, request: SearchPoints) -> Result<SearchResponse> {
-        self.search_points(request).await.map_err(|e| SagittaError::QdrantError(e))
+        self.search_points(request).await.map_err(|e| SagittaError::QdrantError(Box::new(e)))
     }
 
     async fn get_collection_info(&self, collection_name: String) -> Result<CollectionInfo> {
         let request = GetCollectionInfoRequest {
             collection_name: collection_name.clone(),
         };
-        let response = self.collection_info(request).await.map_err(|e| SagittaError::QdrantError(e))?;
+        let response = self.collection_info(request).await.map_err(|e| SagittaError::QdrantError(Box::new(e)))?;
         match response.result {
             Some(info) => Ok(info),
             None => {
-                let err_msg = format!("Collection info not found for '{}'", collection_name);
+                let err_msg = format!("Collection info not found for '{collection_name}'");
                 Err(SagittaError::RepositoryNotFound(err_msg))
             }
         }
     }
 
     async fn count(&self, request: CountPoints) -> Result<CountResponse> {
-        self.count(request).await.map_err(|e| SagittaError::QdrantError(e))
+        self.count(request).await.map_err(|e| SagittaError::QdrantError(Box::new(e)))
     }
 
     async fn collection_exists(&self, collection_name: String) -> Result<bool> {
-        self.collection_exists(collection_name).await.map_err(|e| SagittaError::QdrantError(e))
+        self.collection_exists(collection_name).await.map_err(|e| SagittaError::QdrantError(Box::new(e)))
     }
 
     async fn delete_points_blocking(&self, collection_name: &str, points_selector: &PointsSelector) -> Result<()> {
@@ -98,16 +98,16 @@ impl QdrantClientTrait for Qdrant {
             points: Some(points_selector.clone()),
             ..Default::default()
         };
-        self.delete_points(request).await.map_err(|e| SagittaError::QdrantError(e))?;
+        self.delete_points(request).await.map_err(|e| SagittaError::QdrantError(Box::new(e)))?;
         Ok(())
     }
 
     async fn scroll(&self, request: ScrollPoints) -> Result<ScrollResponse> {
-        self.scroll(request).await.map_err(|e| SagittaError::QdrantError(e))
+        self.scroll(request).await.map_err(|e| SagittaError::QdrantError(Box::new(e)))
     }
 
     async fn upsert_points(&self, request: UpsertPoints) -> Result<PointsOperationResponse> {
-        self.upsert_points(request).await.map_err(|e| SagittaError::QdrantError(e))
+        self.upsert_points(request).await.map_err(|e| SagittaError::QdrantError(Box::new(e)))
     }
     
     async fn create_collection(&self, collection_name: &str, vector_dimension: u64) -> Result<bool> {
@@ -117,7 +117,7 @@ impl QdrantClientTrait for Qdrant {
             config: Some(VectorsConfig_oneof_config::ParamsMap(VectorParamsMap {
                 map: std::collections::HashMap::from([( 
                     "dense".to_string(), 
-                    dense_params.into(),
+                    dense_params,
                 )])
             }))
         };
@@ -142,29 +142,36 @@ impl QdrantClientTrait for Qdrant {
             ..Default::default()
         };
         
-        let response = self.create_collection(request).await.map_err(|e| SagittaError::QdrantError(e))?;
+        let response = self.create_collection(request).await.map_err(|e| SagittaError::QdrantError(Box::new(e)))?;
         Ok(response.result)
     }
     
     async fn create_collection_detailed(&self, request: CreateCollection) -> Result<bool> {
-        let response = self.create_collection(request).await.map_err(|e| SagittaError::QdrantError(e))?;
+        let response = self.create_collection(request).await.map_err(|e| SagittaError::QdrantError(Box::new(e)))?;
         Ok(response.result)
     }
     
     async fn delete_points(&self, request: DeletePoints) -> Result<PointsOperationResponse> {
-        self.delete_points(request).await.map_err(SagittaError::from)
+        // Use the qdrant client's delete_points method
+        Qdrant::delete_points(self, request).await
+            .map_err(|e| SagittaError::QdrantError(Box::new(e)))
     }
 
     async fn query_points(&self, request: QueryPoints) -> Result<QueryResponse> {
-        self.query_points(request).await.map_err(SagittaError::from)
+        // The qdrant client doesn't have a query_points method, use query instead
+        // We need to call the Qdrant's query method directly to avoid infinite recursion
+        Qdrant::query(self, request).await
+            .map_err(|e| SagittaError::QdrantError(Box::new(e)))
     }
 
     async fn query(&self, request: QueryPoints) -> Result<QueryResponse> {
-        self.query(request).await.map_err(SagittaError::from)
+        // Use the qdrant client's query method
+        Qdrant::query(self, request).await
+            .map_err(|e| SagittaError::QdrantError(Box::new(e)))
     }
 
     async fn list_collections(&self) -> Result<Vec<String>> {
-        let response = self.list_collections().await.map_err(|e| SagittaError::QdrantError(e))?;
+        let response = self.list_collections().await.map_err(|e| SagittaError::QdrantError(Box::new(e)))?;
         let collection_names = response.collections
             .into_iter()
             .map(|collection| collection.name)

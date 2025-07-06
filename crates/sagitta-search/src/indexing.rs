@@ -5,10 +5,8 @@ use crate::{
     constants::*,
     vocabulary::VocabularyManager,
     sync_progress::{SyncProgressReporter, SyncProgress, SyncStage, NoOpProgressReporter},
-    qdrant_ops::{self, upsert_batch, delete_collection_by_name},
-    app_config_to_embedding_config,
-    syntax, // Import our syntax parsing module
-    tokenizer, // Import the tokenizer module for consistent tokenization
+    qdrant_ops::{upsert_batch, delete_collection_by_name},
+    app_config_to_embedding_config, // Import the tokenizer module for consistent tokenization
 };
 use qdrant_client::{
     qdrant::{PointStruct, Vector, NamedVectors},
@@ -17,19 +15,17 @@ use qdrant_client::{
 use std::{
     collections::{HashSet, HashMap},
     path::PathBuf,
-    sync::{Arc, atomic::{AtomicUsize, Ordering}},
+    sync::Arc,
     time::Instant,
 };
 use walkdir::WalkDir;
 use uuid::Uuid;
 use tokio::sync::Semaphore;
-use anyhow::anyhow;
-use async_trait::async_trait;
 
 // Import from sagitta-embed for the new decoupled processing architecture
 use sagitta_embed::{
     DefaultFileProcessor, EmbeddingPool, FileProcessor, EmbeddingProcessor,
-    ProcessingConfig, ProcessedChunk, EmbeddedChunk, ChunkMetadata,
+    ProcessingConfig,
 };
 use sagitta_embed::processor::{
     ProgressReporter as EmbedProgressReporter, ProcessingProgress, ProcessingStage
@@ -39,7 +35,6 @@ use sagitta_embed::processor::{
 /// This version handles file processing stages
 struct FileProcessingProgressBridge {
     reporter: Arc<dyn SyncProgressReporter>,
-    total_files: usize,
 }
 
 #[async_trait::async_trait]
@@ -79,7 +74,6 @@ impl EmbedProgressReporter for FileProcessingProgressBridge {
 /// This treats chunks as "files" for display purposes
 struct EmbeddingProgressBridge {
     reporter: Arc<dyn SyncProgressReporter>,
-    total_chunks: usize,
 }
 
 #[async_trait::async_trait]
@@ -152,7 +146,7 @@ pub async fn index_paths<
     // --- 1. Ensure Collection Exists ---
     let embedding_dim = embedding_pool.dimension();
     ensure_collection_exists(client.clone(), collection_name, embedding_dim as u64).await?; 
-    log::debug!("Core: Collection \"{}\" ensured.", collection_name);
+    log::debug!("Core: Collection \"{collection_name}\" ensured.");
 
     // --- 2. Gather Files ---
     let files_to_process = gather_files(paths, file_extensions)?;
@@ -161,7 +155,7 @@ pub async fn index_paths<
     if files_to_process.is_empty() {
         log::warn!("Core: No files found matching the criteria. Indexing complete.");
         reporter.report(SyncProgress::new(SyncStage::Error {
-            message: format!("No files found to index"),
+            message: "No files found to index".to_string(),
         })).await;
         return Ok((0, 0));
     }
@@ -177,7 +171,7 @@ pub async fn index_paths<
     // Create syntax parser function that uses our existing syntax parsing infrastructure
     let syntax_parser_fn = |file_path: &std::path::Path| -> sagitta_embed::error::Result<Vec<sagitta_embed::processor::file_processor::ParsedChunk>> {
         let chunks = crate::syntax::get_chunks(file_path)
-            .map_err(|e| sagitta_embed::error::SagittaEmbedError::file_system(format!("Syntax parsing error: {}", e)))?;
+            .map_err(|e| sagitta_embed::error::SagittaEmbedError::file_system(format!("Syntax parsing error: {e}")))?;
         
         let parsed_chunks = chunks.into_iter().map(|chunk| {
             sagitta_embed::processor::file_processor::ParsedChunk {
@@ -198,10 +192,9 @@ pub async fn index_paths<
     // --- 4. Process Files (CPU-intensive, parallel) ---
     let progress_bridge = Arc::new(FileProcessingProgressBridge {
         reporter: reporter.clone(),
-        total_files: files_to_process.len(),
     });
 
-    let start_time = Instant::now();
+    let _start_time = Instant::now();
     let processed_chunks = file_processor.process_files_with_progress(&files_to_process, progress_bridge).await?;
     
     if processed_chunks.is_empty() {
@@ -217,7 +210,6 @@ pub async fn index_paths<
     // --- 5. Generate Embeddings (GPU-intensive, controlled) ---
     let progress_bridge = Arc::new(EmbeddingProgressBridge {
         reporter: reporter.clone(),
-        total_chunks: processed_chunks.len(),
     });
 
     let embedded_chunks = embedding_pool.process_chunks_with_progress(processed_chunks, progress_bridge).await?;
@@ -267,12 +259,11 @@ pub async fn index_paths<
         
         for token in tokens {
             // Only use identifiers and literals for sparse indexing (skip symbols, comments, etc.)
-            if matches!(token.kind, crate::tokenizer::TokenKind::Identifier | crate::tokenizer::TokenKind::Literal) {
-                if !token.text.is_empty() {
-                    let token_id = vocabulary_manager.add_token(&token.text);
-                    let boost_factor = if filename_terms.contains(&token.text) { 2 } else { 1 };
-                    *term_frequencies.entry(token_id).or_insert(0) += boost_factor;
-                }
+            if matches!(token.kind, crate::tokenizer::TokenKind::Identifier | crate::tokenizer::TokenKind::Literal) 
+                && !token.text.is_empty() {
+                let token_id = vocabulary_manager.add_token(&token.text);
+                let boost_factor = if filename_terms.contains(&token.text) { 2 } else { 1 };
+                *term_frequencies.entry(token_id).or_insert(0) += boost_factor;
             }
         }
         
@@ -310,7 +301,7 @@ pub async fn index_paths<
         if points_batch.len() >= config.performance.batch_size {
             log::debug!("Upserting batch of {} points...", points_batch.len());
             if let Err(e) = upsert_batch(client.clone(), collection_name, points_batch).await {
-                log::error!("Failed to upsert batch: {}", e);
+                log::error!("Failed to upsert batch: {e}");
                 return Err(e.into());
             }
             points_batch = Vec::with_capacity(config.performance.batch_size);
@@ -321,7 +312,7 @@ pub async fn index_paths<
     if !points_batch.is_empty() {
         log::debug!("Upserting final batch of {} points...", points_batch.len());
         if let Err(e) = upsert_batch(client.clone(), collection_name, points_batch).await {
-            log::error!("Failed to upsert final batch: {}", e);
+            log::error!("Failed to upsert final batch: {e}");
             return Err(e.into());
         }
     }
@@ -347,6 +338,30 @@ pub async fn index_paths<
     Ok((files_to_process.len(), points_processed_count))
 }
 
+/// Parameters for indexing repository files
+pub struct IndexRepoFilesParams<'a, C> {
+    /// Application configuration.
+    pub config: &'a AppConfig,
+    /// Root directory of the repository.
+    pub repo_root: &'a PathBuf,
+    /// List of relative file paths to index.
+    pub relative_paths: &'a [PathBuf],
+    /// Name of the Qdrant collection to index into.
+    pub collection_name: &'a str,
+    /// Name of the git branch being indexed.
+    pub branch_name: &'a str,
+    /// Git commit hash for tracking indexed version.
+    pub commit_hash: &'a str,
+    /// Qdrant client for vector operations.
+    pub client: Arc<C>,
+    /// Embedding pool for generating embeddings.
+    pub embedding_pool: Arc<EmbeddingPool>,
+    /// Optional progress reporter for tracking indexing status.
+    pub progress_reporter: Option<Arc<dyn SyncProgressReporter>>,
+    /// Maximum number of concurrent upsert operations.
+    pub max_concurrent_upserts: usize,
+}
+
 /// Indexes specific files within a repository context using the decoupled processing architecture.
 ///
 /// # Arguments
@@ -365,43 +380,32 @@ pub async fn index_paths<
 /// * `Result<usize>` - Total number of points successfully processed and attempted to upsert.
 pub async fn index_repo_files<
     C: QdrantClientTrait + Send + Sync + 'static
->(
-    config: &AppConfig,
-    repo_root: &PathBuf,
-    relative_paths: &[PathBuf],
-    collection_name: &str,
-    branch_name: &str,
-    commit_hash: &str,
-    client: Arc<C>,
-    embedding_pool: Arc<EmbeddingPool>,
-    progress_reporter: Option<Arc<dyn SyncProgressReporter>>, 
-    max_concurrent_upserts: usize,
-) -> Result<usize> {
-    let reporter = progress_reporter.as_ref().map(|r| r.clone()).unwrap_or_else(|| Arc::new(NoOpProgressReporter));
+>(params: IndexRepoFilesParams<'_, C>) -> Result<usize> {
+    let reporter = params.progress_reporter.as_ref().map(|r| r.clone()).unwrap_or_else(|| Arc::new(NoOpProgressReporter));
     
     log::info!(
         "Core: Starting repo index process for {} files into collection \"{}\" using decoupled processing (branch: {}, commit: {})",
-        relative_paths.len(),
-        collection_name,
-        branch_name,
-        &commit_hash[..8]
+        params.relative_paths.len(),
+        params.collection_name,
+        params.branch_name,
+        &params.commit_hash[..8]
     );
 
-    if relative_paths.is_empty() {
+    if params.relative_paths.is_empty() {
         log::warn!("Core: No relative paths provided for repo indexing.");
         reporter.report(SyncProgress::new(SyncStage::Error {
-            message: format!("No files provided to index"),
+            message: "No files provided to index".to_string(),
         })).await;
         return Ok(0);
     }
 
     // --- 1. Ensure Collection Exists ---
-    let embedding_dim = embedding_pool.dimension();
-    ensure_collection_exists(client.clone(), collection_name, embedding_dim as u64).await?;
-    log::debug!("Core: Collection \"{}\" ensured.", collection_name);
+    let embedding_dim = params.embedding_pool.dimension();
+    ensure_collection_exists(params.client.clone(), params.collection_name, embedding_dim as u64).await?;
+    log::debug!("Core: Collection \"{}\" ensured.", params.collection_name);
 
     // --- 2. Set up decoupled processing ---
-    let embedding_config = app_config_to_embedding_config(config);
+    let embedding_config = app_config_to_embedding_config(params.config);
     let processing_config = ProcessingConfig::from_embedding_config(&embedding_config);
     
     log::info!("Using decoupled processing: {} CPU cores for file processing, {} embedding sessions for GPU control",
@@ -411,7 +415,7 @@ pub async fn index_repo_files<
     // Create syntax parser function that uses our existing syntax parsing infrastructure
     let syntax_parser_fn = |file_path: &std::path::Path| -> sagitta_embed::error::Result<Vec<sagitta_embed::processor::file_processor::ParsedChunk>> {
         let chunks = crate::syntax::get_chunks(file_path)
-            .map_err(|e| sagitta_embed::error::SagittaEmbedError::file_system(format!("Syntax parsing error: {}", e)))?;
+            .map_err(|e| sagitta_embed::error::SagittaEmbedError::file_system(format!("Syntax parsing error: {e}")))?;
         
         let parsed_chunks = chunks.into_iter().map(|chunk| {
             sagitta_embed::processor::file_processor::ParsedChunk {
@@ -428,17 +432,16 @@ pub async fn index_repo_files<
 
     let file_processor = DefaultFileProcessor::new(processing_config.clone())
         .with_syntax_parser(syntax_parser_fn);
-    let embedding_pool_ref = &*embedding_pool;
+    let embedding_pool_ref = &*params.embedding_pool;
 
     // Convert relative paths to absolute paths
-    let absolute_paths: Vec<PathBuf> = relative_paths.iter()
-        .map(|relative_path| repo_root.join(relative_path))
+    let absolute_paths: Vec<PathBuf> = params.relative_paths.iter()
+        .map(|relative_path| params.repo_root.join(relative_path))
         .collect();
 
     // --- 4. Process Files (CPU-intensive, parallel) ---
     let progress_bridge = Arc::new(FileProcessingProgressBridge {
         reporter: reporter.clone(),
-        total_files: relative_paths.len(),
     });
 
     let processed_chunks = file_processor.process_files_with_progress(&absolute_paths, progress_bridge).await?;
@@ -448,12 +451,11 @@ pub async fn index_repo_files<
         return Ok(0);
     }
 
-    log::info!("Processed {} repo files into {} chunks", relative_paths.len(), processed_chunks.len());
+    log::info!("Processed {} repo files into {} chunks", params.relative_paths.len(), processed_chunks.len());
 
     // --- 5. Generate Embeddings (GPU-intensive, controlled) ---
     let progress_bridge = Arc::new(EmbeddingProgressBridge {
         reporter: reporter.clone(),
-        total_chunks: processed_chunks.len(),
     });
 
     let embedded_chunks = embedding_pool_ref.process_chunks_with_progress(processed_chunks, progress_bridge).await?;
@@ -461,7 +463,7 @@ pub async fn index_repo_files<
     log::info!("Generated {} embeddings for repo files", embedded_chunks.len());
 
     // --- 6. Build Vocabulary and Create Points ---
-    let vocab_path = config::get_vocabulary_path(config, collection_name)?;
+    let vocab_path = config::get_vocabulary_path(params.config, params.collection_name)?;
     let mut vocabulary_manager = if vocab_path.exists() {
         match VocabularyManager::load(&vocab_path) {
             Ok(vm) => {
@@ -485,7 +487,7 @@ pub async fn index_repo_files<
         let chunk = &embedded_chunk.chunk;
         
         // Convert absolute path back to relative path for storage
-        let relative_path = chunk.metadata.file_path.strip_prefix(repo_root)
+        let relative_path = chunk.metadata.file_path.strip_prefix(params.repo_root)
             .unwrap_or(&chunk.metadata.file_path)
             .to_string_lossy()
             .to_string();
@@ -509,12 +511,11 @@ pub async fn index_repo_files<
         
         for token in tokens {
             // Only use identifiers and literals for sparse indexing (skip symbols, comments, etc.)
-            if matches!(token.kind, crate::tokenizer::TokenKind::Identifier | crate::tokenizer::TokenKind::Literal) {
-                if !token.text.is_empty() {
-                    let token_id = vocabulary_manager.add_token(&token.text);
-                    let boost_factor = if filename_terms.contains(&token.text) { 2 } else { 1 };
-                    *term_frequencies.entry(token_id).or_insert(0) += boost_factor;
-                }
+            if matches!(token.kind, crate::tokenizer::TokenKind::Identifier | crate::tokenizer::TokenKind::Literal) 
+                && !token.text.is_empty() {
+                let token_id = vocabulary_manager.add_token(&token.text);
+                let boost_factor = if filename_terms.contains(&token.text) { 2 } else { 1 };
+                *term_frequencies.entry(token_id).or_insert(0) += boost_factor;
             }
         }
         
@@ -533,8 +534,8 @@ pub async fn index_repo_files<
         payload.insert(FIELD_FILE_EXTENSION, chunk.metadata.file_extension.clone());
         payload.insert(FIELD_ELEMENT_TYPE, chunk.metadata.element_type.clone());
         payload.insert(FIELD_CHUNK_CONTENT, chunk.content.clone());
-        payload.insert(FIELD_BRANCH, branch_name.to_string());
-        payload.insert(FIELD_COMMIT_HASH, commit_hash.to_string());
+        payload.insert(FIELD_BRANCH, params.branch_name.to_string());
+        payload.insert(FIELD_COMMIT_HASH, params.commit_hash.to_string());
 
         // Create NamedVectors for both dense and sparse
         let vectors = NamedVectors::default()
@@ -550,29 +551,29 @@ pub async fn index_repo_files<
     }
 
     let final_vocab_size = vocabulary_manager.len();
-    log::info!("Vocabulary updated. Size: {} -> {}", initial_vocab_size, final_vocab_size);
+    log::info!("Vocabulary updated. Size: {initial_vocab_size} -> {final_vocab_size}");
 
     // Save vocabulary
     vocabulary_manager.save(&vocab_path).map_err(|e| {
         log::error!("FATAL: Failed to save updated vocabulary to {}: {}", vocab_path.display(), e);
-        SagittaError::Other(format!("Failed to save vocabulary: {}", e)) 
+        SagittaError::Other(format!("Failed to save vocabulary: {e}")) 
     })?;
 
     log::info!("Updated vocabulary saved to {}", vocab_path.display());
 
     // --- 6. Upload Points to Qdrant (Network Bound, Concurrent) ---
-    let semaphore = Arc::new(Semaphore::new(max_concurrent_upserts));
-    log::info!("Using max_concurrent_upserts: {}", max_concurrent_upserts);
+    let semaphore = Arc::new(Semaphore::new(params.max_concurrent_upserts));
+    log::info!("Using max_concurrent_upserts: {}", params.max_concurrent_upserts);
     let mut upsert_tasks = Vec::new();
     let total_points_attempted_upsert = final_points.len();
 
-    for points_batch in final_points.chunks(config.performance.batch_size) {
+    for points_batch in final_points.chunks(params.config.performance.batch_size) {
         if points_batch.is_empty() {
             continue;
         }
         let batch_to_upsert = points_batch.to_vec();
-        let client_clone = client.clone();
-        let collection_name_clone = collection_name.to_string();
+        let client_clone = params.client.clone();
+        let collection_name_clone = params.collection_name.to_string();
         let semaphore_clone = semaphore.clone();
 
         let task = tokio::spawn(async move {
@@ -591,15 +592,15 @@ pub async fn index_repo_files<
                  // Batch succeeded
              },
              Ok(Err(e)) => { 
-                 let error_msg = format!("Qdrant batch upsert failed: {}", e);
-                 log::error!("Batch upsert task failed: {}", e);
+                 let error_msg = format!("Qdrant batch upsert failed: {e}");
+                 log::error!("Batch upsert task failed: {e}");
                  upsert_errors.push(e.into()); 
                  reporter.report(SyncProgress::new(SyncStage::Error { message: error_msg })).await;
              },
              Err(join_err) => { 
-                 log::error!("Tokio task join error during upsert: {}", join_err);
-                 upsert_errors.push(SagittaError::Other(format!("Tokio task join error: {}", join_err)));
-                 reporter.report(SyncProgress::new(SyncStage::Error { message: format!("Tokio task join error during upsert: {}", join_err) })).await;
+                 log::error!("Tokio task join error during upsert: {join_err}");
+                 upsert_errors.push(SagittaError::Other(format!("Tokio task join error: {join_err}")));
+                 reporter.report(SyncProgress::new(SyncStage::Error { message: format!("Tokio task join error during upsert: {join_err}") })).await;
              },
          }
     }
@@ -607,17 +608,17 @@ pub async fn index_repo_files<
     if !upsert_errors.is_empty() {
         log::error!("Encountered {} errors during Qdrant upsert:", upsert_errors.len());
         for e in upsert_errors.iter().take(10) {
-            log::error!("  - {}", e);
+            log::error!("  - {e}");
         }
         if upsert_errors.len() > 10 {
             log::error!("  ... and {} more upsert errors.", upsert_errors.len() - 10);
         }
-        return Err(upsert_errors.remove(0).into());
+        return Err(upsert_errors.remove(0));
     }
 
     log::info!(
         "Core: Repo indexing finished using decoupled processing. Processed {} files, uploaded {} points.",
-        relative_paths.len(),
+        params.relative_paths.len(),
         total_points_attempted_upsert
     );
 
@@ -707,7 +708,7 @@ pub async fn ensure_collection_exists<
     embedding_dimension: u64,
 ) -> Result<()> {
     if client.collection_exists(collection_name.to_string()).await? {
-        log::debug!("Collection '{}' already exists. Verifying dimension...", collection_name);
+        log::debug!("Collection '{collection_name}' already exists. Verifying dimension...");
         let collection_info = client.get_collection_info(collection_name.to_string()).await?;
         
         let mut current_dimension: Option<u64> = None;
@@ -722,7 +723,7 @@ pub async fn ensure_collection_exists<
                                 }
                             }
                             _ => {
-                                log::warn!("Collection '{}' has unexpected vector config type", collection_name);
+                                log::warn!("Collection '{collection_name}' has unexpected vector config type");
                             }
                         }
                     }
@@ -733,37 +734,33 @@ pub async fn ensure_collection_exists<
         if let Some(dim) = current_dimension {
             if dim != embedding_dimension {
                 log::warn!(
-                    "Collection '{}' exists but has dimension {} instead of expected {}. Recreating...",
-                    collection_name,
-                    dim,
-                    embedding_dimension
+                    "Collection '{collection_name}' exists but has dimension {dim} instead of expected {embedding_dimension}. Recreating..."
                 );
                 delete_collection_by_name(client.clone(), collection_name).await?;
             } else {
-                log::debug!("Collection '{}' exists with correct dimension {}.", collection_name, dim);
+                log::debug!("Collection '{collection_name}' exists with correct dimension {dim}.");
                 return Ok(());
             }
         } else {
             log::warn!(
-                "Collection '{}' exists but could not determine its dimension. Recreating...",
-                collection_name
+                "Collection '{collection_name}' exists but could not determine its dimension. Recreating..."
             );
             delete_collection_by_name(client.clone(), collection_name).await?;
         }
     }
 
-    log::info!("Creating collection '{}' with dimension {}...", collection_name, embedding_dimension);
+    log::info!("Creating collection '{collection_name}' with dimension {embedding_dimension}...");
     match client.create_collection(collection_name, embedding_dimension).await {
         Ok(true) => {
-            log::info!("Collection '{}' created/recreated successfully.", collection_name);
+            log::info!("Collection '{collection_name}' created/recreated successfully.");
             Ok(())
         }
         Ok(false) => {
-            log::error!("Qdrant reported false for collection creation/recreation of '{}', though no direct error was returned.", collection_name);
-            Err(SagittaError::QdrantOperationError(format!("Qdrant reported false for collection creation/recreation of '{}'", collection_name)))
+            log::error!("Qdrant reported false for collection creation/recreation of '{collection_name}', though no direct error was returned.");
+            Err(SagittaError::QdrantOperationError(format!("Qdrant reported false for collection creation/recreation of '{collection_name}'")))
         }
         Err(e) => {
-            log::error!("Failed to create/recreate collection '{}': {:?}", collection_name, e);
+            log::error!("Failed to create/recreate collection '{collection_name}': {e:?}");
             Err(e)
         }
     }

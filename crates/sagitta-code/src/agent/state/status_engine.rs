@@ -6,10 +6,9 @@ use tokio::time::{interval, Duration as TokioDuration};
 use uuid::Uuid;
 
 use crate::agent::conversation::manager::ConversationManager;
-use crate::agent::conversation::types::Conversation;
 use crate::agent::state::types::ConversationStatus;
 use crate::agent::events::AgentEvent;
-use crate::llm::fast_model::{FastModelProvider, FastModelOperations};
+use crate::llm::fast_model::FastModelOperations;
 
 /// Configuration for the status engine
 #[derive(Debug, Clone)]
@@ -93,7 +92,7 @@ impl ConversationStatusEngine {
                     &event_sender,
                     &manual_overrides,
                 ).await {
-                    eprintln!("Error updating conversation statuses: {}", e);
+                    eprintln!("Error updating conversation statuses: {e}");
                 }
             }
         });

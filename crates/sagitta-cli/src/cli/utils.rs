@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use sagitta_search::config::{AppConfig, RepositoryConfig};
 
 /// Retrieves the configuration for the target repository.

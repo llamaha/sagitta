@@ -3,7 +3,7 @@
 use egui::{
     widgets::TextEdit, 
     Color32, 
-    Rounding, 
+    CornerRadius, 
     Stroke, 
     Event, 
     Key, 
@@ -12,7 +12,6 @@ use egui::{
     Vec2, 
     RichText,
     Frame,
-    ComboBox,
 };
 use crate::gui::theme::AppTheme;
 
@@ -67,12 +66,12 @@ pub fn chat_input_ui(
     // Use theme colors properly
     let text_color = theme.text_color();
     let hint_color = theme.hint_text_color();
-    let button_bg_color = theme.button_background();
-    let button_hover_color = theme.button_hover_color();
+    let _button_bg_color = theme.button_background();
+    let _button_hover_color = theme.button_hover_color();
     let accent_color = theme.accent_color();
     let input_bg_color = theme.input_background();
     let border_color = theme.border_color();
-    let focus_border_color = theme.focus_border_color();
+    let _focus_border_color = theme.focus_border_color();
     let success_color = theme.success_color();
     let warning_color = theme.warning_color();
     let error_color = theme.error_color();
@@ -91,7 +90,7 @@ pub fn chat_input_ui(
         // Repository context selector
         ui.horizontal(|ui| {
             let repo_text = match current_repository_context {
-                Some(repo) => format!("📁 {}", repo),
+                Some(repo) => format!("📁 {repo}"),
                 None => "📁 No Repository".to_string(),
             };
             
@@ -101,11 +100,11 @@ pub fn chat_input_ui(
                 hint_color
             };
 
-            let combo_response = egui::ComboBox::from_id_source("repository_context_selector")
+            let combo_response = egui::ComboBox::from_id_salt("repository_context_selector")
                 .selected_text(RichText::new(&repo_text).color(repo_color).small())
                 .width(180.0)
                 .show_ui(ui, |ui| {
-                    ui.style_mut().wrap = Some(false);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                     ui.set_min_width(200.0);
                     
                     // "No Repository" option
@@ -119,15 +118,14 @@ pub fn chat_input_ui(
                     
                     // If current repository is set but not in available list, show it first
                     if let Some(current_repo) = current_repository_context {
-                        if !available_repositories.contains(current_repo) {
-                            if ui.selectable_value(
+                        if !available_repositories.contains(current_repo)
+                            && ui.selectable_value(
                                 &mut *on_repository_context_change,
                                 Some(current_repo.clone()),
-                                RichText::new(format!("📁 {} (loading...)", current_repo)).color(success_color)
+                                RichText::new(format!("📁 {current_repo} (loading...)")).color(success_color)
                             ).clicked() {
                                 *on_repository_context_change = Some(current_repo.clone());
                             }
-                        }
                     }
                     
                     // Available repositories
@@ -135,7 +133,7 @@ pub fn chat_input_ui(
                         if ui.selectable_value(
                             &mut *on_repository_context_change,
                             Some(repo.clone()),
-                            RichText::new(format!("📁 {}", repo)).color(success_color)
+                            RichText::new(format!("📁 {repo}")).color(success_color)
                         ).clicked() {
                             *on_repository_context_change = Some(repo.clone());
                         }
@@ -190,7 +188,7 @@ pub fn chat_input_ui(
                     hint_color
                 };
                 
-                ui.label(RichText::new(format!("📊 {:.1}%", percentage))
+                ui.label(RichText::new(format!("📊 {percentage:.1}%"))
                     .color(color)
                     .small());
                 
@@ -202,7 +200,7 @@ pub fn chat_input_ui(
                 
                 if let Some(cached) = token_usage.cached_tokens {
                     ui.separator();
-                    ui.label(RichText::new(format!("💾 {} cached", cached))
+                    ui.label(RichText::new(format!("💾 {cached} cached"))
                         .color(success_color)
                         .small());
                 }
@@ -233,7 +231,7 @@ pub fn chat_input_ui(
                 } else {
                     hint_color
                 };
-                ui.small(RichText::new(format!("{} chars", char_count)).color(char_color));
+                ui.small(RichText::new(format!("{char_count} chars")).color(char_color));
             });
         });
         
@@ -283,21 +281,19 @@ pub fn chat_input_ui(
                         .text_color(text_color)
                 );
                 
-                if inject_response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                    if !loop_inject_buffer.trim().is_empty() {
+                if inject_response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter))
+                    && !loop_inject_buffer.trim().is_empty() {
                         *loop_inject_message = Some(loop_inject_buffer.clone());
                         loop_inject_buffer.clear();
                         *show_loop_inject_input = false;
                     }
-                }
                 
-                if ui.small_button(RichText::new("Send").color(text_color)).clicked() {
-                    if !loop_inject_buffer.trim().is_empty() {
+                if ui.small_button(RichText::new("Send").color(text_color)).clicked()
+                    && !loop_inject_buffer.trim().is_empty() {
                         *loop_inject_message = Some(loop_inject_buffer.clone());
                         loop_inject_buffer.clear();
                         *show_loop_inject_input = false;
                     }
-                }
                 
                 if ui.small_button(RichText::new("Cancel").color(hint_color)).clicked() {
                     *show_loop_inject_input = false;
@@ -317,10 +313,10 @@ pub fn chat_input_ui(
                 Vec2::new(ui.available_width() - margin, ui.available_height()),
                 Layout::left_to_right(Align::TOP),
                 |ui| {
-                    Frame::none()
+                    Frame::NONE
                         .fill(input_bg_color)
                         .stroke(Stroke::new(1.0, border_color))
-                        .rounding(Rounding::same(4))
+                        .corner_radius(CornerRadius::same(4))
                         .inner_margin(Vec2::splat(8.0))
                         .show(ui, |ui| {
                 // Disable input during waiting/thinking/loop states
@@ -355,11 +351,10 @@ pub fn chat_input_ui(
                             text_edit_id = Some(response.id);
                             
                             // Handle Enter key for submission
-                            if input_enabled && response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)) && !new_line_added {
-                                if !input_buffer.trim().is_empty() {
+                            if input_enabled && response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)) && !new_line_added
+                                && !input_buffer.trim().is_empty() {
                                     *on_submit = true;
                                 }
-                            }
                         });
                 } else {
                     // Small content - no scroll area needed
@@ -387,11 +382,10 @@ pub fn chat_input_ui(
                     }
                     
                     // Handle Enter key for submission
-                    if input_enabled && response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)) && !new_line_added {
-                        if !input_buffer.trim().is_empty() {
+                    if input_enabled && response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)) && !new_line_added
+                        && !input_buffer.trim().is_empty() {
                             *on_submit = true;
                         }
-                    }
                 }
             });
                 });
@@ -414,7 +408,7 @@ pub fn chat_input_ui(
                             .size(12.0)
                     )
                     .fill(Color32::TRANSPARENT)
-                    .corner_radius(Rounding::same(16))
+                    .corner_radius(CornerRadius::same(16))
                     .min_size(Vec2::new(80.0, 24.0))
                 )
                 .on_hover_text("Clear the input field")
@@ -441,7 +435,7 @@ pub fn chat_input_ui(
                                 .strong()
                         )
                         .fill(stop_color)
-                        .corner_radius(Rounding::same(18))
+                        .corner_radius(CornerRadius::same(18))
                         .min_size(Vec2::new(100.0, 36.0))
                     )
                     .on_hover_text(if is_in_loop { "Stop the reasoning loop" } else { "Stop the current operation" })
@@ -467,7 +461,7 @@ pub fn chat_input_ui(
                                 .strong()
                         )
                         .fill(send_color)
-                        .corner_radius(Rounding::same(18))
+                        .corner_radius(CornerRadius::same(18))
                         .min_size(Vec2::new(100.0, 36.0))
                     ).clicked() {
                         *on_submit = true;
@@ -483,7 +477,7 @@ pub fn chat_input_ui(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use egui::Context;
+    
 
     #[test]
     fn test_chat_input_basic_behavior() {
@@ -491,10 +485,10 @@ mod tests {
         // We can test the logic parts that don't require egui context
         
         let mut input_buffer = String::new();
-        let mut on_submit = false;
+        let on_submit = false;
         let is_waiting = false;
         let theme = AppTheme::Dark; // Use the new simplified theme
-        let mut show_hotkeys_modal = false;
+        let show_hotkeys_modal = false;
         
         // Test initial state
         assert!(input_buffer.is_empty());
@@ -568,13 +562,13 @@ mod tests {
     fn test_theme_compatibility() {
         // Test that the function works with different themes
         let theme = AppTheme::Dark;
-        let mut input_buffer = String::new();
-        let mut on_submit = false;
-        let mut show_hotkeys_modal = false;
-        let mut loop_break_requested = false;
-        let mut loop_inject_buffer = String::new();
-        let mut show_loop_inject_input = false;
-        let mut loop_inject_message: Option<String> = None;
+        let input_buffer = String::new();
+        let on_submit = false;
+        let show_hotkeys_modal = false;
+        let loop_break_requested = false;
+        let loop_inject_buffer = String::new();
+        let show_loop_inject_input = false;
+        let loop_inject_message: Option<String> = None;
         
         // This should not panic with any theme
         // We can't easily test the UI rendering without egui context

@@ -6,7 +6,6 @@ use crate::model::EmbeddingModelType;
 use crate::provider::EmbeddingProvider;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 #[cfg(feature = "onnx")]
 use crate::provider::onnx::OnnxEmbeddingModel;
@@ -17,7 +16,6 @@ pub struct EmbeddingHandler {
     config: EmbeddingConfig,
     #[cfg(feature = "onnx")]
     onnx_provider: Option<Arc<Mutex<OnnxEmbeddingModel>>>,
-    last_used: Instant,
 }
 
 impl EmbeddingHandler {
@@ -56,7 +54,6 @@ impl EmbeddingHandler {
             config: config.clone(),
             #[cfg(feature = "onnx")]
             onnx_provider,
-            last_used: Instant::now(),
         })
     }
 
@@ -66,13 +63,13 @@ impl EmbeddingHandler {
         {
             if let Some(provider) = &self.onnx_provider {
                 let provider_guard = provider.lock()
-                    .map_err(|e| SagittaEmbedError::thread_safety(format!("Failed to lock provider: {}", e)))?;
+                    .map_err(|e| SagittaEmbedError::thread_safety(format!("Failed to lock provider: {e}")))?;
                 Ok(provider_guard.dimension())
             } else {
                 log::warn!("ONNX provider not initialized when getting dimension. Attempting lazy init...");
                 let provider = self.create_embedding_model()?;
                 let provider_guard = provider.lock()
-                    .map_err(|e| SagittaEmbedError::thread_safety(format!("Failed to lock provider: {}", e)))?;
+                    .map_err(|e| SagittaEmbedError::thread_safety(format!("Failed to lock provider: {e}")))?;
                 Ok(provider_guard.dimension())
             }
         }
@@ -92,13 +89,13 @@ impl EmbeddingHandler {
         {
             if let Some(provider) = &self.onnx_provider {
                 let provider_guard = provider.lock()
-                    .map_err(|e| SagittaEmbedError::thread_safety(format!("Failed to lock provider: {}", e)))?;
+                    .map_err(|e| SagittaEmbedError::thread_safety(format!("Failed to lock provider: {e}")))?;
                 provider_guard.embed_batch(texts)
             } else {
                 log::warn!("ONNX provider not initialized during embed call. This may indicate an earlier init failure.");
                 let provider = self.create_embedding_model()?;
                 let provider_guard = provider.lock()
-                    .map_err(|e| SagittaEmbedError::thread_safety(format!("Failed to lock provider: {}", e)))?;
+                    .map_err(|e| SagittaEmbedError::thread_safety(format!("Failed to lock provider: {e}")))?;
                 provider_guard.embed_batch(texts)
             }
         }
@@ -191,7 +188,7 @@ impl EmbeddingHandler {
                 if let (Some(model_p), Some(tok_p)) = (&self.config.onnx_model_path, &self.config.onnx_tokenizer_path) {
                     match OnnxEmbeddingModel::new_with_config(model_p, tok_p, &self.config) {
                         Ok(p) => self.onnx_provider = Some(Arc::new(Mutex::new(p))),
-                        Err(e) => log::error!("Failed to re-initialize ONNX provider after config change: {}", e),
+                        Err(e) => log::error!("Failed to re-initialize ONNX provider after config change: {e}"),
                     }
                 }
             }
@@ -211,7 +208,7 @@ impl EmbeddingProvider for EmbeddingHandler {
         self.get_model_type()
     }
 
-    fn embed_batch<'a>(&self, texts: &[&'a str]) -> Result<Vec<Vec<f32>>> {
+    fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         self.embed(texts)
     }
 }
@@ -222,7 +219,6 @@ impl Clone for EmbeddingHandler {
             config: self.config.clone(),
             #[cfg(feature = "onnx")]
             onnx_provider: self.onnx_provider.clone(),
-            last_used: Instant::now(), // Reset last_used for the clone
         }
     }
 }

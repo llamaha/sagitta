@@ -124,7 +124,7 @@ async fn test_progress_reporting_during_parallel_processing() {
         Ok(pool) => {
             // Create test chunks
             let chunks: Vec<ProcessedChunk> = (0..10).map(|i| {
-                create_test_chunk(&format!("Test content {}", i), &format!("chunk_{}", i))
+                create_test_chunk(&format!("Test content {i}"), &format!("chunk_{i}"))
             }).collect();
 
             // Create test progress reporter
@@ -137,16 +137,16 @@ async fn test_progress_reporting_during_parallel_processing() {
             let result = pool.process_chunks_with_progress(chunks, Arc::clone(&progress_reporter) as Arc<dyn ProgressReporter>).await;
 
             let duration = start_time.elapsed();
-            println!("Processing completed in {:?}", duration);
+            println!("Processing completed in {duration:?}");
 
             // Check progress reporting
             let progress_count = progress_reporter.get_progress_count();
             let last_stage = progress_reporter.get_last_stage();
             let last_message = progress_reporter.get_last_message();
 
-            println!("Progress updates received: {}", progress_count);
-            println!("Last stage: {:?}", last_stage);
-            println!("Last message: {:?}", last_message);
+            println!("Progress updates received: {progress_count}");
+            println!("Last stage: {last_stage:?}");
+            println!("Last message: {last_message:?}");
 
             // Verify progress reporting worked
             assert!(progress_count > 0, "Should have received at least one progress update");
@@ -196,7 +196,7 @@ async fn test_progress_reporting_doesnt_hang() {
         Ok(pool) => {
             // Create a few test chunks
             let chunks: Vec<ProcessedChunk> = (0..3).map(|i| {
-                create_test_chunk(&format!("Test content {}", i), &format!("chunk_{}", i))
+                create_test_chunk(&format!("Test content {i}"), &format!("chunk_{i}"))
             }).collect();
 
             let progress_reporter = Arc::new(TestProgressReporter::new());
@@ -215,7 +215,7 @@ async fn test_progress_reporting_doesnt_hang() {
                     println!("✅ Processing completed within timeout - no hang detected");
                     
                     let progress_count = progress_reporter.get_progress_count();
-                    println!("Progress updates received: {}", progress_count);
+                    println!("Progress updates received: {progress_count}");
                     
                     // Verify we got at least some progress updates
                     assert!(progress_count > 0, "Should have received progress updates");
@@ -251,7 +251,7 @@ async fn test_empty_chunks_progress_reporting() {
         
         // Should have minimal progress reporting for empty case
         let progress_count = progress_reporter.get_progress_count();
-        println!("Progress updates for empty chunks: {}", progress_count);
+        println!("Progress updates for empty chunks: {progress_count}");
         
         // Empty chunks should return immediately without hanging
         println!("✅ Empty chunks progress reporting test passed");

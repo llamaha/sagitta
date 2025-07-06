@@ -6,7 +6,7 @@ use std::fmt::Debug;
 
 /// A trait for embedding providers, defining a common interface for generating embeddings.
 /// This allows for different underlying embedding model implementations (e.g., ONNX, SentenceTransformers).
-#[cfg_attr(test, mockall::automock)]
+// #[cfg_attr(test, mockall::automock)]
 pub trait EmbeddingProvider: Send + Sync + Debug {
     /// Get the embedding dimension of the model.
     fn dimension(&self) -> usize;
@@ -15,7 +15,7 @@ pub trait EmbeddingProvider: Send + Sync + Debug {
     fn model_type(&self) -> EmbeddingModelType;
 
     /// Embed a batch of texts.
-    fn embed_batch<'a>(&self, texts: &[&'a str]) -> Result<Vec<Vec<f32>>>;
+    fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>>;
 }
 
 // Provider modules

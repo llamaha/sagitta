@@ -34,7 +34,7 @@ pub fn get_branch_aware_collection_name(
     let mut hasher = Sha256::new();
     hasher.update(branch_or_ref.as_bytes());
     let hash = hasher.finalize();
-    let branch_hash = format!("{:x}", hash)[..8].to_string(); // Use first 8 chars of hash
+    let branch_hash = format!("{hash:x}")[..8].to_string(); // Use first 8 chars of hash
     
     format!("{}{}_br_{}", 
         config.performance.collection_name_prefix, 
@@ -56,16 +56,21 @@ where
 {
     let collection_name = get_branch_aware_collection_name(repo_name, branch_or_ref, config);
     client.collection_exists(collection_name).await
-        .map_err(|e| Error::Other(format!("Failed to check collection existence: {}", e)))
+        .map_err(|e| Error::Other(format!("Failed to check collection existence: {e}")))
 }
 
 /// Metadata about a repository's sync status for a specific branch/ref
 #[derive(Debug, Clone)]
 pub struct BranchSyncMetadata {
+    /// Name of the Qdrant collection storing this branch's data
     pub collection_name: String,
+    /// SHA hash of the last synchronized commit for this branch
     pub last_commit_hash: Option<String>,
+    /// Name of the branch or reference (e.g., "main", "v1.0.0", "abc123")
     pub branch_or_ref: String,
+    /// Timestamp of the last successful synchronization
     pub last_sync_timestamp: Option<chrono::DateTime<chrono::Utc>>,
+    /// Number of files indexed in this collection
     pub files_count: usize,
 }
 
@@ -84,7 +89,7 @@ where
     
     // Check if collection exists
     let exists = client.collection_exists(collection_name.clone()).await
-        .map_err(|e| Error::Other(format!("Failed to check collection existence: {}", e)))?;
+        .map_err(|e| Error::Other(format!("Failed to check collection existence: {e}")))?;
     
     if !exists {
         return Ok(None);
@@ -92,7 +97,7 @@ where
     
     // Get collection info to check if it has any points
     let collection_info = client.get_collection_info(collection_name.clone()).await
-        .map_err(|e| Error::Other(format!("Failed to get collection info: {}", e)))?;
+        .map_err(|e| Error::Other(format!("Failed to get collection info: {e}")))?;
     
     let points_count = collection_info.points_count.unwrap_or(0) as usize;
     
@@ -162,7 +167,7 @@ pub async fn delete_points_for_files<
 ) -> Result<(), Error> {
     let reporter = progress_reporter.unwrap_or_else(|| Arc::new(NoOpProgressReporter));
     if relative_paths.is_empty() {
-        log::debug!("No files provided for deletion in branch '{}'.", branch_name);
+        log::debug!("No files provided for deletion in branch '{branch_name}'.");
         return Ok(());
     }
     log::info!("Deleting points for {} files in branch '{}' from collection '{}'...",
@@ -204,7 +209,7 @@ pub async fn delete_points_for_files<
         
         let scroll_request = builder.into();
         let scroll_result: ScrollResponse = client.scroll(scroll_request).await
-            .with_context(|| format!("Failed to scroll points for deletion in collection '{}'", collection_name))?;
+            .with_context(|| format!("Failed to scroll points for deletion in collection '{collection_name}'"))?;
         if scroll_result.result.is_empty() {
             break;
         }
@@ -212,7 +217,7 @@ pub async fn delete_points_for_files<
             if let Some(id) = point.id {
                  point_ids_to_delete.push(id);
             } else {
-                log::warn!("Found point without ID during scroll for deletion: {:?}", point);
+                log::warn!("Found point without ID during scroll for deletion: {point:?}");
             }
         }
         offset = scroll_result.next_page_offset;
@@ -221,7 +226,7 @@ pub async fn delete_points_for_files<
         }
     }
     if point_ids_to_delete.is_empty() {
-        log::info!("No points found matching the files to be deleted in branch '{}'.", branch_name);
+        log::info!("No points found matching the files to be deleted in branch '{branch_name}'.");
         return Ok(());
     }
     log::debug!("Found {} points to delete for branch '{}'.", point_ids_to_delete.len(), branch_name);
@@ -238,7 +243,7 @@ pub async fn delete_points_for_files<
          let delete_request = DeletePointsBuilder::new(collection_name)
             .points(chunk.to_vec());
          client.delete_points(delete_request.into()).await
-             .with_context(|| format!("Failed to delete a batch of points from collection '{}'", collection_name))?;
+             .with_context(|| format!("Failed to delete a batch of points from collection '{collection_name}'"))?;
         log::debug!("Deleted batch of {} points for branch '{}'.", chunk.len(), branch_name);
         deleted_points_count += chunk.len();
         // Report progress after each batch deletion
@@ -247,7 +252,7 @@ pub async fn delete_points_for_files<
             total_files: relative_paths.len(),
             current_file_num: relative_paths.len(),
             files_per_second: None,
-            message: Some(format!("Deleted {}/{} points associated with scanned files.", deleted_points_count, total_points_to_delete)),
+            message: Some(format!("Deleted {deleted_points_count}/{total_points_to_delete} points associated with scanned files.")),
         })).await;
     }
     log::info!("Successfully deleted {} points for {} files in branch '{}'.",
@@ -268,25 +273,23 @@ where
     match client.collection_exists(collection_name.to_string()).await {
         Ok(exists) => {
             if exists {
-                log::debug!("Collection '{}' already exists.", collection_name);
+                log::debug!("Collection '{collection_name}' already exists.");
                 // TODO: Optionally verify existing collection parameters?
                 Ok(())
             } else {
-                log::info!("Collection '{}' does not exist. Creating...", collection_name);
+                log::info!("Collection '{collection_name}' does not exist. Creating...");
                 // Create collection using the trait method
                 client.create_collection(collection_name, vector_dim).await
-                    .map_err(|e| Error::Other(format!("Failed to create collection '{}': {}", collection_name, e.to_string())))?;
+                    .map_err(|e| Error::Other(format!("Failed to create collection '{collection_name}': {e}")))?;
                 log::info!(
-                    "Created Qdrant collection '{}' with dimension {}.",
-                    collection_name,
-                    vector_dim
+                    "Created Qdrant collection '{collection_name}' with dimension {vector_dim}."
                 );
                 Ok(())
             }
         }
         Err(e) => {
-            log::error!("Failed to check or create collection '{}': {}", collection_name, e);
-            Err(Error::Other(format!("Failed to ensure collection '{}' exists: {}", collection_name, e)))
+            log::error!("Failed to check or create collection '{collection_name}': {e}");
+            Err(Error::Other(format!("Failed to ensure collection '{collection_name}' exists: {e}")))
         }
     }
 }
@@ -326,7 +329,7 @@ pub async fn delete_points_by_branch(
         
         let scroll_request = builder.into();
         let scroll_result: ScrollResponse = client.scroll(scroll_request).await
-            .with_context(|| format!("Failed to scroll points for deletion in collection '{}'", collection_name))?;
+            .with_context(|| format!("Failed to scroll points for deletion in collection '{collection_name}'"))?;
         
         if scroll_result.result.is_empty() {
             break;
@@ -336,7 +339,7 @@ pub async fn delete_points_by_branch(
             if let Some(id) = point.id {
                 point_ids_to_delete.push(id);
             } else {
-                log::warn!("Found point without ID during scroll for deletion: {:?}", point);
+                log::warn!("Found point without ID during scroll for deletion: {point:?}");
             }
         }
 
@@ -347,7 +350,7 @@ pub async fn delete_points_by_branch(
     }
 
     if point_ids_to_delete.is_empty() {
-        log::info!("No points found for branch '{}' in collection '{}'.", branch, collection_name);
+        log::info!("No points found for branch '{branch}' in collection '{collection_name}'.");
         return Ok(());
     }
 
@@ -358,7 +361,7 @@ pub async fn delete_points_by_branch(
         let delete_request = DeletePointsBuilder::new(collection_name)
             .points(chunk.to_vec());
         client.delete_points(delete_request.into()).await
-            .with_context(|| format!("Failed to delete a batch of points from collection '{}'", collection_name))?;
+            .with_context(|| format!("Failed to delete a batch of points from collection '{collection_name}'"))?;
         log::debug!("Deleted batch of {} points for branch '{}'.", chunk.len(), branch);
     }
 

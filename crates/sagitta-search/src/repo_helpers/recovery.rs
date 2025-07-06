@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use std::path::Path;
 use std::fs;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 
 /// Attempts to recover a repository that may be in a bad state
 pub async fn recover_repository(repo_path: &Path) -> Result<()> {
@@ -39,7 +39,7 @@ async fn abort_in_progress_operations(repo_path: &Path) -> Result<()> {
         warn!("Merge in progress, aborting...");
         Command::new("git")
             .current_dir(repo_path)
-            .args(&["merge", "--abort"])
+            .args(["merge", "--abort"])
             .output()
             .await
             .context("Failed to abort merge")?;
@@ -51,7 +51,7 @@ async fn abort_in_progress_operations(repo_path: &Path) -> Result<()> {
         warn!("Rebase in progress, aborting...");
         Command::new("git")
             .current_dir(repo_path)
-            .args(&["rebase", "--abort"])
+            .args(["rebase", "--abort"])
             .output()
             .await
             .context("Failed to abort rebase")?;
@@ -62,7 +62,7 @@ async fn abort_in_progress_operations(repo_path: &Path) -> Result<()> {
         warn!("Cherry-pick in progress, aborting...");
         Command::new("git")
             .current_dir(repo_path)
-            .args(&["cherry-pick", "--abort"])
+            .args(["cherry-pick", "--abort"])
             .output()
             .await
             .context("Failed to abort cherry-pick")?;
@@ -87,7 +87,7 @@ fn clean_lock_files(repo_path: &Path) -> Result<()> {
         if lock_path.exists() {
             warn!("Removing lock file: {:?}", lock_path);
             fs::remove_file(&lock_path)
-                .with_context(|| format!("Failed to remove lock file: {:?}", lock_path))?;
+                .with_context(|| format!("Failed to remove lock file: {lock_path:?}"))?;
         }
     }
     
@@ -127,7 +127,7 @@ pub async fn cleanup_failed_add(
     if repo_path.exists() && is_partial_clone(repo_path) {
         warn!("Removing partial clone at {:?}", repo_path);
         fs::remove_dir_all(repo_path)
-            .with_context(|| format!("Failed to remove partial clone at {:?}", repo_path))?;
+            .with_context(|| format!("Failed to remove partial clone at {repo_path:?}"))?;
     }
     
     // Remove the Qdrant collection if it was created

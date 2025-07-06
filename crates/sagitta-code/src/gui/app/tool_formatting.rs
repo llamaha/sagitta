@@ -5,6 +5,12 @@ pub struct ToolResultFormatter {
     // Future: could add configuration options here
 }
 
+impl Default for ToolResultFormatter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ToolResultFormatter {
     pub fn new() -> Self {
         Self {}
@@ -15,14 +21,14 @@ impl ToolResultFormatter {
         use crate::agent::events::ToolResult;
         match result {
             ToolResult::Success { output } => {
-                let value: serde_json::Value = serde_json::from_str(&output).unwrap_or(serde_json::Value::String(output.clone()));
+                let value: serde_json::Value = serde_json::from_str(output).unwrap_or(serde_json::Value::String(output.clone()));
                 // Check if this is actually an error wrapped as success (from MCP)
                 if let Some(obj) = value.as_object() {
                     if obj.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false) {
                         let error_msg = obj.get("error")
                             .and_then(|v| v.as_str())
                             .unwrap_or("Tool execution failed");
-                        return format!("❌ **ERROR**\n\n{}", error_msg);
+                        return format!("❌ **ERROR**\n\n{error_msg}");
                     }
                 }
                 self.format_successful_tool_result(tool_name, &value)
@@ -35,18 +41,18 @@ impl ToolResultFormatter {
                 // Try to parse error as JSON for better formatting
                 if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(error) {
                     if let Some(message) = error_json.get("message").and_then(|v| v.as_str()) {
-                        result.push_str(&format!("**Error:** {}\n", message));
+                        result.push_str(&format!("**Error:** {message}\n"));
                     } else {
-                        result.push_str(&format!("**Error:** {}\n", error));
+                        result.push_str(&format!("**Error:** {error}\n"));
                     }
                     
                     // Add any additional error details
                     if let Some(code) = error_json.get("code") {
-                        result.push_str(&format!("\n**Error Code:** {}", code));
+                        result.push_str(&format!("\n**Error Code:** {code}"));
                     }
                 } else {
                     // Plain text error
-                    result.push_str(&format!("**Error:** {}", error));
+                    result.push_str(&format!("**Error:** {error}"));
                 }
                 
                 result
@@ -56,7 +62,7 @@ impl ToolResultFormatter {
     
     /// Format successful tool results based on tool type
     fn format_successful_tool_result(&self, tool_name: &str, value: &serde_json::Value) -> String {
-        log::debug!("Formatting tool result for: {}", tool_name);
+        log::debug!("Formatting tool result for: {tool_name}");
         
         // Handle both native tools and MCP tools
         match tool_name {
@@ -108,12 +114,12 @@ impl ToolResultFormatter {
                     result.push_str("**Git Repositories:**\n");
                     for repo in git_repos {
                         if let Some(url) = repo.get("url").and_then(|v| v.as_str()) {
-                            result.push_str(&format!("• {}", url));
+                            result.push_str(&format!("• {url}"));
                             if let Some(clone_url) = repo.get("clone_url").and_then(|v| v.as_str()) {
-                                result.push_str(&format!(" (clone: {})", clone_url));
+                                result.push_str(&format!(" (clone: {clone_url})"));
                             }
                             if let Some(repo_type) = repo.get("type").and_then(|v| v.as_str()) {
-                                result.push_str(&format!(" [{}]", repo_type));
+                                result.push_str(&format!(" [{repo_type}]"));
                             }
                             result.push('\n');
                         }
@@ -123,7 +129,7 @@ impl ToolResultFormatter {
                 
                 // Default branch
                 if let Some(branch) = extracted_info.get("default_branch").and_then(|v| v.as_str()) {
-                    result.push_str(&format!("**Default Branch:** {}\n\n", branch));
+                    result.push_str(&format!("**Default Branch:** {branch}\n\n"));
                 }
                 
                 // Documentation
@@ -131,7 +137,7 @@ impl ToolResultFormatter {
                     result.push_str("**Documentation:**\n");
                     for doc in docs {
                         if let Some(url) = doc.get("url").and_then(|v| v.as_str()) {
-                            result.push_str(&format!("• {}\n", url));
+                            result.push_str(&format!("• {url}\n"));
                         }
                     }
                     result.push('\n');
@@ -142,7 +148,7 @@ impl ToolResultFormatter {
                     result.push_str("**Installation Commands:**\n");
                     for cmd in commands {
                         if let Some(command) = cmd.as_str() {
-                            result.push_str(&format!("• `{}`\n", command));
+                            result.push_str(&format!("• `{command}`\n"));
                         }
                     }
                     result.push('\n');
@@ -153,7 +159,7 @@ impl ToolResultFormatter {
                     result.push_str("**Versions Found:**\n");
                     for version in versions {
                         if let Some(v) = version.as_str() {
-                            result.push_str(&format!("• {}\n", v));
+                            result.push_str(&format!("• {v}\n"));
                         }
                     }
                     result.push('\n');
@@ -168,7 +174,7 @@ impl ToolResultFormatter {
         result.push_str("🔍 **Web Search Results**\n\n");
         
         if let Some(query) = value.get("query").and_then(|v| v.as_str()) {
-            result.push_str(&format!("**Query:** {}\n\n", query));
+            result.push_str(&format!("**Query:** {query}\n\n"));
         }
         
         if let Some(answer) = value.get("answer").and_then(|v| v.as_str()) {
@@ -188,7 +194,7 @@ impl ToolResultFormatter {
                     if let Some(title) = source.get("title").and_then(|v| v.as_str()) {
                         result.push_str(&format!("{}. **{}**\n", i + 1, title));
                         if let Some(url) = source.get("url").and_then(|v| v.as_str()) {
-                            result.push_str(&format!("   {}\n", url));
+                            result.push_str(&format!("   {url}\n"));
                         } else if let Some(uri) = source.get("uri").and_then(|v| v.as_str()) {
                             // Clean up the URI if it's a redirect
                             let clean_uri = if uri.contains("grounding-api-redirect") {
@@ -196,7 +202,7 @@ impl ToolResultFormatter {
                             } else {
                                 uri
                             };
-                            result.push_str(&format!("   {}\n", clean_uri));
+                            result.push_str(&format!("   {clean_uri}\n"));
                         }
                         result.push('\n');
                     }
@@ -219,21 +225,21 @@ impl ToolResultFormatter {
         let mut file_path_for_lang = None;
         
         if let Some(file_path) = value.get("file_path").and_then(|v| v.as_str()) {
-            result.push_str(&format!("**File:** {}\n\n", file_path));
+            result.push_str(&format!("**File:** {file_path}\n\n"));
             file_path_for_lang = Some(file_path);
         }
         
         if let Some(repo_name) = value.get("repository_name").and_then(|v| v.as_str()) {
-            result.push_str(&format!("**Repository:** {}\n\n", repo_name));
+            result.push_str(&format!("**Repository:** {repo_name}\n\n"));
         }
         
         if let Some(file_type) = value.get("file_type").and_then(|v| v.as_str()) {
-            result.push_str(&format!("**Type:** {}\n\n", file_type));
+            result.push_str(&format!("**Type:** {file_type}\n\n"));
         }
         
         if let Some(start_line) = value.get("start_line") {
             if let Some(end_line) = value.get("end_line") {
-                result.push_str(&format!("**Lines:** {} - {}\n\n", start_line, end_line));
+                result.push_str(&format!("**Lines:** {start_line} - {end_line}\n\n"));
             }
         }
         
@@ -281,7 +287,7 @@ impl ToolResultFormatter {
                 })
                 .unwrap_or("");
             
-            result.push_str(&format!("```{}\n", language));
+            result.push_str(&format!("```{language}\n"));
             result.push_str(content);
             result.push_str("\n```\n");
         }
@@ -295,7 +301,7 @@ impl ToolResultFormatter {
         result.push_str("SEARCH: Code Search Results\n\n");
         
         if let Some(query) = value.get("query").and_then(|v| v.as_str()) {
-            result.push_str(&format!("**Query:** {}\n\n", query));
+            result.push_str(&format!("**Query:** {query}\n\n"));
         }
         
         if let Some(results) = value.get("results").and_then(|v| v.as_array()) {
@@ -306,7 +312,7 @@ impl ToolResultFormatter {
                     result.push_str(&format!("{}. **{}**\n", i + 1, file_path));
                     
                     if let Some(repo) = search_result.get("repository").and_then(|v| v.as_str()) {
-                        result.push_str(&format!("   Repository: {}\n", repo));
+                        result.push_str(&format!("   Repository: {repo}\n"));
                     }
                     
                     if let Some(score) = search_result.get("score").and_then(|v| v.as_f64()) {
@@ -357,14 +363,14 @@ impl ToolResultFormatter {
                             })
                             .unwrap_or("");
                         
-                        result.push_str(&format!("   ```{}\n", language));
+                        result.push_str(&format!("   ```{language}\n"));
                         // Limit snippet length
                         let limited_snippet = if snippet.len() > 200 {
                             format!("{}...", &snippet[..200])
                         } else {
                             snippet.to_string()
                         };
-                        result.push_str(&format!("   {}\n", limited_snippet));
+                        result.push_str(&format!("   {limited_snippet}\n"));
                         result.push_str("   ```\n");
                     }
                     
@@ -386,21 +392,21 @@ impl ToolResultFormatter {
             if let Some(summary) = value.get("summary") {
                 result.push_str("**Summary:**\n");
                 if let Some(existing_count) = summary.get("existing_count").and_then(|v| v.as_u64()) {
-                    result.push_str(&format!("   📁 Existing repositories: {}\n", existing_count));
+                    result.push_str(&format!("   📁 Existing repositories: {existing_count}\n"));
                 }
                 if let Some(needs_sync) = summary.get("needs_sync_count").and_then(|v| v.as_u64()) {
-                    result.push_str(&format!("   🔄 Need syncing: {}\n", needs_sync));
+                    result.push_str(&format!("   🔄 Need syncing: {needs_sync}\n"));
                 }
                 if let Some(dirty_count) = summary.get("dirty_count").and_then(|v| v.as_u64()) {
-                    result.push_str(&format!("   ⚠️  With uncommitted changes: {}\n", dirty_count));
+                    result.push_str(&format!("   ⚠️  With uncommitted changes: {dirty_count}\n"));
                 }
                 if let Some(total_files) = summary.get("total_files").and_then(|v| v.as_u64()) {
-                    result.push_str(&format!("   📊 Total files: {}\n", total_files));
+                    result.push_str(&format!("   📊 Total files: {total_files}\n"));
                 }
                 if let Some(total_size) = summary.get("total_size_bytes").and_then(|v| v.as_u64()) {
                     result.push_str(&format!("   💾 Total size: {}\n", format_bytes(total_size)));
                 }
-                result.push_str("\n");
+                result.push('\n');
             }
             
             result.push_str(&format!("**Found {} repositories:**\n\n", repos.len()));
@@ -411,16 +417,16 @@ impl ToolResultFormatter {
                     
                     // Basic information
                     if let Some(url) = repo.get("url").and_then(|v| v.as_str()) {
-                        result.push_str(&format!("   🔗 URL: {}\n", url));
+                        result.push_str(&format!("   🔗 URL: {url}\n"));
                     }
                     
                     if let Some(path) = repo.get("local_path").and_then(|v| v.as_str()) {
-                        result.push_str(&format!("   📁 Path: {}\n", path));
+                        result.push_str(&format!("   📁 Path: {path}\n"));
                     }
                     
                     // Branch information
                     if let Some(branch) = repo.get("active_branch").and_then(|v| v.as_str()) {
-                        result.push_str(&format!("   🌿 Branch: {}\n", branch));
+                        result.push_str(&format!("   🌿 Branch: {branch}\n"));
                     }
                     
                     // Filesystem status
@@ -433,13 +439,13 @@ impl ToolResultFormatter {
                             (true, false) => "📂 Directory (no git)",
                             (false, _) => "❌ Missing from filesystem",
                         };
-                        result.push_str(&format!("   📍 Status: {}\n", status_text));
+                        result.push_str(&format!("   📍 Status: {status_text}\n"));
                         
                         if let Some(file_count) = fs_status.get("total_files").and_then(|v| v.as_u64()) {
                             if let Some(size) = fs_status.get("size_bytes").and_then(|v| v.as_u64()) {
                                 result.push_str(&format!("   📊 Files: {} ({})\n", file_count, format_bytes(size)));
                             } else {
-                                result.push_str(&format!("   📊 Files: {}\n", file_count));
+                                result.push_str(&format!("   📊 Files: {file_count}\n"));
                             }
                         }
                     }
@@ -453,7 +459,7 @@ impl ToolResultFormatter {
                                 "NeverSynced" => "❌ Never synced",
                                 _ => "❓ Unknown",
                             };
-                            result.push_str(&format!("   🔄 Sync: {}\n", sync_text));
+                            result.push_str(&format!("   🔄 Sync: {sync_text}\n"));
                         }
                         
                         if let Some(branches_needing_sync) = sync_status.get("branches_needing_sync").and_then(|v| v.as_array()) {
@@ -473,7 +479,7 @@ impl ToolResultFormatter {
                             let short_commit = if commit.len() >= 8 { &commit[..8] } else { commit };
                             let is_clean = git_status.get("is_clean").and_then(|v| v.as_bool()).unwrap_or(true);
                             let clean_text = if is_clean { "clean" } else { "dirty" };
-                            result.push_str(&format!("   📍 Commit: {} ({})\n", short_commit, clean_text));
+                            result.push_str(&format!("   📍 Commit: {short_commit} ({clean_text})\n"));
                         }
                     }
                     
@@ -497,7 +503,7 @@ impl ToolResultFormatter {
                                 .filter_map(|ext| {
                                     let name = ext.get("extension").and_then(|v| v.as_str())?;
                                     let count = ext.get("count").and_then(|v| v.as_u64())?;
-                                    Some(format!("{} ({})", name, count))
+                                    Some(format!("{name} ({count})"))
                                 })
                                 .collect();
                             if !ext_strs.is_empty() {
@@ -512,7 +518,7 @@ impl ToolResultFormatter {
             
             // Active repository
             if let Some(active) = value.get("active_repository").and_then(|v| v.as_str()) {
-                result.push_str(&format!("**Active Repository:** {}\n", active));
+                result.push_str(&format!("**Active Repository:** {active}\n"));
             }
         }
         
@@ -525,15 +531,15 @@ impl ToolResultFormatter {
         result.push_str("📦 Repository Operation\n\n");
         
         if let Some(message) = value.get("message").and_then(|v| v.as_str()) {
-            result.push_str(&format!("**Result:** {}\n\n", message));
+            result.push_str(&format!("**Result:** {message}\n\n"));
         }
         
         if let Some(repo_name) = value.get("repository_name").and_then(|v| v.as_str()) {
-            result.push_str(&format!("**Repository:** {}\n\n", repo_name));
+            result.push_str(&format!("**Repository:** {repo_name}\n\n"));
         }
         
         if let Some(details) = value.get("details").and_then(|v| v.as_str()) {
-            result.push_str(&format!("**Details:** {}\n\n", details));
+            result.push_str(&format!("**Details:** {details}\n\n"));
         }
         
         result
@@ -545,7 +551,7 @@ impl ToolResultFormatter {
         result.push_str("📁 File Search Results\n\n");
         
         if let Some(pattern) = value.get("pattern").and_then(|v| v.as_str()) {
-            result.push_str(&format!("**Pattern:** {}\n\n", pattern));
+            result.push_str(&format!("**Pattern:** {pattern}\n\n"));
         }
         
         if let Some(files) = value.get("files").and_then(|v| v.as_array()) {
@@ -567,15 +573,15 @@ impl ToolResultFormatter {
         result.push_str("✏️ Edit Operation\n\n");
         
         if let Some(message) = value.get("message").and_then(|v| v.as_str()) {
-            result.push_str(&format!("**Result:** {}\n\n", message));
+            result.push_str(&format!("**Result:** {message}\n\n"));
         }
         
         if let Some(file_path) = value.get("file_path").and_then(|v| v.as_str()) {
-            result.push_str(&format!("**File:** {}\n\n", file_path));
+            result.push_str(&format!("**File:** {file_path}\n\n"));
         }
         
         if let Some(changes) = value.get("changes_made").and_then(|v| v.as_str()) {
-            result.push_str(&format!("**Changes:** {}\n\n", changes));
+            result.push_str(&format!("**Changes:** {changes}\n\n"));
         }
         
         result
@@ -589,9 +595,9 @@ impl ToolResultFormatter {
         let mut file_path_for_lang = None;
         
         if let Some(file_path) = value.get("relativePath").and_then(|v| v.as_str()) {
-            result.push_str(&format!("📄 **{}**\n\n", file_path));
+            result.push_str(&format!("📄 **{file_path}**\n\n"));
             file_path_for_lang = Some(file_path);
-            log::debug!("MCP file view: Found relativePath: {}", file_path);
+            log::debug!("MCP file view: Found relativePath: {file_path}");
         }
         
         // Show the actual file content
@@ -604,7 +610,7 @@ impl ToolResultFormatter {
                     .and_then(|path| std::path::Path::new(path).extension())
                     .and_then(|ext| ext.to_str());
                 
-                log::debug!("MCP file view: Detected extension: {:?}", extension);
+                log::debug!("MCP file view: Detected extension: {extension:?}");
                 
                 let language = extension
                     .map(|ext| {
@@ -642,13 +648,13 @@ impl ToolResultFormatter {
                             "makefile" => "makefile",
                             _ => ext // Use the extension as-is for other cases
                         };
-                        log::debug!("MCP file view: Mapped {} to language: {}", ext, lang);
+                        log::debug!("MCP file view: Mapped {ext} to language: {lang}");
                         lang
                     })
                     .unwrap_or("");
                 
-                log::debug!("MCP file view: Using language identifier: '{}'", language);
-                result.push_str(&format!("```{}\n{}\n```\n", language, content));
+                log::debug!("MCP file view: Using language identifier: '{language}'");
+                result.push_str(&format!("```{language}\n{content}\n```\n"));
             }
         }
         
@@ -669,7 +675,7 @@ impl ToolResultFormatter {
                 
                 // Extract file path and line range - fields are in camelCase
                 if let Some(file_path) = item.get("filePath").and_then(|v| v.as_str()) {
-                    result.push_str(&format!("**{}**", file_path));
+                    result.push_str(&format!("**{file_path}**"));
                     
                     // Show line range
                     let start_line = item.get("startLine").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -677,18 +683,18 @@ impl ToolResultFormatter {
                     
                     if start_line > 0 {
                         if end_line > start_line {
-                            result.push_str(&format!(":{}-{}", start_line, end_line));
+                            result.push_str(&format!(":{start_line}-{end_line}"));
                         } else {
-                            result.push_str(&format!(":{}", start_line));
+                            result.push_str(&format!(":{start_line}"));
                         }
                     }
                     
                     // Show score if available
                     if let Some(score) = item.get("score").and_then(|v| v.as_f64()) {
-                        result.push_str(&format!(" (score: {:.2})", score));
+                        result.push_str(&format!(" (score: {score:.2})"));
                     }
                     
-                    result.push_str("\n");
+                    result.push('\n');
                 }
                 
                 // Show preview if available
@@ -734,7 +740,7 @@ impl ToolResultFormatter {
                         })
                         .unwrap_or("");
                     
-                    result.push_str(&format!("```{}\n{}\n```\n", language, preview));
+                    result.push_str(&format!("```{language}\n{preview}\n```\n"));
                 } else if let Some(content) = item.get("content").and_then(|v| v.as_str()) {
                     // Fall back to full content if available
                     if content != "[Content not included]" {
@@ -790,16 +796,16 @@ impl ToolResultFormatter {
             
             for repo in repos {
                 if let Some(name) = repo.get("name").and_then(|v| v.as_str()) {
-                    result.push_str(&format!("• **{}**", name));
+                    result.push_str(&format!("• **{name}**"));
                     
                     if let Some(branch) = repo.get("activeBranch").and_then(|v| v.as_str()) {
-                        result.push_str(&format!(" ({})", branch));
+                        result.push_str(&format!(" ({branch})"));
                     }
                     
-                    result.push_str("\n");
+                    result.push('\n');
                     
                     if let Some(path) = repo.get("path").and_then(|v| v.as_str()) {
-                        result.push_str(&format!("  📁 {}\n", path));
+                        result.push_str(&format!("  📁 {path}\n"));
                     }
                 }
             }
@@ -822,11 +828,11 @@ impl ToolResultFormatter {
             result.push_str("```json\n[\n");
             for (i, file) in files.iter().enumerate() {
                 if let Some(file_path) = file.as_str() {
-                    result.push_str(&format!("  \"{}\"", file_path));
+                    result.push_str(&format!("  \"{file_path}\""));
                     if i < files.len() - 1 {
-                        result.push_str(",");
+                        result.push(',');
                     }
-                    result.push_str("\n");
+                    result.push('\n');
                 }
             }
             result.push_str("]\n```\n");
@@ -843,19 +849,19 @@ impl ToolResultFormatter {
         
         if let Some(stdout) = value.get("stdout").and_then(|v| v.as_str()) {
             if !stdout.is_empty() {
-                result.push_str(&format!("```\n{}\n```\n", stdout));
+                result.push_str(&format!("```\n{stdout}\n```\n"));
             }
         }
         
         if let Some(stderr) = value.get("stderr").and_then(|v| v.as_str()) {
             if !stderr.is_empty() {
-                result.push_str(&format!("\n**Error output:**\n```\n{}\n```\n", stderr));
+                result.push_str(&format!("\n**Error output:**\n```\n{stderr}\n```\n"));
             }
         }
         
         if let Some(exit_code) = value.get("exit_code").and_then(|v| v.as_i64()) {
             if exit_code != 0 {
-                result.push_str(&format!("\n**Exit code:** {}\n", exit_code));
+                result.push_str(&format!("\n**Exit code:** {exit_code}\n"));
             }
         }
         
@@ -899,7 +905,7 @@ impl ToolResultFormatter {
                         _ => "🟡"
                     };
                     
-                    result.push_str(&format!("{} {} {}\n", status_icon, priority_icon, content));
+                    result.push_str(&format!("{status_icon} {priority_icon} {content}\n"));
                 }
             }
         }
@@ -936,7 +942,7 @@ impl ToolResultFormatter {
         
         // Add summary if available
         if let Some(summary) = value.get("summary").and_then(|v| v.as_str()) {
-            result.push_str(&format!("📋 **{}**\n\n", summary));
+            result.push_str(&format!("📋 **{summary}**\n\n"));
         }
         
         // Format todos
@@ -958,7 +964,7 @@ impl ToolResultFormatter {
                         _ => "🟡"
                     };
                     
-                    result.push_str(&format!("{} {} {}\n", status_icon, priority_indicator, content));
+                    result.push_str(&format!("{status_icon} {priority_indicator} {content}\n"));
                 }
             }
         }
@@ -983,11 +989,11 @@ impl ToolResultFormatter {
         let mut result = String::new();
         
         if let Some(file_path) = value.get("file_path").and_then(|v| v.as_str()) {
-            result.push_str(&format!("📝 **Edited:** `{}`\n\n", file_path));
+            result.push_str(&format!("📝 **Edited:** `{file_path}`\n\n"));
         }
         
         if let Some(summary) = value.get("changes_summary").and_then(|v| v.as_str()) {
-            result.push_str(&format!("{}\n\n", summary));
+            result.push_str(&format!("{summary}\n\n"));
         }
         
         // The diff will be shown in the special diff rendering
@@ -1003,15 +1009,15 @@ impl ToolResultFormatter {
         let mut result = String::new();
         
         if let Some(file_path) = value.get("file_path").and_then(|v| v.as_str()) {
-            result.push_str(&format!("📝 **Multi-edited:** `{}`\n\n", file_path));
+            result.push_str(&format!("📝 **Multi-edited:** `{file_path}`\n\n"));
         }
         
         if let Some(edits_applied) = value.get("edits_applied").and_then(|v| v.as_u64()) {
-            result.push_str(&format!("Applied {} edits\n", edits_applied));
+            result.push_str(&format!("Applied {edits_applied} edits\n"));
         }
         
         if let Some(summary) = value.get("changes_summary").and_then(|v| v.as_str()) {
-            result.push_str(&format!("{}\n\n", summary));
+            result.push_str(&format!("{summary}\n\n"));
         }
         
         // The diff will be shown in the special diff rendering
@@ -1029,12 +1035,12 @@ impl ToolResultFormatter {
         let mut result = String::new();
         
         if let Some(command) = value.get("command").and_then(|v| v.as_str()) {
-            result.push_str(&format!("🖥️ **Command:** `{}`\n", command));
+            result.push_str(&format!("🖥️ **Command:** `{command}`\n"));
         }
         
         if let Some(exit_code) = value.get("exit_code").and_then(|v| v.as_i64()) {
             let status = if exit_code == 0 { "✅ Success" } else { "❌ Failed" };
-            result.push_str(&format!("**Status:** {} (exit code: {})\n", status, exit_code));
+            result.push_str(&format!("**Status:** {status} (exit code: {exit_code})\n"));
         }
         
         if let Some(timed_out) = value.get("timed_out").and_then(|v| v.as_bool()) {
@@ -1054,18 +1060,18 @@ impl ToolResultFormatter {
         let mut file_path_for_lang = None;
         
         if let Some(file_path) = value.get("file_path").and_then(|v| v.as_str()) {
-            result.push_str(&format!("📄 **File:** `{}`\n", file_path));
+            result.push_str(&format!("📄 **File:** `{file_path}`\n"));
             file_path_for_lang = Some(file_path);
         }
         
         if let Some(line_count) = value.get("line_count").and_then(|v| v.as_u64()) {
-            result.push_str(&format!("**Lines:** {}", line_count));
+            result.push_str(&format!("**Lines:** {line_count}"));
         }
         
         if let Some(file_size) = value.get("file_size").and_then(|v| v.as_u64()) {
-            result.push_str(&format!(" | **Size:** {} bytes\n", file_size));
+            result.push_str(&format!(" | **Size:** {file_size} bytes\n"));
         } else {
-            result.push_str("\n");
+            result.push('\n');
         }
         
         // Check if we're reading a specific range
@@ -1073,7 +1079,7 @@ impl ToolResultFormatter {
             value.get("start_line").and_then(|v| v.as_u64()),
             value.get("end_line").and_then(|v| v.as_u64())
         ) {
-            result.push_str(&format!("**Range:** Lines {}-{}\n", start, end));
+            result.push_str(&format!("**Range:** Lines {start}-{end}\n"));
         }
         
         // Detect language from file extension for syntax highlighting
@@ -1117,7 +1123,7 @@ impl ToolResultFormatter {
             })
             .unwrap_or("");
         
-        result.push_str(&format!("\n```{}\n", language));
+        result.push_str(&format!("\n```{language}\n"));
         if let Some(content) = value.get("content").and_then(|v| v.as_str()) {
             result.push_str(content);
         }
@@ -1136,11 +1142,11 @@ impl ToolResultFormatter {
             } else {
                 "💾 **Updated:**"
             };
-            result.push_str(&format!("{} `{}`\n", action, file_path));
+            result.push_str(&format!("{action} `{file_path}`\n"));
         }
         
         if let Some(bytes) = value.get("bytes_written").and_then(|v| v.as_u64()) {
-            result.push_str(&format!("**Bytes written:** {}\n", bytes));
+            result.push_str(&format!("**Bytes written:** {bytes}\n"));
         }
         
         result
@@ -1171,7 +1177,7 @@ impl ToolResultFormatter {
                     _ => val.to_string(),
                 };
                 
-                result.push_str(&format!("**{}:** {}\n", key, val_str));
+                result.push_str(&format!("**{key}:** {val_str}\n"));
             }
         } else {
             // If it's not an object, just show the value
@@ -1749,7 +1755,7 @@ mod tests {
         
         for tool_type in tool_types {
             let formatted = formatter.format_successful_tool_result(tool_type, &test_data);
-            assert!(!formatted.is_empty(), "Tool type {} should produce non-empty output", tool_type);
+            assert!(!formatted.is_empty(), "Tool type {tool_type} should produce non-empty output");
         }
     }
 } 

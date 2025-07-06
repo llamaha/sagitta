@@ -4,7 +4,6 @@ use std::collections::HashMap;
 
 use crate::agent::conversation::clustering::ConversationCluster;
 use crate::agent::conversation::types::{ConversationSummary, ProjectType};
-use crate::agent::state::types::ConversationStatus;
 use crate::llm::client::{LlmClient, Role, Message, MessagePart};
 use sagitta_embed::EmbeddingPool;
 
@@ -101,7 +100,7 @@ impl ClusterNamer {
                     }
                 }
                 Err(e) => {
-                    eprintln!("LLM cluster naming failed: {}", e);
+                    eprintln!("LLM cluster naming failed: {e}");
                 }
             }
         }
@@ -186,7 +185,7 @@ impl ClusterNamer {
         // Add project type if configured
         if self.config.include_project_type {
             if let Some(ref project_type) = cluster.dominant_project_type {
-                context_parts.push(format!("Project Type: {:?}", project_type));
+                context_parts.push(format!("Project Type: {project_type:?}"));
             }
         }
         
@@ -404,7 +403,7 @@ impl ClusterNamer {
         
         let mut common_words: Vec<(String, usize)> = word_counts
             .into_iter()
-            .filter(|(_, count)| *count >= (titles.len() + 1) / 2) // At least half the titles
+            .filter(|(_, count)| *count >= titles.len().div_ceil(2)) // At least half the titles
             .collect();
         
         // Sort by count (descending) then alphabetically for deterministic behavior
@@ -461,7 +460,7 @@ impl ClusterNamer {
         
         // Use project type if available
         if let Some(ref project_type) = cluster.dominant_project_type {
-            return format!("{:?} Cluster", project_type);
+            return format!("{project_type:?} Cluster");
         }
         
         // Final fallback with count
@@ -487,7 +486,7 @@ impl ClusterNamer {
             name
         } else {
             let truncated = name.chars().take(self.config.max_name_length - 3).collect::<String>();
-            format!("{}...", truncated)
+            format!("{truncated}...")
         }
     }
 }
@@ -497,6 +496,7 @@ mod tests {
     use super::*;
     use uuid::Uuid;
     use chrono::Utc;
+    use crate::ConversationStatus;
     
     fn create_test_conversation(title: &str, tags: Vec<String>) -> ConversationSummary {
         ConversationSummary {
@@ -686,7 +686,7 @@ mod tests {
             name.to_lowercase().contains("machine learning") ||
             name.to_lowercase().contains("ml") ||
             name.to_lowercase().contains("learning"),
-            "Should identify ML theme, got: '{}'", name
+            "Should identify ML theme, got: '{name}'"
         );
     }
 } 

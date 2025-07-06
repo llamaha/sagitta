@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Execution provider preference order for auto-selection
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum ExecutionProvider {
     /// CUDA GPU execution provider
     Cuda,
@@ -18,14 +18,10 @@ pub enum ExecutionProvider {
     /// CoreML execution provider (macOS)
     CoreML,
     /// Auto-detect optimal provider
+    #[default]
     Auto,
 }
 
-impl Default for ExecutionProvider {
-    fn default() -> Self {
-        ExecutionProvider::Auto
-    }
-}
 
 /// Memory pool configuration for tensor reuse
 #[derive(Debug, Clone, PartialEq)]
@@ -1360,14 +1356,14 @@ mod tests {
 
         assert_eq!(config.intra_op_num_threads, Some(2));
         assert_eq!(config.inter_op_num_threads, Some(1));
-        assert_eq!(config.enable_parallel_execution, true);
+        assert!(config.enable_parallel_execution);
         assert_eq!(config.graph_optimization_level, 2);
-        assert_eq!(config.enable_memory_pattern, false);
-        assert_eq!(config.enable_deterministic_compute, true);
+        assert!(!config.enable_memory_pattern);
+        assert!(config.enable_deterministic_compute);
         assert_eq!(config.profiling_file_path, Some(PathBuf::from("/tmp/profile.json")));
-        assert_eq!(config.io_binding_config.enable_io_binding, false);
+        assert!(!config.io_binding_config.enable_io_binding);
         assert_eq!(config.cuda_memory_limit, Some(1024 * 1024 * 1024));
-        assert_eq!(config.enable_cpu_arena, false);
+        assert!(!config.enable_cpu_arena);
     }
 
     #[test]
@@ -1386,7 +1382,7 @@ mod tests {
         assert_eq!(config.intra_op_num_threads, Some(4));
         assert_eq!(config.inter_op_num_threads, Some(2));
         assert_eq!(config.graph_optimization_level, 3);
-        assert_eq!(config.enable_memory_pattern, true);
+        assert!(config.enable_memory_pattern);
         assert_eq!(config.cuda_memory_limit, Some(2 * 1024 * 1024 * 1024));
     }
 
@@ -1405,18 +1401,18 @@ mod tests {
         // Verify sensible defaults are set
         assert!(config.intra_op_num_threads.is_some());
         assert!(config.inter_op_num_threads.is_some());
-        assert_eq!(config.enable_parallel_execution, false);
+        assert!(!config.enable_parallel_execution);
         assert_eq!(config.graph_optimization_level, 3);
-        assert_eq!(config.enable_memory_pattern, true);
-        assert_eq!(config.enable_deterministic_compute, false);
+        assert!(config.enable_memory_pattern);
+        assert!(!config.enable_deterministic_compute);
         
         // I/O binding should be enabled for CUDA builds, disabled for CPU-only builds
         #[cfg(feature = "cuda")]
-        assert_eq!(config.io_binding_config.enable_io_binding, true);
+        assert!(config.io_binding_config.enable_io_binding);
         #[cfg(not(feature = "cuda"))]
         assert_eq!(config.io_binding_config.enable_io_binding, false);
         
-        assert_eq!(config.enable_cpu_arena, true);
+        assert!(config.enable_cpu_arena);
     }
 
     #[test]
@@ -1435,10 +1431,10 @@ mod tests {
             .with_pre_allocated_input_buffers(16)
             .with_zero_copy(true);
 
-        assert_eq!(config.io_binding_config.enable_io_binding, true);
-        assert_eq!(config.io_binding_config.enable_pre_allocated_buffers, true);
-        assert_eq!(config.io_binding_config.enable_zero_copy, true);
-        assert_eq!(config.io_binding_config.enable_batch_optimization, true);
+        assert!(config.io_binding_config.enable_io_binding);
+        assert!(config.io_binding_config.enable_pre_allocated_buffers);
+        assert!(config.io_binding_config.enable_zero_copy);
+        assert!(config.io_binding_config.enable_batch_optimization);
         assert_eq!(config.io_binding_config.pre_allocated_input_buffers, 16);
         assert_eq!(config.io_binding_config.pre_allocated_output_buffers, 8);
     }
@@ -1452,10 +1448,10 @@ mod tests {
             .with_memory_pressure_detection(false)
             .with_memory_pressure_threshold(0.9);
 
-        assert_eq!(config.memory_pool_config.enable_pool, true);
+        assert!(config.memory_pool_config.enable_pool);
         assert_eq!(config.memory_pool_config.max_pool_size, 64);
         assert_eq!(config.memory_pool_config.max_pool_memory_bytes, 1024 * 1024 * 1024);
-        assert_eq!(config.memory_pool_config.enable_memory_pressure_detection, false);
+        assert!(!config.memory_pool_config.enable_memory_pressure_detection);
         assert_eq!(config.memory_pool_config.memory_pressure_threshold, 0.9);
     }
 
@@ -1470,7 +1466,7 @@ mod tests {
         assert_eq!(config.execution_providers[0], ExecutionProvider::Cuda);
         assert_eq!(config.execution_providers[1], ExecutionProvider::Cpu);
         assert_eq!(config.execution_providers[2], ExecutionProvider::DirectML);
-        assert_eq!(config.enable_provider_auto_selection, false);
+        assert!(!config.enable_provider_auto_selection);
     }
 
     #[test]
@@ -1483,12 +1479,12 @@ mod tests {
             .with_memory_prediction(false)
             .with_throughput_optimization(true);
 
-        assert_eq!(config.dynamic_batch_config.enable_dynamic_batching, true);
+        assert!(config.dynamic_batch_config.enable_dynamic_batching);
         assert_eq!(config.dynamic_batch_config.min_batch_size, 2);
         assert_eq!(config.dynamic_batch_config.max_batch_size, 64);
         assert_eq!(config.dynamic_batch_config.target_latency_ms, 50);
-        assert_eq!(config.dynamic_batch_config.enable_memory_prediction, false);
-        assert_eq!(config.dynamic_batch_config.optimize_for_throughput, true);
+        assert!(!config.dynamic_batch_config.enable_memory_prediction);
+        assert!(config.dynamic_batch_config.optimize_for_throughput);
     }
 
     #[test]
@@ -1497,8 +1493,8 @@ mod tests {
             .with_cuda_memory_streams(false)
             .with_hardware_detection(false);
 
-        assert_eq!(config.enable_cuda_memory_streams, false);
-        assert_eq!(config.enable_hardware_detection, false);
+        assert!(!config.enable_cuda_memory_streams);
+        assert!(!config.enable_hardware_detection);
     }
 
     #[test]
@@ -1516,15 +1512,15 @@ mod tests {
             .with_provider_auto_selection(true)
             .build_unchecked();
 
-        assert_eq!(config.io_binding_config.enable_pre_allocated_buffers, true);
+        assert!(config.io_binding_config.enable_pre_allocated_buffers);
         assert_eq!(config.io_binding_config.pre_allocated_input_buffers, 8);
-        assert_eq!(config.memory_pool_config.enable_pool, true);
+        assert!(config.memory_pool_config.enable_pool);
         assert_eq!(config.memory_pool_config.max_pool_size, 32);
-        assert_eq!(config.dynamic_batch_config.enable_dynamic_batching, true);
+        assert!(config.dynamic_batch_config.enable_dynamic_batching);
         assert_eq!(config.dynamic_batch_config.min_batch_size, 1);
         assert_eq!(config.dynamic_batch_config.max_batch_size, 16);
         assert_eq!(config.execution_providers.len(), 2); // Auto + Cuda
-        assert_eq!(config.enable_provider_auto_selection, true);
+        assert!(config.enable_provider_auto_selection);
     }
 
     #[test]
@@ -1547,10 +1543,10 @@ mod tests {
         // I/O binding defaults - feature-gated for optimal out-of-the-box experience
         #[cfg(feature = "cuda")]
         {
-            assert_eq!(config.io_binding_config.enable_io_binding, true);
-            assert_eq!(config.io_binding_config.enable_pre_allocated_buffers, true);
-            assert_eq!(config.io_binding_config.enable_zero_copy, true);
-            assert_eq!(config.io_binding_config.enable_batch_optimization, true);
+            assert!(config.io_binding_config.enable_io_binding);
+            assert!(config.io_binding_config.enable_pre_allocated_buffers);
+            assert!(config.io_binding_config.enable_zero_copy);
+            assert!(config.io_binding_config.enable_batch_optimization);
         }
         #[cfg(not(feature = "cuda"))]
         {
@@ -1564,27 +1560,27 @@ mod tests {
         assert_eq!(config.io_binding_config.pre_allocated_output_buffers, 4);
 
         // Memory pool defaults
-        assert_eq!(config.memory_pool_config.enable_pool, true);
+        assert!(config.memory_pool_config.enable_pool);
         assert_eq!(config.memory_pool_config.max_pool_size, 32);
         assert_eq!(config.memory_pool_config.max_pool_memory_bytes, 512 * 1024 * 1024);
-        assert_eq!(config.memory_pool_config.enable_memory_pressure_detection, true);
+        assert!(config.memory_pool_config.enable_memory_pressure_detection);
         assert_eq!(config.memory_pool_config.memory_pressure_threshold, 0.8);
 
         // Execution provider defaults
         assert_eq!(config.execution_providers, vec![ExecutionProvider::Auto]);
-        assert_eq!(config.enable_provider_auto_selection, true);
+        assert!(config.enable_provider_auto_selection);
 
         // Dynamic batch defaults
-        assert_eq!(config.dynamic_batch_config.enable_dynamic_batching, true);
+        assert!(config.dynamic_batch_config.enable_dynamic_batching);
         assert_eq!(config.dynamic_batch_config.min_batch_size, 1);
         assert_eq!(config.dynamic_batch_config.max_batch_size, 32);
         assert_eq!(config.dynamic_batch_config.target_latency_ms, 100);
-        assert_eq!(config.dynamic_batch_config.enable_memory_prediction, true);
-        assert_eq!(config.dynamic_batch_config.optimize_for_throughput, false);
+        assert!(config.dynamic_batch_config.enable_memory_prediction);
+        assert!(!config.dynamic_batch_config.optimize_for_throughput);
 
         // Hardware optimization defaults
-        assert_eq!(config.enable_cuda_memory_streams, true);
-        assert_eq!(config.enable_hardware_detection, true);
+        assert!(config.enable_cuda_memory_streams);
+        assert!(config.enable_hardware_detection);
     }
 
     #[test]
@@ -2099,13 +2095,13 @@ mod tests {
         #[cfg(feature = "cuda")]
         {
             // Should enable GPU optimizations
-            assert_eq!(config.io_binding_config.enable_io_binding, true);
-            assert_eq!(config.io_binding_config.enable_pre_allocated_buffers, true);
-            assert_eq!(config.io_binding_config.enable_zero_copy, true);
-            assert_eq!(config.io_binding_config.enable_batch_optimization, true);
-            assert_eq!(config.enable_cuda_memory_streams, true);
-            assert_eq!(config.cuda_config.enable_memory_optimization, true);
-            assert_eq!(config.cuda_config.enable_memory_pool, true);
+            assert!(config.io_binding_config.enable_io_binding);
+            assert!(config.io_binding_config.enable_pre_allocated_buffers);
+            assert!(config.io_binding_config.enable_zero_copy);
+            assert!(config.io_binding_config.enable_batch_optimization);
+            assert!(config.enable_cuda_memory_streams);
+            assert!(config.cuda_config.enable_memory_optimization);
+            assert!(config.cuda_config.enable_memory_pool);
         }
         #[cfg(not(feature = "cuda"))]
         {

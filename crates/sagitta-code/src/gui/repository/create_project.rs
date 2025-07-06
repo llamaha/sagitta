@@ -1,6 +1,5 @@
 use std::sync::Arc;
-use std::path::PathBuf;
-use egui::{Ui, RichText, Grid, TextEdit, Button, Checkbox, ComboBox, Frame, Stroke};
+use egui::{Ui, RichText, Grid, TextEdit, Button, Checkbox, ComboBox, Frame, Stroke, CornerRadius};
 use tokio::sync::Mutex;
 
 use crate::gui::theme::AppTheme;
@@ -21,7 +20,7 @@ impl LanguageProjectInfo {
         match language {
             "rust" => Some(LanguageProjectInfo {
                 command_check: "cargo",
-                create_command: |name| format!("cargo new {}", name),
+                create_command: |name| format!("cargo new {name}"),
                 tool_name: "Cargo",
                 install_instructions: "Install Rust from https://rustup.rs/",
             }),
@@ -29,8 +28,7 @@ impl LanguageProjectInfo {
                 command_check: "python",
                 create_command: |name| {
                     format!(
-                        "mkdir {} && cd {} && python -m venv venv && echo '# {}' > README.md",
-                        name, name, name
+                        "mkdir {name} && cd {name} && python -m venv venv && echo '# {name}' > README.md"
                     )
                 },
                 tool_name: "Python",
@@ -38,26 +36,26 @@ impl LanguageProjectInfo {
             }),
             "javascript" => Some(LanguageProjectInfo {
                 command_check: "npm",
-                create_command: |name| format!("mkdir {} && cd {} && npm init -y", name, name),
+                create_command: |name| format!("mkdir {name} && cd {name} && npm init -y"),
                 tool_name: "Node.js/npm",
                 install_instructions: "Install Node.js from https://nodejs.org/",
             }),
             "typescript" => Some(LanguageProjectInfo {
                 command_check: "npm",
-                create_command: |name| format!("mkdir {} && cd {} && npm init -y --typescript", name, name),
+                create_command: |name| format!("mkdir {name} && cd {name} && npm init -y --typescript"),
                 tool_name: "Node.js/npm",
                 install_instructions: "Install Node.js from https://nodejs.org/",
             }),
             "go" => Some(LanguageProjectInfo {
                 command_check: "go",
-                create_command: |name| format!("mkdir {} && cd {} && go mod init {}", name, name, name),
+                create_command: |name| format!("mkdir {name} && cd {name} && go mod init {name}"),
                 tool_name: "Go",
                 install_instructions: "Install Go from https://golang.org/",
             }),
             "ruby" => Some(LanguageProjectInfo {
                 command_check: "bundle",
                 create_command: |name| {
-                    format!("mkdir {} && cd {} && bundle init", name, name)
+                    format!("mkdir {name} && cd {name} && bundle init")
                 },
                 tool_name: "Ruby/Bundler",
                 install_instructions: "Install Ruby from https://ruby-lang.org/ and run 'gem install bundler'",
@@ -84,21 +82,24 @@ pub fn render_create_project(
 
     // Show project info if we have a project name
     if !state.project_form.name.is_empty() {
-        Frame::none()
+        Frame::NONE
             .fill(theme.info_background())
             .stroke(Stroke::new(1.0, theme.info_color()))
-            .rounding(4.0)
+            .corner_radius(CornerRadius::same(4))
             .inner_margin(8.0)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("💡").size(14.0));
                     ui.vertical(|ui| {
                         ui.label(RichText::new("Project Info:").strong().color(theme.info_color()));
-                        ui.label(format!("• Location: {}/{}", state.project_form.path, state.project_form.name));
+                        let path = &state.project_form.path;
+                        let name = &state.project_form.name;
+                        ui.label(format!("• Location: {path}/{name}"));
                         
                         // Check if the language tool is available
                         if let Some(info) = LanguageProjectInfo::get_language_info(&state.project_form.language) {
-                            ui.label(format!("• Will use {} to create project", info.tool_name));
+                            let tool = info.tool_name;
+                            ui.label(format!("• Will use {tool} to create project"));
                         }
                     });
                 });
@@ -107,10 +108,10 @@ pub fn render_create_project(
     }
 
     // Main form
-    Frame::none()
+    Frame::NONE
         .fill(theme.panel_background())
         .stroke(Stroke::new(1.0, theme.border_color()))
-        .rounding(6.0)
+        .corner_radius(CornerRadius::same(6))
         .inner_margin(12.0)
         .show(ui, |ui| {
             Grid::new("project_creation_form")
@@ -136,7 +137,7 @@ pub fn render_create_project(
                             ("ruby", "💎"),
                         ];
 
-                        ComboBox::from_id_source("language_combo")
+                        ComboBox::from_id_salt("language_combo")
                             .selected_text(&state.project_form.language)
                             .show_ui(ui, |ui| {
                                 for (lang, _icon) in &languages {
@@ -238,7 +239,7 @@ pub fn render_create_project(
 /// Create the project directly without AI involvement
 fn create_project(
     state: &mut RepoPanelState,
-    config: &SagittaCodeConfig,
+    _config: &SagittaCodeConfig,
     repo_manager: Arc<Mutex<RepositoryManager>>,
 ) {
     let project_name = state.project_form.name.clone();
@@ -248,14 +249,16 @@ fn create_project(
     
     if let Some(info) = LanguageProjectInfo::get_language_info(&language) {
         let repo_manager_clone = repo_manager.clone();
-        let full_path = format!("{}/{}", project_path, project_name);
+        let full_path = format!("{project_path}/{project_name}");
         
         tokio::spawn(async move {
             // First check if the tool is available
             let check_command = if cfg!(windows) {
-                format!("where {}", info.command_check)
+                let cmd = info.command_check;
+                format!("where {cmd}")
             } else {
-                format!("which {}", info.command_check)
+                let cmd = info.command_check;
+                format!("which {cmd}")
             };
 
             match tokio::process::Command::new(if cfg!(windows) { "cmd" } else { "sh" })
@@ -266,7 +269,7 @@ fn create_project(
                 Ok(output) if output.status.success() => {
                     // Tool is available, create the base directory if it doesn't exist
                     if let Err(e) = tokio::fs::create_dir_all(&project_path).await {
-                        log::error!("Failed to create base directory {}: {}", project_path, e);
+                        log::error!("Failed to create base directory {project_path}: {e}");
                         return;
                     }
                     
@@ -275,75 +278,77 @@ fn create_project(
                     
                     let result = if cfg!(windows) {
                         tokio::process::Command::new("cmd")
-                            .args(["/C", &format!("cd /d \"{}\" && {}", project_path, create_cmd)])
+                            .args(["/C", &format!("cd /d \"{project_path}\" && {create_cmd}")])
                             .output()
                             .await
                     } else {
                         tokio::process::Command::new("sh")
-                            .args(["-c", &format!("cd '{}' && {}", project_path, create_cmd)])
+                            .args(["-c", &format!("cd '{project_path}' && {create_cmd}")])
                             .output()
                             .await
                     };
                     
                     match result {
                         Ok(output) if output.status.success() => {
-                            log::info!("Project created successfully at {}", full_path);
+                            log::info!("Project created successfully at {full_path}");
                             
                             // Initialize git if requested
                             if initialize_git {
                                 let git_init_result = if cfg!(windows) {
                                     tokio::process::Command::new("cmd")
-                                        .args(["/C", &format!("cd /d \"{}\" && git init", full_path)])
+                                        .args(["/C", &format!("cd /d \"{full_path}\" && git init")])
                                         .output()
                                         .await
                                 } else {
                                     tokio::process::Command::new("sh")
-                                        .args(["-c", &format!("cd '{}' && git init", full_path)])
+                                        .args(["-c", &format!("cd '{full_path}' && git init")])
                                         .output()
                                         .await
                                 };
                                 
                                 match git_init_result {
                                     Ok(git_output) if git_output.status.success() => {
-                                        log::info!("Git repository initialized at {}", full_path);
+                                        log::info!("Git repository initialized at {full_path}");
                                     }
                                     Ok(git_output) => {
                                         let error = String::from_utf8_lossy(&git_output.stderr);
-                                        log::warn!("Git init warning for {}: {}", full_path, error);
+                                        log::warn!("Git init warning for {full_path}: {error}");
                                     }
                                     Err(e) => {
-                                        log::warn!("Failed to initialize git for {}: {}", full_path, e);
+                                        log::warn!("Failed to initialize git for {full_path}: {e}");
                                     }
                                 }
                             }
                             
                             // Add to repository manager
-                            let mut manager = repo_manager_clone.lock().await;
+                            let manager = repo_manager_clone.lock().await;
                             if let Err(e) = manager.add_repository(&project_name, &full_path, None, None).await {
-                                log::error!("Failed to add repository after creation: {}", e);
+                                log::error!("Failed to add repository after creation: {e}");
                             } else {
-                                log::info!("Successfully added repository '{}' to Sagitta", project_name);
+                                log::info!("Successfully added repository '{project_name}' to Sagitta");
                                 // Project created successfully - the repository list will refresh automatically
                             }
                         }
                         Ok(output) => {
                             let error = String::from_utf8_lossy(&output.stderr);
-                            log::error!("Failed to create project: {}", error);
+                            log::error!("Failed to create project: {error}");
                         }
                         Err(e) => {
-                            log::error!("Failed to execute create command: {}", e);
+                            log::error!("Failed to execute create command: {e}");
                         }
                     }
                 }
                 _ => {
-                    log::error!("{} is not installed. {}", info.tool_name, info.install_instructions);
+                    let tool = info.tool_name;
+                    let instructions = info.install_instructions;
+                    log::error!("{tool} is not installed. {instructions}");
                 }
             }
         });
 
         state.project_form.status_message = Some("Creating project... Check the logs for progress.".to_string());
     } else {
-        state.project_form.error_message = Some(format!("Project creation for {} is not yet supported", language));
+        state.project_form.error_message = Some(format!("Project creation for {language} is not yet supported"));
     }
     
     state.project_form.creating = false;
@@ -352,7 +357,7 @@ fn create_project(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gui::repository::types::{RepoPanelState, ProjectCreationForm};
+    use crate::gui::repository::types::ProjectCreationForm;
 
     #[test]
     fn test_language_project_info() {

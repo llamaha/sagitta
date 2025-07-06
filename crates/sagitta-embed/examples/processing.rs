@@ -18,8 +18,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Check if model files exist
     if !std::path::Path::new(model_path).exists() || !std::path::Path::new(tokenizer_path).exists() {
         println!("⚠️  Model files not found. This example requires:");
-        println!("   - ONNX model file: {}", model_path);
-        println!("   - Tokenizer file: {}", tokenizer_path);
+        println!("   - ONNX model file: {model_path}");
+        println!("   - Tokenizer file: {tokenizer_path}");
         println!();
         println!("To run this example:");
         println!("1. Download a compatible ONNX embedding model");
@@ -107,7 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let total_duration = file_start.elapsed();
     println!();
     println!("Summary:");
-    println!("  Total time: {:?}", total_duration);
+    println!("  Total time: {total_duration:?}");
     println!("  File processing: {:?} ({:.1}%)", 
              file_duration, 
              file_duration.as_secs_f64() / total_duration.as_secs_f64() * 100.0);
@@ -125,8 +125,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
     println!("Key Benefits Demonstrated:");
     println!("✅ File processing scales to {} CPU cores", num_cpus::get());
-    println!("✅ Embedding models limited to {} instances (controlled GPU memory)", 
-             max_embedding_sessions);
+    println!("✅ Embedding models limited to {max_embedding_sessions} instances (controlled GPU memory)");
     println!("✅ Independent scaling of CPU vs GPU intensive work");
     println!("✅ Async pipeline prevents blocking between phases");
 
@@ -138,17 +137,17 @@ fn create_test_files(temp_dir: &tempfile::TempDir) -> Result<Vec<PathBuf>, Box<d
     
     // Create various test files
     for i in 0..10 {
-        let file_path = temp_dir.path().join(format!("test_{}.rs", i));
+        let file_path = temp_dir.path().join(format!("test_{i}.rs"));
         let content = format!(r#"
-// Test file {}
+// Test file {i}
 use std::collections::HashMap;
 
-pub struct TestStruct_{} {{
+pub struct TestStruct_{i} {{
     data: HashMap<String, i32>,
     counter: usize,
 }}
 
-impl TestStruct_{} {{
+impl TestStruct_{i} {{
     pub fn new() -> Self {{
         Self {{
             data: HashMap::new(),
@@ -166,10 +165,10 @@ impl TestStruct_{} {{
     }}
 }}
 
-pub fn test_function_{}() -> String {{
-    let mut test = TestStruct_{}::new();
-    test.add_item("example".to_string(), {});
-    format!("Test {} completed with count: {{}}", test.get_count())
+pub fn test_function_{i}() -> String {{
+    let mut test = TestStruct_{i}::new();
+    test.add_item("example".to_string(), {i});
+    format!("Test {i} completed with count: {{}}", test.get_count())
 }}
 
 #[cfg(test)]
@@ -178,18 +177,18 @@ mod tests {{
     
     #[test]
     fn test_creation() {{
-        let test = TestStruct_{}::new();
+        let test = TestStruct_{i}::new();
         assert_eq!(test.get_count(), 0);
     }}
     
     #[test]
     fn test_add_item() {{
-        let mut test = TestStruct_{}::new();
+        let mut test = TestStruct_{i}::new();
         test.add_item("key".to_string(), 42);
         assert_eq!(test.get_count(), 1);
     }}
 }}
-"#, i, i, i, i, i, i, i, i, i);
+"#);
         
         std::fs::write(&file_path, content)?;
         files.push(file_path);
@@ -197,13 +196,13 @@ mod tests {{
     
     // Add some Python files too
     for i in 0..5 {
-        let file_path = temp_dir.path().join(format!("test_{}.py", i));
+        let file_path = temp_dir.path().join(format!("test_{i}.py"));
         let content = format!(r#"
 """
-Test Python file {}
+Test Python file {i}
 """
 
-class TestClass{}:
+class TestClass{i}:
     def __init__(self):
         self.data = {{}}
         self.counter = 0
@@ -224,15 +223,15 @@ class TestClass{}:
             result.append(f"{{key}}: {{value * 2}}")
         return result
 
-def test_function_{}():
-    """Test function for file {}."""
-    test = TestClass{}()
-    test.add_item("example", {})
-    return f"Test {} completed with count: {{test.get_count()}}"
+def test_function_{i}():
+    """Test function for file {i}."""
+    test = TestClass{i}()
+    test.add_item("example", {i})
+    return f"Test {i} completed with count: {{test.get_count()}}"
 
 if __name__ == "__main__":
-    print(test_function_{}())
-"#, i, i, i, i, i, i, i, i);
+    print(test_function_{i}())
+"#);
         
         std::fs::write(&file_path, content)?;
         files.push(file_path);

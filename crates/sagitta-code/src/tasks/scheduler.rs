@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc, Duration};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
-use tokio::time::{interval, sleep_until, Instant};
+use tokio::time::interval;
 use uuid::Uuid;
 
 use super::types::*;
@@ -185,7 +185,7 @@ impl TaskScheduler {
                                 error_message: execution_result.err().map(|e| e.to_string()),
                             };
                             
-                            if let Err(_) = event_tx.send(event) {
+                            if event_tx.send(event).is_err() {
                                 // Event receiver dropped, continue anyway
                             }
                             
@@ -310,7 +310,7 @@ impl TaskScheduler {
             ..Default::default()
         };
         
-        let request = CreateTaskRequest {
+        let _request = CreateTaskRequest {
             title,
             description: Some("Scheduled conversation follow-up".to_string()),
             task_type: TaskType::ConversationFollowUp,
@@ -349,7 +349,7 @@ impl TaskScheduler {
                     started_at: Utc::now(),
                     completed_at: Utc::now(),
                     conversation_id: Some(conversation_id),
-                    output: Some(format!("Created follow-up conversation: {}", conversation_id)),
+                    output: Some(format!("Created follow-up conversation: {conversation_id}")),
                     error_message: None,
                     artifacts: Vec::new(),
                 })
@@ -464,7 +464,7 @@ impl Default for RecurringSchedule {
 mod tests {
     use super::*;
     use crate::tasks::manager::InMemoryTaskManager;
-    use crate::agent::conversation::manager::ConversationManager;
+    
     
     #[tokio::test]
     async fn test_scheduler_creation() {

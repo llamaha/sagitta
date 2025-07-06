@@ -6,21 +6,17 @@ use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc}; // Import Utc
 use std::hash::Hash;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum AgentMode {
     ChatOnly,
+    #[default]
     ToolsWithConfirmation,
     FullyAutonomous,
 }
 
-impl Default for AgentMode {
-    fn default() -> Self {
-        AgentMode::ToolsWithConfirmation
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum AgentState {
+    #[default]
     Idle,
     Thinking { message: String },
     Responding { is_streaming: bool, step_info: Option<String> },
@@ -29,29 +25,18 @@ pub enum AgentState {
     Error { message: String, details: Option<String> }, // Added details field
 }
 
-impl Default for AgentState {
-    fn default() -> Self {
-        AgentState::Idle
-    }
-}
-
 // Add other necessary state-related types here if they were previously in this file
 // e.g., ConversationStatus, AgentStateInfo, StateTransition if they are truly agent-level concepts
 // For now, focusing on AgentMode and AgentState as they are widely used.
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash, Default)]
 pub enum ConversationStatus {
+    #[default]
     Active,
     Archived,
     Summarizing,
     Paused,
     Completed,
-}
-
-impl Default for ConversationStatus {
-    fn default() -> Self {
-        ConversationStatus::Active
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

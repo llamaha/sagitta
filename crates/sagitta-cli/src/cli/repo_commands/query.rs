@@ -1,13 +1,13 @@
 use clap::Args;
-use anyhow::{anyhow, Context, Result, bail};
+use anyhow::{anyhow, Result, bail};
 use std::sync::Arc;
 use sagitta_search::{
     config::AppConfig,
     qdrant_client_trait::QdrantClientTrait,
-    repo_helpers::{get_collection_name, get_branch_aware_collection_name},
+    repo_helpers::get_branch_aware_collection_name,
     error::SagittaError,
-    search_impl::search_collection,
-    EmbeddingPool, EmbeddingProcessor,
+    search_impl::{search_collection, SearchParams},
+    EmbeddingPool,
     app_config_to_embedding_config,
     constants::{FIELD_BRANCH, FIELD_LANGUAGE, FIELD_ELEMENT_TYPE},
 };
@@ -18,13 +18,7 @@ use qdrant_client::qdrant::{Filter, QueryResponse, Condition};
 use colored::*;
 use std::fmt::Debug;
 
-use crate::{
-    cli::commands::{
-        LEGACY_INDEX_COLLECTION,
-    },
-    cli::repo_commands::RepoCommand,
-    cli::formatters::print_search_results,
-};
+use crate::cli::formatters::print_search_results;
 
 #[derive(Args, Debug, Clone)]
 pub struct RepoQueryArgs {
@@ -111,16 +105,16 @@ where
     let search_filter = Filter::must(filter_conditions);
 
     log::debug!("Calling core search_collection...");
-    let search_response_result: Result<QueryResponse, SagittaError> = search_collection(
+    let search_response_result: Result<QueryResponse, SagittaError> = search_collection(SearchParams {
         client,
-        &collection_name,
-        &embedding_pool,
-        &args.query,
-        args.limit,
-        Some(search_filter),
+        collection_name: &collection_name,
+        embedding_pool: &embedding_pool,
+        query_text: &args.query,
+        limit: args.limit,
+        filter: Some(search_filter),
         config,
-        None,
-    ).await;
+        search_config: None,
+    }).await;
 
     let search_response = match search_response_result {
         Ok(resp) => resp,

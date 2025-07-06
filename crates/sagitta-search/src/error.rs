@@ -164,7 +164,7 @@ pub enum SagittaError {
 
     /// Error originating from the Qdrant client
     #[error("Qdrant client error: {0}")]
-    QdrantError(#[from] qdrant_client::QdrantError),
+    QdrantError(Box<qdrant_client::QdrantError>),
 
     /// Custom error during a Qdrant operation (e.g., unexpected response)
     #[error("Qdrant operation error: {0}")]
@@ -172,7 +172,7 @@ pub enum SagittaError {
 
     /// Error related to Git operations
     #[error("Git error: {0}")]
-    GitError(#[from] git2::Error),
+    GitError(Box<git2::Error>),
 
     /// Error when a required feature is not yet implemented
     #[error("Feature not implemented: {0}")]
@@ -199,6 +199,20 @@ pub enum SagittaError {
     /// Configuration error with a custom message.
     #[error("Config error: {0}")]
     ConfigError(String),
+}
+
+// Manual From implementation for QdrantError
+impl From<qdrant_client::QdrantError> for SagittaError {
+    fn from(err: qdrant_client::QdrantError) -> Self {
+        SagittaError::QdrantError(Box::new(err))
+    }
+}
+
+// Manual From implementation for git2::Error
+impl From<git2::Error> for SagittaError {
+    fn from(err: git2::Error) -> Self {
+        SagittaError::GitError(Box::new(err))
+    }
 }
 
 // Custom conversion from anyhow::Error to SagittaError
@@ -276,14 +290,14 @@ impl Clone for SagittaError {
             Self::IndexNotFound => Self::IndexNotFound,
             Self::OperationCancelled => Self::OperationCancelled,
             Self::MutexLockError(s) => Self::MutexLockError(s.clone()),
-            Self::QdrantError(e) => Self::Other(format!("QdrantError (cloned): {}", e)),
+            Self::QdrantError(e) => Self::Other(format!("QdrantError (cloned): {e}")),
             Self::QdrantOperationError(s) => Self::QdrantOperationError(s.clone()),
-            Self::GitError(e) => Self::Other(format!("GitError (cloned): {}", e)),
+            Self::GitError(e) => Self::Other(format!("GitError (cloned): {e}")),
             Self::NotImplemented(s) => Self::NotImplemented(s.clone()),
             #[cfg(feature = "ort")]
-            Self::OrtSession(e) => Self::Other(format!("OrtSession Error (cloned): {}", e)),
+            Self::OrtSession(e) => Self::Other(format!("OrtSession Error (cloned): {e}")),
             #[cfg(feature = "ort")]
-            Self::OrtInitialization(e) => Self::Other(format!("OrtInitialization Error (cloned): {}", e)),
+            Self::OrtInitialization(e) => Self::Other(format!("OrtInitialization Error (cloned): {e}")),
             Self::FeatureNotEnabled(s) => Self::FeatureNotEnabled(s.clone()),
             Self::GitMessageError(s) => Self::GitMessageError(s.clone()),
             Self::ConfigError(s) => Self::ConfigError(s.clone()),

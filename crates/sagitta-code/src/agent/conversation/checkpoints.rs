@@ -1,15 +1,14 @@
 // Smart conversation checkpoints with context awareness
 
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use crate::agent::conversation::types::{Conversation, ConversationCheckpoint, ContextSnapshot};
 use crate::agent::message::types::AgentMessage;
-use crate::llm::client::Role;
 
 /// Smart checkpoint manager for conversation state management
 pub struct ConversationCheckpointManager {
@@ -344,7 +343,7 @@ impl ConversationCheckpointManager {
         &self,
         message: &AgentMessage,
         context_messages: &[&AgentMessage],
-        message_index: usize,
+        _message_index: usize,
         conversation: &Conversation,
     ) -> Result<Option<CheckpointSuggestion>> {
         let content = &message.content.to_lowercase();
@@ -514,7 +513,7 @@ impl ConversationCheckpointManager {
             CheckpointReason::BeforeRefactoring => "Before Refactoring".to_string(),
             CheckpointReason::TaskCompletion => "Task Completed".to_string(),
             CheckpointReason::UserRequested => "User Checkpoint".to_string(),
-            CheckpointReason::PeriodicAutomatic => format!("Auto Checkpoint - {:?}", phase),
+            CheckpointReason::PeriodicAutomatic => format!("Auto Checkpoint - {phase:?}"),
             CheckpointReason::BeforeBranching => "Before Branching".to_string(),
         }
     }
@@ -803,7 +802,7 @@ impl ContextSnapshotGenerator {
     }
     
     /// Check if a file should be excluded from snapshots
-    fn should_exclude_file(&self, file_path: &PathBuf, patterns: &[String]) -> bool {
+    fn should_exclude_file(&self, file_path: &Path, patterns: &[String]) -> bool {
         let path_str = file_path.to_string_lossy();
         
         for pattern in patterns {
@@ -838,7 +837,7 @@ impl ContextSnapshotGenerator {
         if git_dir.exists() {
             // Get current commit hash
             if let Ok(output) = tokio::process::Command::new("git")
-                .args(&["rev-parse", "HEAD"])
+                .args(["rev-parse", "HEAD"])
                 .current_dir(&base_dir)
                 .output()
                 .await
@@ -851,7 +850,7 @@ impl ContextSnapshotGenerator {
             
             // Get current branch
             if let Ok(output) = tokio::process::Command::new("git")
-                .args(&["branch", "--show-current"])
+                .args(["branch", "--show-current"])
                 .current_dir(&base_dir)
                 .output()
                 .await
@@ -990,7 +989,7 @@ mod tests {
         
         let value = manager.calculate_restoration_value(&message, &context, &CheckpointReason::SuccessfulSolution);
         
-        assert!(value >= 0.0 && value <= 1.0);
+        assert!((0.0..=1.0).contains(&value));
         assert!(value > 0.5); // Successful solutions should have higher restoration value
     }
 

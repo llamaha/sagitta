@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("error")).init();
 
     // Parse command-line arguments
-    let mut args = CliArgs::parse();
+    let args = CliArgs::parse();
 
     // Determine configuration path
     let config_path_override: Option<PathBuf> = None; // Placeholder, fix if needed
@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
     let mut config = match core_load_config(config_path_override.as_ref()) {
         Ok(cfg) => cfg,
         Err(e) => {
-            eprintln!("Error loading configuration: {}", e);
+            eprintln!("Error loading configuration: {e}");
             eprintln!("Using default configuration.");
             CoreAppConfig::default()
         }
@@ -85,7 +85,7 @@ Please provide one of the following:\n\
 
     // Handle potential errors from command execution
     if let Err(e) = command_result {
-        eprintln!("Error executing command: {}", e);
+        eprintln!("Error executing command: {e}");
         // Consider exiting with a non-zero status code
         std::process::exit(1); 
     }

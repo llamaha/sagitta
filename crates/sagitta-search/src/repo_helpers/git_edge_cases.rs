@@ -67,7 +67,7 @@ pub async fn detect_default_branch(repo_path: &Path) -> Result<String> {
     // First try: git symbolic-ref refs/remotes/origin/HEAD
     let output = Command::new("git")
         .current_dir(repo_path)
-        .args(&["symbolic-ref", "refs/remotes/origin/HEAD"])
+        .args(["symbolic-ref", "refs/remotes/origin/HEAD"])
         .output()
         .await
         .context("Failed to execute git symbolic-ref")?;
@@ -75,8 +75,8 @@ pub async fn detect_default_branch(repo_path: &Path) -> Result<String> {
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         // Output format: refs/remotes/origin/main
-        if let Some(branch) = stdout.trim().split('/').last() {
-            info!("Detected default branch from remote HEAD: {}", branch);
+        if let Some(branch) = stdout.trim().split('/').next_back() {
+            info!("Detected default branch from remote HEAD: {branch}");
             return Ok(branch.to_string());
         }
     }
@@ -86,13 +86,13 @@ pub async fn detect_default_branch(repo_path: &Path) -> Result<String> {
     for branch_name in &common_defaults {
         let check = Command::new("git")
             .current_dir(repo_path)
-            .args(&["show-ref", "--verify", &format!("refs/remotes/origin/{}", branch_name)])
+            .args(["show-ref", "--verify", &format!("refs/remotes/origin/{branch_name}")])
             .output()
             .await
             .context("Failed to execute git show-ref")?;
         
         if check.status.success() {
-            info!("Found default branch by checking common names: {}", branch_name);
+            info!("Found default branch by checking common names: {branch_name}");
             return Ok(branch_name.to_string());
         }
     }
@@ -100,7 +100,7 @@ pub async fn detect_default_branch(repo_path: &Path) -> Result<String> {
     // Third try: List all remote branches and pick the first one
     let list_output = Command::new("git")
         .current_dir(repo_path)
-        .args(&["branch", "-r", "--format=%(refname:short)"])
+        .args(["branch", "-r", "--format=%(refname:short)"])
         .output()
         .await
         .context("Failed to list remote branches")?;
@@ -109,7 +109,7 @@ pub async fn detect_default_branch(repo_path: &Path) -> Result<String> {
         let branches = String::from_utf8_lossy(&list_output.stdout);
         if let Some(first_branch) = branches.lines().next() {
             let branch_name = first_branch.trim().trim_start_matches("origin/");
-            warn!("Could not detect default branch, using first remote branch: {}", branch_name);
+            warn!("Could not detect default branch, using first remote branch: {branch_name}");
             return Ok(branch_name.to_string());
         }
     }
@@ -125,7 +125,7 @@ pub async fn check_working_tree_clean(repo_path: &Path) -> Result<bool> {
     
     let output = Command::new("git")
         .current_dir(repo_path)
-        .args(&["status", "--porcelain"])
+        .args(["status", "--porcelain"])
         .output()
         .await
         .context("Failed to check git status")?;

@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use crate::agent::conversation::types::ProjectType;
 use crate::agent::state::types::ConversationStatus;
-use crate::config::{SagittaCodeConfig, SidebarPersistentConfig, save_config};
-use super::types::{ConversationSidebar, OrganizationMode, SidebarFilters, ConversationItem};
+use crate::config::{SagittaCodeConfig, SidebarPersistentConfig};
+use super::types::{ConversationSidebar, OrganizationMode, SidebarFilters};
 
 impl ConversationSidebar {
     /// Get display name for organization mode
@@ -169,7 +169,7 @@ impl ConversationSidebar {
             match config.try_lock() {
                 Ok(mut config_guard) => {
                     if let Err(e) = self.save_persistent_state(&mut config_guard) {
-                        log::error!("Failed to auto-save sidebar state: {}", e);
+                        log::error!("Failed to auto-save sidebar state: {e}");
                     } else {
                         self.last_state_save = Some(Instant::now());
                     }

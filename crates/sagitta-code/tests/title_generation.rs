@@ -198,7 +198,7 @@ async fn test_title_generation_character_limit() -> Result<()> {
     let generated_title = title_generator.generate_title(&messages).await?;
     
     // Title should be under 50 characters
-    assert!(generated_title.len() <= 50, "Generated title should be under 50 characters, got: {}", generated_title);
+    assert!(generated_title.len() <= 50, "Generated title should be under 50 characters, got: {generated_title}");
     
     Ok(())
 }
@@ -279,8 +279,8 @@ async fn test_title_generation_edge_cases() -> Result<()> {
 /// Helper function to create a test conversation manager
 async fn create_test_manager() -> Result<Arc<dyn ConversationManager>> {
     let manager = ConversationManagerImpl::new(
-        Box::new(MockPersistence::default()),
-        Box::new(MockSearchEngine::default()),
+        Box::new(MockPersistence),
+        Box::new(MockSearchEngine),
     ).await?;
     Ok(Arc::new(manager) as Arc<dyn ConversationManager>)
 }

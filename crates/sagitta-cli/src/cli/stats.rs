@@ -6,7 +6,6 @@ use clap::Args;
 use colored::*;
 use std::sync::Arc;
 use sagitta_search::AppConfig;
-use sagitta_search::repo_helpers::get_collection_name;
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;
 use std::path::PathBuf;
 use qdrant_client::qdrant::CountPointsBuilder;
@@ -56,7 +55,7 @@ pub async fn handle_stats<C>(
     args: StatsArgs,
     config: AppConfig,
     client: Arc<C>,
-    cli_args: &crate::cli::CliArgs,
+    _cli_args: &crate::cli::CliArgs,
 ) -> Result<()>
 where
     C: QdrantClientTrait + Send + Sync + 'static,
@@ -96,7 +95,7 @@ where
     let collection_info_result = client
         .get_collection_info(collection_name.clone())
         .await
-        .context(format!("Failed to retrieve collection info for '{}'", collection_name));
+        .context(format!("Failed to retrieve collection info for '{collection_name}'"));
 
     if args.json {
         let info = collection_info_result.as_ref().ok().map(|info| CollectionInfoStats {
@@ -148,7 +147,7 @@ where
             }
             Err(e) => {
                 eprintln!("{}", "  Error: Could not retrieve collection info (collection might not exist yet). Run 'repo sync'?".red());
-                return Err(e.context(format!("Failed to get collection info for '{}'", collection_name)));
+                return Err(e.context(format!("Failed to get collection info for '{collection_name}'")));
             }
         }
     }

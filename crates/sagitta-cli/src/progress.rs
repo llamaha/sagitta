@@ -96,11 +96,11 @@ impl IndicatifProgressReporter {
         match &progress_info.stage {
             SyncStage::GitFetch { message, progress } => {
                 stage_progress.pb.set_style(simple_style.clone());
-                stage_progress.message_template = format!("[Git Fetch] {}", message);
+                stage_progress.message_template = format!("[Git Fetch] {message}");
                 if let Some((current, total)) = progress {
                     stage_progress.pb.set_length(*total as u64);
                     stage_progress.pb.set_position(*current as u64);
-                    stage_progress.message_template = format!("[Git Fetch] {}: {}/{}", message, current, total);
+                    stage_progress.message_template = format!("[Git Fetch] {message}: {current}/{total}");
                 } else {
                     stage_progress.pb.set_length(1); // Indeterminate
                     stage_progress.pb.set_position(0);
@@ -109,7 +109,7 @@ impl IndicatifProgressReporter {
             }
             SyncStage::DiffCalculation { message } => {
                 stage_progress.pb.set_style(simple_style.clone());
-                stage_progress.message_template = format!("[Diff Calc] {}", message);
+                stage_progress.message_template = format!("[Diff Calc] {message}");
                 stage_progress.pb.set_length(1);
                 stage_progress.pb.set_position(0);
                 stage_progress.pb.tick();
@@ -133,7 +133,7 @@ impl IndicatifProgressReporter {
                     if message.contains("chunk") || message.contains("embedding") {
                         // This is chunk/embedding processing - ensure it uses progress bar style
                         stage_progress.pb.set_style(style.clone()); // Force progress bar style
-                        msg_parts.push(format!("[Embedding]"));
+                        msg_parts.push("[Embedding]".to_string());
                         if message.contains("Starting embedding generation") {
                             msg_parts.push("Starting...".to_string());
                         } else if message.contains("Generating embeddings") {
@@ -145,21 +145,21 @@ impl IndicatifProgressReporter {
                         }
                     } else {
                         // This is file processing
-                        msg_parts.push(format!("[{}]", action));
+                        msg_parts.push(format!("[{action}]"));
                         if let Some(f) = current_file {
                             msg_parts.push(format!("File: {}", f.file_name().unwrap_or_default().to_string_lossy()));
                         }
                     }
                 } else {
                     // Fallback to original behavior
-                    msg_parts.push(format!("[{}]", action));
+                    msg_parts.push(format!("[{action}]"));
                     if let Some(f) = current_file {
                         msg_parts.push(format!("File: {}", f.file_name().unwrap_or_default().to_string_lossy()));
                     }
                 }
                 
                 if let Some(fps) = files_per_second {
-                    let unit = if message.as_ref().map_or(false, |m| m.contains("chunk")) {
+                    let unit = if message.as_ref().is_some_and(|m| m.contains("chunk")) {
                         "chunks/s"
                     } else {
                         "files/s"
@@ -172,7 +172,7 @@ impl IndicatifProgressReporter {
             }
             SyncStage::CollectFiles { total_files, message } => {
                 stage_progress.pb.set_style(simple_style.clone());
-                stage_progress.message_template = format!("[Collect Files] {}", message);
+                stage_progress.message_template = format!("[Collect Files] {message}");
                 stage_progress.total_items = Some(*total_files);
                 stage_progress.pb.set_length(*total_files as u64); // Or 1 if just a message
                 stage_progress.pb.set_position(0); // Or tick if indeterminate
@@ -180,25 +180,25 @@ impl IndicatifProgressReporter {
             }
             SyncStage::QueryLanguages { message } => {
                 stage_progress.pb.set_style(simple_style.clone());
-                stage_progress.message_template = format!("[Query Languages] {}", message);
+                stage_progress.message_template = format!("[Query Languages] {message}");
                 stage_progress.pb.set_length(1);
                 stage_progress.pb.set_position(0);
                 stage_progress.pb.tick();
             }
             SyncStage::VerifyingCollection { message } => {
                 stage_progress.pb.set_style(simple_style.clone());
-                stage_progress.message_template = format!("[Verify Collection] {}", message);
+                stage_progress.message_template = format!("[Verify Collection] {message}");
                 stage_progress.pb.set_length(1);
                 stage_progress.pb.set_position(0);
                 stage_progress.pb.tick();
             }
             SyncStage::Completed { message } => {
-                stage_progress.pb.finish_with_message(format!("[Completed] {}", message));
+                stage_progress.pb.finish_with_message(format!("[Completed] {message}"));
                 // Optionally remove from map or keep for final display
                 return;
             }
             SyncStage::Error { message } => {
-                stage_progress.pb.abandon_with_message(format!("[Error] {}", message));
+                stage_progress.pb.abandon_with_message(format!("[Error] {message}"));
                 // Optionally remove from map
                 return;
             }
@@ -209,7 +209,7 @@ impl IndicatifProgressReporter {
             SyncStage::Heartbeat { message } => {
                 // Heartbeat stage - update existing progress bars or create a simple one
                 stage_progress.pb.set_style(simple_style.clone());
-                stage_progress.message_template = format!("[Heartbeat] {}", message);
+                stage_progress.message_template = format!("[Heartbeat] {message}");
                 stage_progress.pb.set_length(1);
                 stage_progress.pb.set_position(0);
                 stage_progress.pb.tick();
@@ -234,7 +234,7 @@ impl IndicatifProgressReporter {
         });
 
         // Define styles
-        let style = ProgressStyle::default_bar()
+        let _style = ProgressStyle::default_bar()
             .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} ({eta}) {msg}")
             .unwrap()
             .progress_chars("#>-");
@@ -247,11 +247,11 @@ impl IndicatifProgressReporter {
         match &progress_info.stage {
             RepoAddStage::Clone { message, progress } => {
                 stage_progress.pb.set_style(simple_style.clone());
-                stage_progress.message_template = format!("[Clone] {}", message);
+                stage_progress.message_template = format!("[Clone] {message}");
                 if let Some((current, total)) = progress {
                     stage_progress.pb.set_length(*total as u64);
                     stage_progress.pb.set_position(*current as u64);
-                    stage_progress.message_template = format!("[Clone] {}: {}/{}", message, current, total);
+                    stage_progress.message_template = format!("[Clone] {message}: {current}/{total}");
                 } else {
                     stage_progress.pb.set_length(1); // Indeterminate
                     stage_progress.pb.set_position(0);
@@ -260,11 +260,11 @@ impl IndicatifProgressReporter {
             }
             RepoAddStage::Fetch { message, progress } => {
                 stage_progress.pb.set_style(simple_style.clone());
-                stage_progress.message_template = format!("[Fetch] {}", message);
+                stage_progress.message_template = format!("[Fetch] {message}");
                 if let Some((current, total)) = progress {
                     stage_progress.pb.set_length(*total as u64);
                     stage_progress.pb.set_position(*current as u64);
-                    stage_progress.message_template = format!("[Fetch] {}: {}/{}", message, current, total);
+                    stage_progress.message_template = format!("[Fetch] {message}: {current}/{total}");
                 } else {
                     stage_progress.pb.set_length(1); // Indeterminate
                     stage_progress.pb.set_position(0);
@@ -273,17 +273,17 @@ impl IndicatifProgressReporter {
             }
             RepoAddStage::Checkout { message } => {
                 stage_progress.pb.set_style(simple_style.clone());
-                stage_progress.message_template = format!("[Checkout] {}", message);
+                stage_progress.message_template = format!("[Checkout] {message}");
                 stage_progress.pb.set_length(1);
                 stage_progress.pb.set_position(0);
                 stage_progress.pb.tick();
             }
             RepoAddStage::Completed { message } => {
-                stage_progress.pb.finish_with_message(format!("[Completed] {}", message));
+                stage_progress.pb.finish_with_message(format!("[Completed] {message}"));
                 return;
             }
             RepoAddStage::Error { message } => {
-                stage_progress.pb.abandon_with_message(format!("[Error] {}", message));
+                stage_progress.pb.abandon_with_message(format!("[Error] {message}"));
                 return;
             }
             RepoAddStage::Idle => {
@@ -327,7 +327,7 @@ impl SyncProgressReporter for IndicatifProgressReporter {
 
         self.update_or_create_pb(&stage_key, &progress).await;
 
-        if let Some(overall_pb_instance) = &self.overall_pb {
+        if let Some(_overall_pb_instance) = &self.overall_pb {
             // Logic to update overall progress bar if you have one
             // This might involve tracking the total number of stages or total work units
             // For now, let's just increment it or set it based on current stage
@@ -391,7 +391,7 @@ impl AddProgressReporter for IndicatifProgressReporter {
 
         self.update_or_create_add_pb(&stage_key, &progress).await;
 
-        if let Some(overall_pb_instance) = &self.overall_pb {
+        if let Some(_overall_pb_instance) = &self.overall_pb {
             // Logic to update overall progress bar if you have one
             // This might involve tracking the total number of stages or total work units
             // For now, let's just increment it or set it based on current stage

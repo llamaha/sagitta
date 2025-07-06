@@ -41,7 +41,7 @@ pub fn to_agent_error<E: std::error::Error>(err: E) -> SagittaCodeError {
 /// Log an error and return it (for use in ? operator chains)
 pub fn log_error<T, E: std::error::Error>(result: Result<T, E>, context: &str) -> Result<T, E> {
     if let Err(ref e) = result {
-        log::error!("{}: {}", context, e);
+        log::error!("{context}: {e}");
     }
     result
 }
@@ -49,7 +49,7 @@ pub fn log_error<T, E: std::error::Error>(result: Result<T, E>, context: &str) -
 /// Implement From for broadcast::error::SendError
 impl<T> From<tokio::sync::broadcast::error::SendError<T>> for SagittaCodeError {
     fn from(err: tokio::sync::broadcast::error::SendError<T>) -> Self {
-        SagittaCodeError::EventError(format!("Failed to send event: {}", err))
+        SagittaCodeError::EventError(format!("Failed to send event: {err}"))
     }
 }
 
@@ -63,14 +63,14 @@ impl From<std::io::Error> for SagittaCodeError {
 // Add manual From<serde_json::Error> for SagittaCodeError
 impl From<serde_json::Error> for SagittaCodeError {
     fn from(err: serde_json::Error) -> Self {
-        SagittaCodeError::Unknown(format!("JSON serialization error: {}", err))
+        SagittaCodeError::Unknown(format!("JSON serialization error: {err}"))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io;
+    
     use std::error::Error;
     use tokio::sync::broadcast;
 
@@ -160,7 +160,7 @@ mod tests {
 
     #[test]
     fn test_log_error_failure() {
-        let result: Result<i32, std::io::Error> = Err(std::io::Error::new(std::io::ErrorKind::Other, "test error")); // Fully qualify
+        let result: Result<i32, std::io::Error> = Err(std::io::Error::other("test error")); // Fully qualify
         let logged_result = log_error(result, "test context");
         
         assert!(logged_result.is_err());
@@ -187,7 +187,7 @@ mod tests {
     #[test]
     fn test_error_debug_format() {
         let error = SagittaCodeError::ConfigError("test".to_string());
-        let debug_str = format!("{:?}", error);
+        let debug_str = format!("{error:?}");
         assert!(debug_str.contains("ConfigError"));
         assert!(debug_str.contains("test"));
     }
@@ -243,12 +243,12 @@ mod tests {
         
         // Test based on Clone + Debug (if PartialEq is not derived)
         // SagittaCodeError derives Clone, so we can compare cloned instances
-        assert_eq!(format!("{:?}", error1), format!("{:?}", error2));
-        assert_ne!(format!("{:?}", error1), format!("{:?}", error3));
+        assert_eq!(format!("{error1:?}"), format!("{:?}", error2));
+        assert_ne!(format!("{error1:?}"), format!("{:?}", error3));
 
         let io_error1 = SagittaCodeError::IoError("io same".to_string());
         let io_error2 = SagittaCodeError::IoError("io same".to_string());
-        assert_eq!(format!("{:?}", io_error1), format!("{:?}", io_error2));
+        assert_eq!(format!("{io_error1:?}"), format!("{:?}", io_error2));
     }
 
     #[test]

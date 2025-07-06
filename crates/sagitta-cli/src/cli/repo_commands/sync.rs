@@ -3,13 +3,13 @@ use clap::Args;
 use colored::*;
 use std::{path::PathBuf, sync::Arc};
 use std::time::Instant;
-use log::{info, warn, error};
+use log::error;
 
 use git_manager::{GitManager, SyncType};
 use sagitta_search::{AppConfig, save_config};
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;
 use std::fmt::Debug;
-use sagitta_search::sync::{sync_repository, SyncOptions, SyncResult};
+use sagitta_search::sync::{sync_repository, SyncOptions};
 use crate::progress::IndicatifProgressReporter;
 
 #[derive(Args, Debug)]
@@ -31,7 +31,7 @@ pub async fn handle_repo_sync<C>(
     args: SyncRepoArgs, 
     config: &mut AppConfig,
     client: Arc<C>,
-    cli_args: &crate::cli::CliArgs,
+    _cli_args: &crate::cli::CliArgs,
     override_path: Option<&PathBuf>,
 ) -> Result<()>
 where
@@ -98,7 +98,7 @@ where
 
     match sync_repository(
         client,
-        &repo_config,
+        repo_config,
         options,
         &app_config_clone, // Pass reference instead of Arc<RwLock<>>
         Some(progress_reporter),
@@ -123,7 +123,7 @@ where
                 }
 
                 if let Err(e) = save_config(config, override_path) {
-                    error!("Failed to save config after sync: {}", e);
+                    error!("Failed to save config after sync: {e}");
                     println!("{}", "Warning: Failed to save configuration after successful sync.".red());
                 } else {
                      println!("{}", "Configuration saved.".dimmed());
@@ -135,8 +135,8 @@ where
             }
         }
         Err(e) => {
-            error!("Sync error: {}", e);
-            println!("{}", format!("❌ Sync error: {}", e).red());
+            error!("Sync error: {e}");
+            println!("{}", format!("❌ Sync error: {e}").red());
             return Err(e.into());
         }
     }

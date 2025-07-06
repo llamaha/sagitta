@@ -122,10 +122,10 @@ pub fn apply_edit(
     );
 
     for line in original_lines.iter().take(start_line_0_based) {
-        writeln!(temp_file, "{}", line).context("Write error to temp file (before)")?;
+        writeln!(temp_file, "{line}").context("Write error to temp file (before)")?;
     }
     if !formatted_content.is_empty() {
-        write!(temp_file, "{}", formatted_content).context("Write error to temp file (content)")?;
+        write!(temp_file, "{formatted_content}").context("Write error to temp file (content)")?;
         if !formatted_content.ends_with('\n') && (end_line_0_based + 1) < original_lines.len() {
              writeln!(temp_file).context("Write error to temp file (newline after content)")?;
         }
@@ -133,7 +133,7 @@ pub fn apply_edit(
          writeln!(temp_file).context("Write error to temp file (newline after empty content)")?;
     }
     for line in original_lines.iter().skip(end_line_0_based + 1) {
-        writeln!(temp_file, "{}", line).context("Write error to temp file (after)")?;
+        writeln!(temp_file, "{line}").context("Write error to temp file (after)")?;
     }
     temp_file.flush().context("Failed to flush temp file")?;
     temp_file.persist(file_path)
@@ -180,14 +180,14 @@ pub fn validate_edit(
            if *start > *end {
                  issues.push(EngineValidationIssue {
                      severity: EngineValidationSeverity::Error,
-                     message: format!("Start line ({}) cannot be greater than end line ({}).", start, end),
+                     message: format!("Start line ({start}) cannot be greater than end line ({end})."),
                      line_number: Some(*start),
                  });
            }
            if *end > line_count {
                 issues.push(EngineValidationIssue {
                     severity: EngineValidationSeverity::Error,
-                    message: format!("End line ({}) is beyond file length ({} lines).", end, line_count),
+                    message: format!("End line ({end}) is beyond file length ({line_count} lines)."),
                     line_number: Some(*end),
                 });
            }
@@ -202,7 +202,7 @@ pub fn validate_edit(
                          Err(e) => { 
                              issues.push(EngineValidationIssue {
                                 severity: EngineValidationSeverity::Error,
-                                message: format!("Could not find semantic element '{}': {}", element_query, e),
+                                message: format!("Could not find semantic element '{element_query}': {e}"),
                                 line_number: None,
                              });
                          }
@@ -242,12 +242,12 @@ fn format_content_indentation(
             .map(|line| get_leading_whitespace(line))
             .unwrap_or_default()
     } else {
-        original_lines.get(0)
+        original_lines.first()
              .map(|line| get_leading_whitespace(line))
              .unwrap_or_default()
     };
     if start_line_0_based == 0 && original_lines.is_empty() { return new_content.to_string(); }
-    new_content.lines().map(|line| format!("{}{}", leading_indent, line)).collect::<Vec<String>>().join("\n")
+    new_content.lines().map(|line| format!("{leading_indent}{line}")).collect::<Vec<String>>().join("\n")
 }
 
 fn get_language(file_path: &Path) -> Result<Language> {
@@ -310,7 +310,7 @@ fn find_direct_child_element<'a>(parent_node: &Node<'a>, element_query_part: &st
                 // Attempt fallback for simple cases like direct identifiers
                  if child_node.kind() == element_type && child_node.child_count() > 0 {
                      let first_child_name_opt = child_node.named_child(0).and_then(|n| n.utf8_text(source_code).ok());
-                     if first_child_name_opt.as_deref() == Some(element_name) {
+                     if first_child_name_opt == Some(element_name) {
                          return Ok(child_node);
                      }
                  }
@@ -326,7 +326,7 @@ fn find_semantic_element(tree: &tree_sitter::Tree, element_query_str: &str, sour
 
     for part in parts {
          current_node = find_direct_child_element(&current_node, part, source_code)
-             .with_context(|| format!("Failed while searching for element part '{}'", part))?;
+             .with_context(|| format!("Failed while searching for element part '{part}'"))?;
     }
 
     expand_range_for_comments(current_node)

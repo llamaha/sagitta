@@ -3,7 +3,7 @@
 //! This module provides compatibility functions and types to ease the migration
 //! from the old scattered git functionality to the new centralized git-manager.
 
-use crate::{GitManager, GitResult, SwitchResult, SyncResult};
+use crate::{GitManager, GitResult, SwitchResult};
 use std::path::{Path, PathBuf};
 
 /// Compatibility type for old sync results
@@ -23,7 +23,7 @@ impl From<SwitchResult> for LegacySyncResult {
         let (files_processed, message) = if let Some(sync_result) = switch_result.sync_result {
             let total_files = sync_result.files_added + sync_result.files_updated + sync_result.files_removed;
             let message = if sync_result.success {
-                format!("Branch switch completed: {} files processed", total_files)
+                format!("Branch switch completed: {total_files} files processed")
             } else {
                 sync_result.error_message.unwrap_or_else(|| "Sync failed".to_string())
             };
@@ -140,6 +140,7 @@ pub mod performance {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SyncResult;
     use tempfile::TempDir;
     use std::fs;
     

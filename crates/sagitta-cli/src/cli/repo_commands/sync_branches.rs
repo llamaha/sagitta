@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use git_manager::GitManager;
 use sagitta_search::{AppConfig, save_config, qdrant_client_trait::QdrantClientTrait};
 use sagitta_search::sync::{sync_repository, SyncOptions, SyncResult};
-use sagitta_search::config::RepositoryConfig;
 use sagitta_search::repo_helpers::{get_branch_sync_metadata, BranchSyncMetadata};
 use colored::*;
 use tokio::task::JoinSet;
@@ -42,7 +41,7 @@ pub async fn handle_sync_branches<C>(
     args: SyncBranchesArgs,
     config: &mut AppConfig,
     client: Arc<C>,
-    cli_args: &CliArgs,
+    _cli_args: &CliArgs,
     override_path: Option<&PathBuf>,
 ) -> Result<()>
 where
@@ -209,10 +208,10 @@ where
                             println!("  ❌ {} - Error: {}", branch.red(), e);
                         }
                     }
-                    results.insert(branch, sync_result.map_err(|e| anyhow::Error::from(e)));
+                    results.insert(branch, sync_result.map_err(anyhow::Error::from));
                 }
                 Err(e) => {
-                    println!("  ❌ Task error: {}", e);
+                    println!("  ❌ Task error: {e}");
                 }
             }
             

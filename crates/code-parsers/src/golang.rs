@@ -14,9 +14,8 @@ pub struct GolangParser {
     query: Query,
 }
 
-impl GolangParser {
-    /// Creates a new `GolangParser` with the Go grammar and queries.
-    pub fn new() -> Self {
+impl Default for GolangParser {
+    fn default() -> Self {
         let mut parser = Parser::new();
         let language = tree_sitter_go::language();
         parser
@@ -39,6 +38,13 @@ impl GolangParser {
         .expect("Error creating Go query");
 
         GolangParser { parser, query }
+    }
+}
+
+impl GolangParser {
+    /// Creates a new `GolangParser` with the Go grammar and queries.
+    pub fn new() -> Self {
+        Self::default()
     }
 
     fn node_to_chunk(
@@ -101,8 +107,7 @@ impl SyntaxParser for GolangParser {
         // Fallback: If no chunks found in non-empty file, index whole file
         if chunks.is_empty() && !code.trim().is_empty() {
             log::debug!(
-                "No top-level Go items found in {}, splitting into smaller chunks.",
-                file_path
+                "No top-level Go items found in {file_path}, splitting into smaller chunks."
             );
             let lines: Vec<&str> = code.lines().collect();
             let num_lines = lines.len();
@@ -123,7 +128,7 @@ impl SyntaxParser for GolangParser {
                     start_line,
                     end_line,
                     language: "go".to_string(),
-                    element_type: format!("fallback_chunk_{}", i),
+                    element_type: format!("fallback_chunk_{i}"),
                 });
             }
         }

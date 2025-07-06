@@ -4,11 +4,8 @@ use tokio::sync::RwLock;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
-use log::{debug, info, warn};
+use log::{debug, info};
 
-use crate::agent::conversation::types::{Conversation, ConversationCheckpoint};
-use crate::agent::message::types::{AgentMessage, ToolCall};
-use crate::agent::state::types::AgentState;
 use crate::utils::errors::SagittaCodeError;
 
 /// Tracks context and flow for a conversation to provide intelligent assistance
@@ -451,7 +448,7 @@ impl ConversationContextManager {
         // Add progress milestone
         context.progress_tracker.milestones.push(ProgressMilestone {
             timestamp: Utc::now(),
-            description: format!("Successfully completed: {}", action),
+            description: format!("Successfully completed: {action}"),
             confidence: 1.0,
             context: HashMap::new(),
         });
@@ -466,7 +463,7 @@ impl ConversationContextManager {
         // Recalculate frustration level
         context.frustration_metrics.frustration_level = self.calculate_frustration_level(&context).await;
 
-        info!("Recorded success: {}", action);
+        info!("Recorded success: {action}");
         
         Ok(())
     }

@@ -12,8 +12,6 @@ use crate::constants::COLLECTION_NAME_PREFIX;
 
 const APP_NAME: &str = "sagitta";
 const CONFIG_FILE_NAME: &str = "config.toml";
-const REPO_DIR_NAME: &str = "repositories";
-const DEFAULT_QDRANT_URL: &str = "http://localhost:6334";
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 /// Represents configuration for a single managed repository
@@ -198,9 +196,6 @@ pub struct AppConfig {
 }
 
 /// Configuration settings related to indexing.
-// ... (IndexingConfig remains the same) ...
-
-
 // --- Default Implementation ---
 impl Default for AppConfig {
     fn default() -> Self {
@@ -331,7 +326,7 @@ impl AppConfig {
 pub fn get_config_path_or_default(override_path: Option<&PathBuf>) -> Result<PathBuf> {
     // Check for test environment variable first
     if let Ok(test_path_str) = std::env::var("SAGITTA_TEST_CONFIG_PATH") {
-        log::debug!("Using test config path from ENV: {}", test_path_str);
+        log::debug!("Using test config path from ENV: {test_path_str}");
         return Ok(PathBuf::from(test_path_str));
     }
     // Then check for direct override path
@@ -377,7 +372,7 @@ pub fn load_config(override_path: Option<&PathBuf>) -> Result<AppConfig> {
 
         match toml::from_str::<AppConfig>(&config_content) {
             Ok(config) => {
-                log::debug!("Parsed config successfully: {:?}", config);
+                log::debug!("Parsed config successfully: {config:?}");
                 // Validate the configuration
                 config.validate()?;
                 Ok(config)
@@ -426,14 +421,14 @@ pub fn save_config(config: &AppConfig, override_path: Option<&PathBuf>) -> Resul
     // Add embed_model comments if not set
     if config.embed_model.is_none() && config.onnx_model_path.is_none() && config.onnx_tokenizer_path.is_none() {
         onnx_comments.push_str("\n# Embedding model configuration - choose ONE of the following options:");
-        onnx_comments.push_str("\n");
+        onnx_comments.push('\n');
         onnx_comments.push_str("\n# Option 1: Automatic model downloading (recommended)");
         onnx_comments.push_str("\n# The model will be downloaded to ~/.cache/huggingface/hub/");
         onnx_comments.push_str("\n#embed_model = \"bge-small-fast\"  # BGE Small v1.5 with INT8 quantization (fast)");
         onnx_comments.push_str("\n#embed_model = \"bge-small-fp32\"  # BGE Small v1.5 with FP32 (standard precision)");
         onnx_comments.push_str("\n# Or use any HuggingFace model ID:");
         onnx_comments.push_str("\n#embed_model = \"BAAI/bge-base-en-v1.5\"");
-        onnx_comments.push_str("\n");
+        onnx_comments.push('\n');
         onnx_comments.push_str("\n# Option 2: Manual model paths (for custom models)");
         onnx_comments.push_str("\n#onnx_model_path = \"/path/to/your/model.onnx\"");
         onnx_comments.push_str("\n#onnx_tokenizer_path = \"/path/to/your/tokenizer_directory\"");
@@ -446,14 +441,14 @@ pub fn save_config(config: &AppConfig, override_path: Option<&PathBuf>) -> Resul
         }
         if config.onnx_tokenizer_path.is_none() {
             if !onnx_comments.is_empty() { // Add a newline if model_path comments were also added
-                onnx_comments.push_str("\n");
+                onnx_comments.push('\n');
             }
             onnx_comments.push_str("\n# Path to the directory containing tokenizer.json (required for indexing/querying)");
             onnx_comments.push_str("\n#onnx_tokenizer_path = \"/path/to/your/tokenizer_directory\"");
             onnx_comments.push_str("\n# Example: /path/to/sagitta-cli/onnx/");
         }
         if !onnx_comments.is_empty() {
-            onnx_comments.push_str("\n");
+            onnx_comments.push('\n');
             onnx_comments.push_str("\n# Alternative: Use automatic model downloading instead");
             onnx_comments.push_str("\n#embed_model = \"bge-small-fast\"  # or \"bge-small-fp32\"");
         }
@@ -495,6 +490,8 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
     use std::path::Path;
+    
+    const REPO_DIR_NAME: &str = "repositories";
 
     fn setup_test_env(temp_dir: &Path) -> (PathBuf, PathBuf) {
         let fake_config_dir = temp_dir.join("config");

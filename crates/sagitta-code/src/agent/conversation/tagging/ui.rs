@@ -1,9 +1,8 @@
 use super::{TagSuggestion, TagAction, TagSuggestionWithAction, TagSource, SuggestionConfidence};
-use crate::agent::conversation::types::{Conversation, ConversationSummary};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 
 /// State for the tag management UI
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,7 +95,7 @@ impl TagManagementUI {
     pub fn update_suggestions(&mut self, suggestions: Vec<TagSuggestion>) {
         self.state.suggestions = suggestions
             .into_iter()
-            .map(|suggestion| TagSuggestionWithAction::new(suggestion))
+            .map(TagSuggestionWithAction::new)
             .collect();
     }
 
@@ -392,8 +391,8 @@ pub mod egui_helpers {
             
             // Source indicator
             let source_text = match &suggestion_with_action.suggestion.source {
-                TagSource::Embedding { similarity_score } => format!("🧠 {:.2}", similarity_score),
-                TagSource::Rule { rule_name } => format!("📋 {}", rule_name),
+                TagSource::Embedding { similarity_score } => format!("🧠 {similarity_score:.2}"),
+                TagSource::Rule { rule_name } => format!("📋 {rule_name}"),
                 TagSource::Manual => "👤 Manual".to_string(),
                 TagSource::Content { keywords } => format!("📝 {}", keywords.len()),
             };
@@ -423,7 +422,7 @@ pub mod egui_helpers {
                     ui.label(RichText::new("✗ Rejected").color(Color32::RED));
                 },
                 TagAction::Modify { new_tag } => {
-                    ui.label(RichText::new(format!("✏ → {}", new_tag)).color(Color32::BLUE));
+                    ui.label(RichText::new(format!("✏ → {new_tag}")).color(Color32::BLUE));
                 },
             }
         });
@@ -559,7 +558,7 @@ impl Default for TagManagementUI {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::conversation::types::Conversation;
+    
 
     fn create_test_suggestion() -> TagSuggestion {
         TagSuggestion::new(

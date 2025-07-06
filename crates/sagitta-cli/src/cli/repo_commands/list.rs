@@ -29,7 +29,7 @@ pub async fn list_repositories(config: &AppConfig, args: ListArgs) -> Result<()>
         // Serialize the entire enhanced repository list
         let json_output = serde_json::to_string_pretty(&enhanced_data)
             .context("Failed to serialize enhanced repository list to JSON")?;
-        println!("{}", json_output);
+        println!("{json_output}");
     } else if args.summary {
         print_summary_only(&enhanced_data);
     } else {
@@ -74,7 +74,7 @@ fn print_enhanced_repository_list(data: &EnhancedRepositoryList, detailed: bool)
             "missing".red()
         };
         
-        println!("   📁 Status: {}", fs_status);
+        println!("   📁 Status: {fs_status}");
 
         // Current branch and sync status
         if let Some(branch) = &repo.active_branch {
@@ -112,7 +112,7 @@ fn print_enhanced_repository_list(data: &EnhancedRepositoryList, detailed: bool)
             } else {
                 String::new()
             };
-            println!("   📊 Files: {}{}", file_count, size_str);
+            println!("   📊 Files: {file_count}{size_str}");
         }
 
         // Languages
@@ -171,7 +171,7 @@ fn print_summary_only(data: &EnhancedRepositoryList) {
 
 fn print_summary_statistics(summary: &sagitta_search::RepositoryListSummary) {
     println!("{}", "Summary Statistics:".bold());
-    println!("   📁 Total repositories: {}", summary.existing_count + (summary.existing_count == 0).then(|| 0).unwrap_or(0));
+    println!("   📁 Total repositories: {}", summary.existing_count);
     println!("   ✅ Existing on filesystem: {}", summary.existing_count);
     println!("   🔄 Need syncing: {}", summary.needs_sync_count);
     println!("   ⚠️  With uncommitted changes: {}", summary.dirty_count);

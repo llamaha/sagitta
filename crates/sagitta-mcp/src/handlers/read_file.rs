@@ -39,7 +39,7 @@ pub async fn handle_read_file<C: QdrantClientTrait + Send + Sync + 'static>(
         Err(e) => {
             return Err(ErrorObject {
                 code: -32603,
-                message: format!("Failed to read file metadata: {}", e),
+                message: format!("Failed to read file metadata: {e}"),
                 data: None,
             });
         }
@@ -53,7 +53,7 @@ pub async fn handle_read_file<C: QdrantClientTrait + Send + Sync + 'static>(
         Err(e) => {
             return Err(ErrorObject {
                 code: -32603,
-                message: format!("Failed to read file: {}", e),
+                message: format!("Failed to read file: {e}"),
                 data: None,
             });
         }
@@ -72,7 +72,7 @@ pub async fn handle_read_file<C: QdrantClientTrait + Send + Sync + 'static>(
         if start < 1 || start > total_lines {
             return Err(ErrorObject {
                 code: -32603,
-                message: format!("Invalid start_line: {}. File has {} lines", start, total_lines),
+                message: format!("Invalid start_line: {start}. File has {total_lines} lines"),
                 data: None,
             });
         }
@@ -80,7 +80,7 @@ pub async fn handle_read_file<C: QdrantClientTrait + Send + Sync + 'static>(
         if end < start || end > total_lines {
             return Err(ErrorObject {
                 code: -32603,
-                message: format!("Invalid end_line: {}. File has {} lines", end, total_lines),
+                message: format!("Invalid end_line: {end}. File has {total_lines} lines"),
                 data: None,
             });
         }

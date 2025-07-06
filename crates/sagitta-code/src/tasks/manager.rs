@@ -1,8 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -120,7 +119,7 @@ impl InMemoryTaskManager {
             
             // Add initial message with task context
             if let Some(ref context) = task.metadata.conversation_context {
-                let initial_message = format!(
+                let _initial_message = format!(
                     "Starting work on task: {}\n\nRequirements:\n{}\n\nExpected outcomes:\n{}",
                     task.title,
                     context.requirements.join("\n- "),
@@ -169,11 +168,10 @@ impl InMemoryTaskManager {
             }
             
             // Tags filter
-            if !query.tags.is_empty() {
-                if !query.tags.iter().any(|tag| task.tags.contains(tag)) {
+            if !query.tags.is_empty()
+                && !query.tags.iter().any(|tag| task.tags.contains(tag)) {
                     return false;
                 }
-            }
             
             // Date filters
             if let Some(created_after) = query.created_after {
@@ -212,7 +210,7 @@ impl InMemoryTaskManager {
             if let Some(ref search_text) = query.text_search {
                 let search_lower = search_text.to_lowercase();
                 if !task.title.to_lowercase().contains(&search_lower) &&
-                   !task.description.as_ref().map_or(false, |d| d.to_lowercase().contains(&search_lower)) &&
+                   !task.description.as_ref().is_some_and(|d| d.to_lowercase().contains(&search_lower)) &&
                    !task.tags.iter().any(|tag| tag.to_lowercase().contains(&search_lower)) {
                     return false;
                 }
@@ -342,7 +340,7 @@ impl TaskManager for InMemoryTaskManager {
                     matching_fields.push("title".to_string());
                 }
                 
-                if task.description.as_ref().map_or(false, |d| d.to_lowercase().contains(&search_lower)) {
+                if task.description.as_ref().is_some_and(|d| d.to_lowercase().contains(&search_lower)) {
                     relevance_score += 0.3;
                     matching_fields.push("description".to_string());
                 }
@@ -504,11 +502,11 @@ impl Default for UpdateTaskRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::conversation::types::*;
+    
     
     #[tokio::test]
     async fn test_create_and_get_task() {
-        let mut manager = InMemoryTaskManager::new();
+        let manager = InMemoryTaskManager::new();
         
         let request = CreateTaskRequest {
             title: "Test Task".to_string(),
@@ -534,7 +532,7 @@ mod tests {
     
     #[tokio::test]
     async fn test_update_task() {
-        let mut manager = InMemoryTaskManager::new();
+        let manager = InMemoryTaskManager::new();
         
         let request = CreateTaskRequest {
             title: "Original Title".to_string(),
@@ -568,7 +566,7 @@ mod tests {
     
     #[tokio::test]
     async fn test_list_tasks_with_filters() {
-        let mut manager = InMemoryTaskManager::new();
+        let manager = InMemoryTaskManager::new();
         
         // Create test tasks
         let workspace_id = Uuid::new_v4();
@@ -624,7 +622,7 @@ mod tests {
     
     #[tokio::test]
     async fn test_search_tasks() {
-        let mut manager = InMemoryTaskManager::new();
+        let manager = InMemoryTaskManager::new();
         
         let request = CreateTaskRequest {
             title: "Code Analysis Task".to_string(),
@@ -655,7 +653,7 @@ mod tests {
     
     #[tokio::test]
     async fn test_task_execution() {
-        let mut manager = InMemoryTaskManager::new();
+        let manager = InMemoryTaskManager::new();
         
         let request = CreateTaskRequest {
             title: "Test Execution".to_string(),

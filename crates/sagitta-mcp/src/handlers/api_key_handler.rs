@@ -1,16 +1,13 @@
 use axum::{
-    extract::{State, Json, Query, Path, Extension},
+    extract::{State, Json, Path},
     http::StatusCode,
     response::IntoResponse,
-    routing::get,
-    middleware,
 };
 use serde::{Deserialize, Serialize};
-use tracing::{info, error, warn};
+use tracing::{info, error};
 
 use crate::http_transport::AppState;
-use crate::api_key::{ApiKey, ApiKeyStore, ApiKeyInfo, InMemoryApiKeyStore, API_KEY_PREFIX};
-use crate::middleware::auth_middleware::{API_KEY_HEADER, AuthenticatedUser};
+use crate::api_key::ApiKey;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CreateApiKeyRequest {
@@ -60,7 +57,7 @@ pub async fn create_api_key_handler(
                     id: String::new(),
                     key: String::new(),
                     user_id: None,
-                    description: Some(format!("Error: {}", e)),
+                    description: Some(format!("Error: {e}")),
                     created_at: 0,
                     expires_at: None,
                     last_used_at: None,

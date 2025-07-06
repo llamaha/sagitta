@@ -10,7 +10,7 @@ use qdrant_client::qdrant::{Filter, Condition, ScrollPointsBuilder, ScrollRespon
 use crate::constants::{FIELD_BRANCH, FIELD_LANGUAGE};
 use crate::error::SagittaError;
 use crate::QdrantClientTrait;
-use crate::indexing::{index_repo_files, ensure_collection_exists, is_hidden, is_target_dir};
+use crate::indexing::{index_repo_files, ensure_collection_exists, is_hidden, is_target_dir, IndexRepoFilesParams};
 use crate::repo_helpers::qdrant_utils::get_collection_name;
 use crate::repo_helpers::qdrant_utils::get_branch_aware_collection_name;
 use anyhow::anyhow;
@@ -21,8 +21,8 @@ use std::fs;
 use git2::Repository;
 use std::os::unix::fs::PermissionsExt;
 use tokio;
-use crate::sync_progress::{SyncProgressReporter, SyncStage, AddProgressReporter, AddProgress, RepoAddStage, NoOpAddProgressReporter};
-use sagitta_embed::{EmbeddingPool, EmbeddingProcessor};
+use crate::sync_progress::{SyncProgressReporter, AddProgressReporter, AddProgress, RepoAddStage};
+use sagitta_embed::EmbeddingProcessor;
 
 /// Updates the last synced commit for a branch in the AppConfig and refreshes the
 /// list of indexed languages for that branch by querying Qdrant.
@@ -37,10 +37,10 @@ pub async fn update_sync_status_and_languages<
     collection_name: &str,
 ) -> Result<(), SagittaError> {
     let repo_config = config.repositories.get_mut(repo_config_index)
-        .ok_or_else(|| SagittaError::ConfigurationError(format!("Repository index {} out of bounds", repo_config_index)))?;
-    log::debug!("Updating last synced commit for branch '{}' to {}", branch_name, commit_oid_str);
+        .ok_or_else(|| SagittaError::ConfigurationError(format!("Repository index {repo_config_index} out of bounds")))?;
+    log::debug!("Updating last synced commit for branch '{branch_name}' to {commit_oid_str}");
     repo_config.last_synced_commits.insert(branch_name.to_string(), commit_oid_str.to_string());
-    log::debug!("Querying Qdrant for distinct languages in collection '{}' for branch '{}'", collection_name, branch_name);
+    log::debug!("Querying Qdrant for distinct languages in collection '{collection_name}' for branch '{branch_name}'");
     let mut languages = HashSet::new();
     let mut offset: Option<PointId> = None;
     loop {
@@ -90,46 +90,85 @@ pub async fn update_sync_status_and_languages<
     Ok(())
 }
 
+/// Parameters for indexing files
+pub struct IndexFilesParams<'a, C> {
+    /// Qdrant client instance for database operations
+    pub client: Arc<C>,
+    /// Application configuration containing indexing settings
+    pub config: &'a AppConfig,
+    /// Root directory path of the repository being indexed
+    pub repo_root: &'a PathBuf,
+    /// List of relative file paths within the repository to index
+    pub relative_paths: &'a [PathBuf],
+    /// Name of the Qdrant collection to store indexed data
+    pub collection_name: &'a str,
+    /// Name of the branch being indexed
+    pub branch_name: &'a str,
+    /// Git commit hash being indexed
+    pub commit_hash: &'a str,
+    /// Optional progress reporter for tracking indexing progress
+    pub progress_reporter: Option<Arc<dyn SyncProgressReporter>>,
+}
+
 /// Indexes a list of relative file paths within a repository.
 /// Handles embedding generation and upserting points to Qdrant in batches.
 /// This function utilizes parallel processing for CPU-bound tasks (parsing, embedding).
 pub async fn index_files<
     C: QdrantClientTrait + Send + Sync + 'static,
->(
-    client: Arc<C>,
-    config: &AppConfig,
-    repo_root: &PathBuf,
-    relative_paths: &[PathBuf],
-    collection_name: &str,
-    branch_name: &str,
-    commit_hash: &str,
-    progress_reporter: Option<Arc<dyn SyncProgressReporter>>,
-) -> Result<usize, SagittaError>
+>(params: IndexFilesParams<'_, C>) -> Result<usize, SagittaError>
 {
-    if relative_paths.is_empty() {
+    if params.relative_paths.is_empty() {
         info!("No files provided for indexing.");
         return Ok(0);
     }
 
-    let embedding_config = crate::app_config_to_embedding_config(config);
+    let embedding_config = crate::app_config_to_embedding_config(params.config);
     let embedding_pool = crate::EmbeddingPool::with_configured_sessions(embedding_config)
         .context("Failed to initialize embedding pool for repo indexing")?;
     info!("Embedding dimension for repo: {}", embedding_pool.dimension());
 
     let embedding_pool_arc = Arc::new(embedding_pool);
 
-    index_repo_files(
-        config,
-        repo_root,
-        relative_paths,
-        collection_name,
-        branch_name,
-        commit_hash,
-        client.clone(),
-        embedding_pool_arc,
-        progress_reporter,
-        config.indexing.max_concurrent_upserts,
-    ).await
+    index_repo_files(IndexRepoFilesParams {
+        config: params.config,
+        repo_root: params.repo_root,
+        relative_paths: params.relative_paths,
+        collection_name: params.collection_name,
+        branch_name: params.branch_name,
+        commit_hash: params.commit_hash,
+        client: params.client.clone(),
+        embedding_pool: embedding_pool_arc,
+        progress_reporter: params.progress_reporter,
+        max_concurrent_upserts: params.config.indexing.max_concurrent_upserts,
+    }).await
+}
+
+/// Parameters for preparing a repository
+pub struct PrepareRepositoryParams<'a> {
+    /// Repository URL
+    pub url: &'a str,
+    /// Optional repository name
+    pub name_opt: Option<&'a str>,
+    /// Optional local path
+    pub local_path_opt: Option<&'a PathBuf>,
+    /// Optional branch
+    pub branch_opt: Option<&'a str>,
+    /// Optional target ref
+    pub target_ref_opt: Option<&'a str>,
+    /// Optional remote
+    pub remote_opt: Option<&'a str>,
+    /// Optional SSH key path
+    pub ssh_key_path_opt: Option<&'a PathBuf>,
+    /// Optional SSH passphrase
+    pub ssh_passphrase_opt: Option<&'a str>,
+    /// Base path for new clones
+    pub base_path_for_new_clones: &'a Path,
+    /// Embedding dimension
+    pub embedding_dim: u64,
+    /// App configuration
+    pub config: &'a AppConfig,
+    /// Optional progress reporter
+    pub add_progress_reporter: Option<Arc<dyn AddProgressReporter>>,
 }
 
 /// Prepares a repository for use, either by cloning it or ensuring the local path exists.
@@ -137,53 +176,42 @@ pub async fn index_files<
 /// Ensures the corresponding Qdrant collection exists.
 /// Returns the generated `RepositoryConfig` (does not save it to AppConfig).
 pub async fn prepare_repository<C>(
-    url: &str,
-    name_opt: Option<&str>,
-    local_path_opt: Option<&PathBuf>,
-    branch_opt: Option<&str>,
-    target_ref_opt: Option<&str>,
-    remote_opt: Option<&str>,
-    ssh_key_path_opt: Option<&PathBuf>,
-    ssh_passphrase_opt: Option<&str>,
-    base_path_for_new_clones: &Path,
+    params: PrepareRepositoryParams<'_>,
     client: Arc<C>,
-    embedding_dim: u64,
-    config: &AppConfig,
-    add_progress_reporter: Option<Arc<dyn AddProgressReporter>>,
 ) -> Result<RepositoryConfig, SagittaError>
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
-    if url.is_empty() && (local_path_opt.is_none() || !local_path_opt.unwrap().exists()) {
+    if params.url.is_empty() && (params.local_path_opt.is_none() || !params.local_path_opt.unwrap().exists()) {
         return Err(SagittaError::Other("Either URL or existing local repository path must be provided".to_string()));
     }
 
-    let repo_name = name_opt.unwrap_or_else(|| {
-        url.split('/').last().unwrap_or("unknown_repo").trim_end_matches(".git")
+    let repo_name = params.name_opt.unwrap_or_else(|| {
+        params.url.split('/').next_back().unwrap_or("unknown_repo").trim_end_matches(".git")
     });
-    let final_local_path = local_path_opt
+    let final_local_path = params.local_path_opt
         .cloned()
-        .unwrap_or_else(|| base_path_for_new_clones.join(repo_name));
-    let final_branch = branch_opt.unwrap_or("main"); // Default to main if not specified
-    let final_remote = remote_opt.unwrap_or("origin"); // Default to origin if not specified
+        .unwrap_or_else(|| params.base_path_for_new_clones.join(repo_name));
+    let final_branch = params.branch_opt.unwrap_or("main"); // Default to main if not specified
+    let final_remote = params.remote_opt.unwrap_or("origin"); // Default to origin if not specified
 
-    let url_str = url.to_string(); // Clone url for closure
+    let url_str = params.url.to_string(); // Clone url for closure
     let repo_name_str = repo_name.to_string(); // Clone repo_name for closure
     
     // Use branch-aware collection naming to match the new sync behavior
-    let current_branch_or_ref = target_ref_opt.unwrap_or(final_branch);
-    let collection_name = get_branch_aware_collection_name(&repo_name_str, current_branch_or_ref, config);
+    let current_branch_or_ref = params.target_ref_opt.unwrap_or(final_branch);
+    let collection_name = get_branch_aware_collection_name(&repo_name_str, current_branch_or_ref, params.config);
 
     let mut was_cloned = false;
     if !final_local_path.exists() {
-        info!("Ensuring Qdrant collection '{collection_name}' exists (dim={embedding_dim})...");
-        ensure_collection_exists(client.clone(), &collection_name, embedding_dim).await?;
+        info!("Ensuring Qdrant collection '{collection_name}' exists (dim={})...", params.embedding_dim);
+        ensure_collection_exists(client.clone(), &collection_name, params.embedding_dim).await?;
         info!("Qdrant collection ensured for new clone.");
 
         // Report clone start
-        if let Some(reporter) = &add_progress_reporter {
+        if let Some(reporter) = &params.add_progress_reporter {
             reporter.report(AddProgress::new(RepoAddStage::Clone {
-                message: format!("Starting clone of repository '{}'", repo_name_str),
+                message: format!("Starting clone of repository '{repo_name_str}'"),
                 progress: None,
             })).await;
         }
@@ -261,13 +289,13 @@ where
                 error!("Failed to clone repository: {}", e);
                 
                 // Report clone error
-                if let Some(reporter) = &add_progress_reporter {
+                if let Some(reporter) = &params.add_progress_reporter {
                     reporter.report(AddProgress::new(RepoAddStage::Error {
-                        message: format!("Git clone failed: {}", e),
+                        message: format!("Git clone failed: {e}"),
                     })).await;
                 }
                 
-                return Err(SagittaError::GitMessageError(format!("Git clone failed: {}", e)));
+                return Err(SagittaError::GitMessageError(format!("Git clone failed: {e}")));
             }
         };
 
@@ -277,9 +305,9 @@ where
             info!("Successfully cloned repository to {path_str}.");
             
             // Report clone completion
-            if let Some(reporter) = &add_progress_reporter {
+            if let Some(reporter) = &params.add_progress_reporter {
                 reporter.report(AddProgress::new(RepoAddStage::Clone {
-                    message: format!("Successfully cloned repository to {}", path_str),
+                    message: format!("Successfully cloned repository to {path_str}"),
                     progress: Some((1, 1)), // Mark as complete
                 })).await;
             }
@@ -298,9 +326,9 @@ where
                 info!("Checking if we need to checkout branch '{}'...", final_branch);
                 
                 // Report checkout start
-                if let Some(reporter) = &add_progress_reporter {
+                if let Some(reporter) = &params.add_progress_reporter {
                     reporter.report(AddProgress::new(RepoAddStage::Checkout {
-                        message: format!("Checking out branch '{}'", final_branch),
+                        message: format!("Checking out branch '{final_branch}'"),
                     })).await;
                 }
                 
@@ -338,9 +366,9 @@ where
             error!("Failed to clone repository: {stderr}");
             
             // Report clone error
-            if let Some(reporter) = &add_progress_reporter {
+            if let Some(reporter) = &params.add_progress_reporter {
                 reporter.report(AddProgress::new(RepoAddStage::Error {
-                    message: format!("Git clone command failed: {}", stderr),
+                    message: format!("Git clone command failed: {stderr}"),
                 })).await;
             }
             
@@ -354,13 +382,13 @@ where
                     error!("Failed to remove directory {path_str} after failed clone: {error_str}");
                 }
             }
-            return Err(SagittaError::GitMessageError(format!("Git clone command failed: {}", stderr)));
+            return Err(SagittaError::GitMessageError(format!("Git clone command failed: {stderr}")));
         }
     } else {
         let path_str = final_local_path.display().to_string();
         info!("Repository already exists locally at {path_str}, ensuring collection exists...");
-        info!("Ensuring Qdrant collection '{collection_name}' exists (dim={embedding_dim}) for existing clone...");
-        ensure_collection_exists(client.clone(), &collection_name, embedding_dim).await?;
+        info!("Ensuring Qdrant collection '{collection_name}' exists (dim={}) for existing clone...", params.embedding_dim);
+        ensure_collection_exists(client.clone(), &collection_name, params.embedding_dim).await?;
         info!("Qdrant collection ensured for existing clone.");
     }
 
@@ -369,7 +397,7 @@ where
     let resolved_target_ref: Option<String>;
     
     // Resolve special refs like HEAD
-    if let Some(target_ref) = target_ref_opt {
+    if let Some(target_ref) = params.target_ref_opt {
         // Open repository to resolve refs
         let repo = git2::Repository::open(&final_local_path)
             .context(format!("Failed to open repository at {} to resolve refs", final_local_path.display()))?;
@@ -391,7 +419,7 @@ where
                 Ok(_) => resolved_target_ref = Some(target_ref.to_string()),
                 Err(e) => {
                     return Err(SagittaError::GitMessageError(format!(
-                        "Invalid target ref '{}': {}", target_ref, e
+                        "Invalid target ref '{target_ref}': {e}"
                     )));
                 }
             }
@@ -404,9 +432,9 @@ where
         info!("Attempting to checkout target ref '{}' for repository '{}'...", target_ref, repo_name);
         
         // Report fetch start
-        if let Some(reporter) = &add_progress_reporter {
+        if let Some(reporter) = &params.add_progress_reporter {
             reporter.report(AddProgress::new(RepoAddStage::Fetch {
-                message: format!("Fetching latest changes for target ref '{}'", target_ref),
+                message: format!("Fetching latest changes for target ref '{target_ref}'"),
                 progress: None,
             })).await;
         }
@@ -420,9 +448,9 @@ where
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .context(format!("Failed to spawn git fetch before checkout for {}", repo_name))?
+            .context(format!("Failed to spawn git fetch before checkout for {repo_name}"))?
             .wait_with_output()
-            .context(format!("Failed to wait for git fetch before checkout for {}", repo_name))?;
+            .context(format!("Failed to wait for git fetch before checkout for {repo_name}"))?;
         
         if !fetch_status.status.success() {
             let stderr = String::from_utf8_lossy(&fetch_status.stderr);
@@ -432,9 +460,9 @@ where
         }
 
         // Report checkout start
-        if let Some(reporter) = &add_progress_reporter {
+        if let Some(reporter) = &params.add_progress_reporter {
             reporter.report(AddProgress::new(RepoAddStage::Checkout {
-                message: format!("Checking out target ref '{}'", target_ref),
+                message: format!("Checking out target ref '{target_ref}'"),
             })).await;
         }
 
@@ -446,9 +474,9 @@ where
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .context(format!("Failed to spawn git checkout {} for {}", target_ref, repo_name))?
+            .context(format!("Failed to spawn git checkout {target_ref} for {repo_name}"))?
             .wait_with_output()
-            .context(format!("Failed to wait for git checkout {} for {}", target_ref, repo_name))?;
+            .context(format!("Failed to wait for git checkout {target_ref} for {repo_name}"))?;
 
         if checkout_status.status.success() {
             info!("Successfully checked out target ref '{}' for repository '{}'.", target_ref, repo_name);
@@ -467,9 +495,9 @@ where
             error!("Failed to checkout target ref '{}' for repository '{}': {}", target_ref, repo_name, stderr);
             
             // Report checkout error
-            if let Some(reporter) = &add_progress_reporter {
+            if let Some(reporter) = &params.add_progress_reporter {
                 reporter.report(AddProgress::new(RepoAddStage::Error {
-                    message: format!("Failed to checkout target ref '{}': {}", target_ref, stderr),
+                    message: format!("Failed to checkout target ref '{target_ref}': {stderr}"),
                 })).await;
             }
             
@@ -481,9 +509,7 @@ where
                 }
             }
             return Err(SagittaError::GitMessageError(format!(
-                "Failed to checkout target ref '{}': {}",
-                target_ref,
-                stderr
+                "Failed to checkout target ref '{target_ref}': {stderr}"
             )));
         }
     } else {
@@ -497,7 +523,7 @@ where
         // If no URL was provided and it's an existing local path, try to get it from the git remote
         match git2::Repository::open(&final_local_path) {
             Ok(repo) => {
-                let remote_to_check = remote_opt.unwrap_or("origin");
+                let remote_to_check = params.remote_opt.unwrap_or("origin");
                 match repo.find_remote(remote_to_check) {
                     Ok(remote) => {
                         if let Some(git_remote_url) = remote.url() {
@@ -519,7 +545,7 @@ where
     }
 
     // Report completion
-    if let Some(reporter) = &add_progress_reporter {
+    if let Some(reporter) = &params.add_progress_reporter {
         reporter.report(AddProgress::new(RepoAddStage::Completed {
             message: format!("Repository '{}' successfully prepared at {}", repo_name, final_local_path.display()),
         })).await;
@@ -530,7 +556,7 @@ where
         url: final_url_to_store, // Use the potentially updated URL
         local_path: final_local_path,
         default_branch: final_active_branch.clone(),
-        tracked_branches: if final_active_branch != final_branch && target_ref_opt.is_some() {
+        tracked_branches: if final_active_branch != final_branch && params.target_ref_opt.is_some() {
             vec![final_branch.to_string(), final_active_branch.clone()]
         } else {
             vec![final_active_branch.clone()]
@@ -539,10 +565,10 @@ where
         remote_name: Some(final_remote.to_string()),
         last_synced_commits: HashMap::new(),
         indexed_languages: None,
-        ssh_key_path: ssh_key_path_opt.cloned(),
-        ssh_key_passphrase: ssh_passphrase_opt.map(String::from),
-        added_as_local_path: local_path_opt.is_some(),
-        target_ref: target_ref_opt.map(|s| s.to_string()),
+        ssh_key_path: params.ssh_key_path_opt.cloned(),
+        ssh_key_passphrase: params.ssh_passphrase_opt.map(String::from),
+        added_as_local_path: params.local_path_opt.is_some(),
+        target_ref: params.target_ref_opt.map(|s| s.to_string()),
     })
 }
 
@@ -629,7 +655,7 @@ where
         return Ok(());
     }
     let dangerous_paths = ["/", "/usr", "/bin", "/sbin", "/etc", "/var", "/tmp", "/opt", "/boot", "/lib", "/dev", "/proc", "/sys", "/run"];
-    if dangerous_paths.iter().any(|p| path_str == *p || path_str.starts_with(&format!("{}/", p))) {
+    if dangerous_paths.iter().any(|p| path_str == *p || path_str.starts_with(&format!("{p}/"))) {
         error!("Path '{path_str}' appears to be a system directory. Refusing to delete for safety.");
         return Ok(());
     }
@@ -747,7 +773,7 @@ where
         Ok(())
     } else {
         error!("Failed to delete repository directory after all attempts");
-        Err(SagittaError::Other(format!("Failed to delete repository directory")))
+        Err(SagittaError::Other("Failed to delete repository directory".to_string()))
     }
 }
 
@@ -766,19 +792,19 @@ pub struct CommitInfo {
 ///   1. Check out the specified static ref (tag, commit, branch).
 ///   2. Determine the commit hash for that ref.
 ///   3. Return the commit hash without fetching updates from the remote.
-///   (The caller is then responsible for indexing based on this static ref).
+///      (The caller is then responsible for indexing based on this static ref).
 /// - If `target_ref` is *not* set, this function will:
 ///   1. Fetch updates from the remote for the repository's active branch.
 ///   2. Merge the changes (fast-forward or create merge commit).
 ///   3. Return the new HEAD commit hash after the merge.
-///   (The caller is then responsible for indexing the updated files).
+///      (The caller is then responsible for indexing the updated files).
 ///
 /// Note: The actual indexing (`index_files`) is typically called *after* this function
 /// by the primary handler (e.g., in MCP server or CLI command) based on the returned commit hash.
 pub async fn sync_repository_branch(
     config: &AppConfig,
     repo_config_index: usize,
-    _client: Arc<impl QdrantClientTrait + Send + Sync + 'static>, // Keep client for future use maybe
+    _client: Arc<impl QdrantClientTrait + 'static>, // Keep client for future use maybe
     _fetch_and_merge: bool, // Keep flag for future use maybe
 ) -> Result<String, anyhow::Error> {
     let repo_config = config.repositories.get(repo_config_index)
@@ -813,7 +839,7 @@ pub async fn sync_repository_branch(
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
-            .context(format!("Failed to execute git rev-parse for target ref {}", target_ref))?;
+            .context(format!("Failed to execute git rev-parse for target ref {target_ref}"))?;
 
         if commit_hash_output.status.success() {
             let commit_hash = String::from_utf8(commit_hash_output.stdout)?.trim().to_string();
@@ -875,11 +901,11 @@ pub async fn sync_repository_branch(
     let local_commit_output = Command::new("git")
         .current_dir(repo_path)
         .arg("rev-parse")
-        .arg(format!("refs/heads/{}", branch_name)) // Target local branch ref
+        .arg(format!("refs/heads/{branch_name}")) // Target local branch ref
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .context(format!("Failed to execute git rev-parse for local {}", branch_name))?;
+        .context(format!("Failed to execute git rev-parse for local {branch_name}"))?;
 
     let local_commit_hash = if local_commit_output.status.success() {
         String::from_utf8(local_commit_output.stdout)?.trim().to_string()
@@ -888,7 +914,7 @@ pub async fn sync_repository_branch(
         let stderr = stderr_cow.as_ref();
         if stderr.contains("unknown revision or path not in the working tree") {
             warn!("Local branch {branch_name} not found in {repo_name}. It might have been deleted or not checked out.");
-            return Ok(format!("Local branch {} not found.", branch_name));
+            return Ok(format!("Local branch {branch_name} not found."));
         } else {
             error!("Failed to get local commit hash for {repo_name}/{branch_name}: {stderr}");
             return Err(anyhow!("Failed to get local commit hash for {}/{}: {}", repo_config.name, branch_name, stderr));
@@ -896,7 +922,7 @@ pub async fn sync_repository_branch(
     };
 
     // 3. Get remote commit hash
-    let remote_ref = format!("refs/remotes/{}/{}", remote_name, branch_name);
+    let remote_ref = format!("refs/remotes/{remote_name}/{branch_name}");
     let remote_commit_output = Command::new("git")
         .current_dir(repo_path)
         .arg("rev-parse")
@@ -904,7 +930,7 @@ pub async fn sync_repository_branch(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .context(format!("Failed to execute git rev-parse for remote {}", remote_ref))?;
+        .context(format!("Failed to execute git rev-parse for remote {remote_ref}"))?;
 
     let remote_commit_hash = if remote_commit_output.status.success() {
         String::from_utf8(remote_commit_output.stdout)?.trim().to_string()
@@ -913,7 +939,7 @@ pub async fn sync_repository_branch(
         let stderr = stderr_cow.as_ref();
         if stderr.contains("unknown revision or path not in the working tree") {
             info!("Remote branch {remote_ref} not found for {repo_name} after fetch (likely deleted).");
-            return Ok(format!("Remote branch {}/{} not found after fetch.", remote_name, branch_name));
+            return Ok(format!("Remote branch {remote_name}/{branch_name} not found after fetch."));
         } else {
             error!("Failed to get remote commit hash for {repo_name}/{remote_ref} even though ref exists: {stderr}");
             return Err(anyhow!("Failed to get remote commit hash for {}/{}: {}", repo_config.name, remote_ref, stderr));
@@ -923,7 +949,7 @@ pub async fn sync_repository_branch(
     // 4. Compare local and remote hashes
     if local_commit_hash == remote_commit_hash {
         info!("Branch {branch_name} already up-to-date for {repo_name}.");
-        return Ok(format!("Branch {} already up-to-date.", branch_name));
+        return Ok(format!("Branch {branch_name} already up-to-date."));
     }
 
     // 5. Determine relationship (behind, ahead, diverged) using merge-base
@@ -959,13 +985,13 @@ pub async fn sync_repository_branch(
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
-            .context(format!("Failed to execute git merge --ff-only for {}", branch_name))?;
+            .context(format!("Failed to execute git merge --ff-only for {branch_name}"))?;
 
         if !merge_output.status.success() {
             let stderr_cow = String::from_utf8_lossy(&merge_output.stderr);
             let stderr = stderr_cow.as_ref();
             error!("Fast-forward merge failed for {repo_name}/{branch_name}: {stderr}");
-            return Err(anyhow!("Fast-forward merge failed for {}/{}: {}", repo_config.name, branch_name, stderr));
+            Err(anyhow!("Fast-forward merge failed for {}/{}: {}", repo_config.name, branch_name, stderr))
         } else {
             let stdout = String::from_utf8_lossy(&merge_output.stdout);
             info!("Fast-forward merge successful for {repo_name}/{branch_name}. New commit: {remote_commit_hash}");
@@ -977,11 +1003,11 @@ pub async fn sync_repository_branch(
     } else if merge_base_hash == remote_commit_hash {
         // Local is ahead of remote
         warn!("Local branch {branch_name} ({local_commit_hash}) is ahead of remote {remote_commit_hash} ({remote_commit_hash}) for {repo_name}. No automatic push configured.");
-        Ok(format!("Local branch {} is ahead of remote.", branch_name))
+        Ok(format!("Local branch {branch_name} is ahead of remote."))
     } else {
         // Local and remote have diverged
         warn!("Local branch {branch_name} ({local_commit_hash}) and remote {remote_commit_hash} ({remote_commit_hash}) have diverged (base: {merge_base_hash}) for {repo_name}. Manual merge required.");
-        Ok(format!("Branch {} has diverged from remote. Manual merge required.", branch_name))
+        Ok(format!("Branch {branch_name} has diverged from remote. Manual merge required."))
     }
 }
 
@@ -996,7 +1022,7 @@ fn checkout_branch(repo_path: &Path, branch_name: &str) -> Result<(), anyhow::Er
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .context(format!("Failed to execute git checkout {}", branch_name))?;
+        .context(format!("Failed to execute git checkout {branch_name}"))?;
 
     if !checkout_output.status.success() {
         let stderr_cow = String::from_utf8_lossy(&checkout_output.stderr);
@@ -1079,16 +1105,16 @@ pub async fn index_repository<C: QdrantClientTrait + Send + Sync + 'static>(
     }
 
     // Index the files
-    index_files(
+    index_files(IndexFilesParams {
         client,
         config,
-        &repo_path.to_path_buf(),
-        &files_to_process,
+        repo_root: &repo_path.to_path_buf(),
+        relative_paths: &files_to_process,
         collection_name,
-        branch,
+        branch_name: branch,
         commit_hash,
-        None,
-    ).await?;
+        progress_reporter: None,
+    }).await?;
 
     Ok(())
 }
@@ -1252,20 +1278,23 @@ mod tests {
         
         // This should fail because the URL is invalid, simulating what would happen
         // if a clone operation timed out
+        let prepare_params = PrepareRepositoryParams {
+            url: "https://invalid-nonexistent-repo-url-that-would-timeout.git",
+            name_opt: Some("test-repo"),
+            local_path_opt: None, // No local path
+            branch_opt: Some("main"),
+            target_ref_opt: None, // No target ref
+            remote_opt: None, // No remote
+            ssh_key_path_opt: None, // No SSH key
+            ssh_passphrase_opt: None, // No SSH passphrase
+            base_path_for_new_clones: base_path,
+            embedding_dim: 384,
+            config: &config,
+            add_progress_reporter: None, // No progress reporter for test
+        };
         let result = prepare_repository::<MockQdrantClientTrait>(
-            "https://invalid-nonexistent-repo-url-that-would-timeout.git",
-            Some("test-repo"),
-            None, // No local path
-            Some("main"),
-            None, // No target ref
-            None, // No remote
-            None, // No SSH key
-            None, // No SSH passphrase
-            base_path,
+            prepare_params,
             client,
-            384, // embedding_dim
-            &config,
-            None, // No progress reporter for test
         ).await;
         
         // Should fail with a git error (simulating timeout)
@@ -1297,20 +1326,23 @@ mod tests {
         let config = AppConfig::default();
         
         // Test prepare_repository with existing local path (should not timeout)
+        let prepare_params = PrepareRepositoryParams {
+            url: "", // Empty URL since we're using local path
+            name_opt: Some("existing-repo"),
+            local_path_opt: Some(&existing_repo_path),
+            branch_opt: Some("main"),
+            target_ref_opt: None,
+            remote_opt: None,
+            ssh_key_path_opt: None,
+            ssh_passphrase_opt: None,
+            base_path_for_new_clones: base_path,
+            embedding_dim: 384,
+            config: &config,
+            add_progress_reporter: None, // No progress reporter for test
+        };
         let result = prepare_repository::<MockQdrantClientTrait>(
-            "", // Empty URL since we're using local path
-            Some("existing-repo"),
-            Some(&existing_repo_path),
-            Some("main"),
-            None,
-            None,
-            None,
-            None,
-            base_path,
+            prepare_params,
             client,
-            384,
-            &config,
-            None, // No progress reporter for test
         ).await;
         
         assert!(result.is_ok());
@@ -1335,16 +1367,16 @@ mod tests {
         let config = AppConfig::default();
         let empty_file_list: Vec<PathBuf> = vec![];
         
-        let result = index_files(
+        let result = index_files(IndexFilesParams {
             client,
-            &config,
-            &repo_root,
-            &empty_file_list,
-            "test_collection",
-            "main",
-            "abc123",
-            None,
-        ).await;
+            config: &config,
+            repo_root: &repo_root,
+            relative_paths: &empty_file_list,
+            collection_name: "test_collection",
+            branch_name: "main",
+            commit_hash: "abc123",
+            progress_reporter: None,
+        }).await;
         
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 0); // Should return 0 files indexed

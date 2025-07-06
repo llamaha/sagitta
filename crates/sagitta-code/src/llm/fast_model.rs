@@ -369,9 +369,8 @@ fn create_branch_prompt(conversation: &Conversation) -> String {
         Example:\n\
         5:error_recovery:0.8\n\
         12:alternative_approach:0.6\n\n\
-        Conversation:\n{}\n\n\
-        Branch points:",
-        messages_text
+        Conversation:\n{messages_text}\n\n\
+        Branch points:"
     )
 }
 

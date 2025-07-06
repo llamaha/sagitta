@@ -9,7 +9,6 @@ use crate::agent::conversation::service::ConversationService;
 use crate::agent::state::types::ConversationStatus;
 use crate::config::SagittaCodeConfig;
 use super::types::{ConversationSidebar, ConversationGroup, ConversationItem, SidebarAction, OrganizationMode};
-use super::organization::*;
 
 impl ConversationSidebar {
     /// Main rendering method for the sidebar
@@ -28,7 +27,7 @@ impl ConversationSidebar {
         let panel_frame = Frame {
             inner_margin: Margin::same(8),
             outer_margin: Margin::same(0),
-            corner_radius: egui::Rounding::same(4),
+            corner_radius: egui::CornerRadius::same(4),
             fill: theme.panel_background(),
             stroke: egui::Stroke::NONE,
             ..Default::default()
@@ -112,7 +111,7 @@ impl ConversationSidebar {
                                     organized_data.filtered_count, organized_data.total_count));
                             },
                             Err(e) => {
-                                log::error!("Failed to organize conversations: {}", e);
+                                log::error!("Failed to organize conversations: {e}");
                                 self.render_simple_conversation_list(ui, app_state, theme);
                             }
                         }
@@ -131,7 +130,7 @@ impl ConversationSidebar {
                                     },
                                     Ok(None) => {},
                                     Err(e) => {
-                                        log::error!("Failed to render checkpoint suggestions: {}", e);
+                                        log::error!("Failed to render checkpoint suggestions: {e}");
                                     }
                                 }
                             }
@@ -146,7 +145,7 @@ impl ConversationSidebar {
     }
 
     /// Render the sidebar header
-    fn render_header(&mut self, ui: &mut Ui, app_state: &mut AppState, theme: &AppTheme) {
+    fn render_header(&mut self, ui: &mut Ui, _app_state: &mut AppState, _theme: &AppTheme) {
         let screen_size = ui.ctx().screen_rect().size();
         let is_small_screen = self.config.responsive.enabled && 
             screen_size.x <= self.config.responsive.small_screen_breakpoint;
@@ -207,7 +206,7 @@ impl ConversationSidebar {
     }
 
     /// Render the search bar
-    fn render_search_bar(&mut self, ui: &mut Ui, app_state: &mut AppState) {
+    fn render_search_bar(&mut self, ui: &mut Ui, _app_state: &mut AppState) {
         ui.horizontal(|ui| {
             ui.label("🔍");
             
@@ -330,14 +329,14 @@ impl ConversationSidebar {
         &mut self, 
         ui: &mut Ui, 
         item: &ConversationItem, 
-        app_state: &mut AppState, 
+        _app_state: &mut AppState, 
         theme: &AppTheme
     ) {
         log::trace!("Sidebar: Rendering conversation item: {} ({})", item.display.title, item.summary.id);
         let is_selected = item.selected;
         let is_editing = self.editing_conversation_id == Some(item.summary.id);
         
-        let item_color = if is_selected {
+        let _item_color = if is_selected {
             theme.accent_color().gamma_multiply(0.3)
         } else {
             Color32::TRANSPARENT
@@ -408,7 +407,7 @@ impl ConversationSidebar {
                         // Create a small frame for each tag
                         let tag_frame = Frame {
                             inner_margin: Margin { left: 4, right: 4, top: 1, bottom: 1 },
-                            corner_radius: egui::Rounding::same(3),
+                            corner_radius: egui::CornerRadius::same(3),
                             fill: theme.accent_color().gamma_multiply(0.2),
                             stroke: egui::Stroke::NONE,
                             ..Default::default()
@@ -464,19 +463,19 @@ impl ConversationSidebar {
     pub(super) fn handle_sidebar_actions(
         &mut self, 
         app_state: &mut AppState, 
-        ctx: &egui::Context, 
-        conversation_service: Option<Arc<ConversationService>>, 
+        _ctx: &egui::Context, 
+        _conversation_service: Option<Arc<ConversationService>>, 
         app_event_sender: UnboundedSender<AppEvent>
     ) {
         if let Some(action) = self.pending_action.take() {
             match action {
                 SidebarAction::SwitchToConversation(id) => {
-                    log::info!("Sidebar: Switching to conversation {}", id);
+                    log::info!("Sidebar: Switching to conversation {id}");
                     app_state.current_conversation_id = Some(id);
                     self.selected_conversation = Some(id);
                     match app_event_sender.send(AppEvent::SwitchToConversation(id)) {
                         Ok(_) => log::info!("Sidebar: Successfully sent SwitchToConversation event"),
-                        Err(e) => log::error!("Sidebar: Failed to send SwitchToConversation event: {}", e),
+                        Err(e) => log::error!("Sidebar: Failed to send SwitchToConversation event: {e}"),
                     }
                 }
                 SidebarAction::CreateNewConversation => {
@@ -489,7 +488,7 @@ impl ConversationSidebar {
                     
                     // Send event to notify the app about the new conversation
                     if let Err(e) = app_event_sender.send(AppEvent::CreateNewConversation) {
-                        log::error!("Failed to send CreateNewConversation event: {}", e);
+                        log::error!("Failed to send CreateNewConversation event: {e}");
                     }
                     
                     // The next message will automatically create a new conversation
@@ -498,7 +497,7 @@ impl ConversationSidebar {
                 SidebarAction::RefreshConversations => {
                     let _ = app_event_sender.send(AppEvent::RefreshConversationList);
                 }
-                SidebarAction::RequestDeleteConversation(id) => {
+                SidebarAction::RequestDeleteConversation(_id) => {
                     // TODO: Implement delete confirmation dialog
                 }
                 SidebarAction::RenameConversation(id, new_name) => {
@@ -507,16 +506,16 @@ impl ConversationSidebar {
                         conversation_id: id,
                         new_title: new_name,
                     }) {
-                        log::error!("Failed to send RenameConversation event: {}", e);
+                        log::error!("Failed to send RenameConversation event: {e}");
                     }
                 }
-                SidebarAction::SetWorkspace(id) => {
+                SidebarAction::SetWorkspace(_id) => {
                     let _ = app_event_sender.send(AppEvent::RefreshConversationList);
                 }
                 SidebarAction::UpdateConversationTitle(id) => {
-                    log::info!("Sidebar: Requesting title update for conversation {}", id);
+                    log::info!("Sidebar: Requesting title update for conversation {id}");
                     if let Err(e) = app_event_sender.send(AppEvent::UpdateConversationTitle { conversation_id: id }) {
-                        log::error!("Failed to send UpdateConversationTitle event: {}", e);
+                        log::error!("Failed to send UpdateConversationTitle event: {e}");
                     }
                 }
                 _ => {}

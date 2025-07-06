@@ -27,7 +27,7 @@ pub async fn handle_write_file<C: QdrantClientTrait + Send + Sync + 'static>(
                 if let Err(e) = fs::create_dir_all(parent).await {
                     return Err(ErrorObject {
                         code: -32603,
-                        message: format!("Failed to create parent directories: {}", e),
+                        message: format!("Failed to create parent directories: {e}"),
                         data: None,
                     });
                 }
@@ -42,7 +42,7 @@ pub async fn handle_write_file<C: QdrantClientTrait + Send + Sync + 'static>(
     if let Err(e) = fs::write(&params.file_path, content_bytes).await {
         return Err(ErrorObject {
             code: -32603,
-            message: format!("Failed to write file: {}", e),
+            message: format!("Failed to write file: {e}"),
             data: None,
         });
     }

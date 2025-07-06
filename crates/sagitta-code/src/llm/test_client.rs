@@ -32,7 +32,7 @@ impl TestLlmClient {
         }
     }
     
-    pub fn with_tool_calls(mut self, tool_calls: Vec<(String, serde_json::Value)>) -> Self {
+    pub fn with_tool_calls(self, tool_calls: Vec<(String, serde_json::Value)>) -> Self {
         *self.tool_calls.lock().unwrap() = tool_calls;
         self
     }

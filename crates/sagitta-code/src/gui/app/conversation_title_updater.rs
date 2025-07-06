@@ -6,8 +6,8 @@ use crate::agent::conversation::service::ConversationService;
 use crate::llm::title::{TitleGenerator, TitleGeneratorConfig};
 use crate::llm::client::LlmClient;
 use crate::agent::message::types::AgentMessage;
-use crate::agent::conversation::tagging::{TaggingPipeline, TaggingPipelineConfig};
-use crate::llm::fast_model::{FastModelProvider, FastModelOperations};
+use crate::agent::conversation::tagging::TaggingPipeline;
+use crate::llm::fast_model::FastModelOperations;
 
 /// Updates conversation titles automatically after messages are added
 pub struct ConversationTitleUpdater {
@@ -88,7 +88,7 @@ impl ConversationTitleUpdater {
                 match fast_model.suggest_tags(&updated_conversation).await {
                     Ok(tag_suggestions) => {
                         // Filter high-confidence tags (>= 0.7) and take top 5
-                        let mut high_confidence_tags: Vec<String> = tag_suggestions.into_iter()
+                        let high_confidence_tags: Vec<String> = tag_suggestions.into_iter()
                             .filter(|(_, confidence)| *confidence >= 0.7)
                             .take(5)
                             .map(|(tag, _)| tag)
@@ -96,8 +96,7 @@ impl ConversationTitleUpdater {
                         
                         // If we got tags from fast model, use them
                         if !high_confidence_tags.is_empty() {
-                            log::info!("Fast model suggested tags for conversation {}: {:?}", 
-                                conversation_id, high_confidence_tags);
+                            log::info!("Fast model suggested tags for conversation {conversation_id}: {high_confidence_tags:?}");
                             high_confidence_tags
                         } else {
                             // Fall back to rule-based tagging
@@ -105,7 +104,7 @@ impl ConversationTitleUpdater {
                         }
                     }
                     Err(e) => {
-                        log::debug!("Fast model tag suggestion failed: {}, using rule-based", e);
+                        log::debug!("Fast model tag suggestion failed: {e}, using rule-based");
                         self.generate_rule_based_tags(&updated_conversation)
                     }
                 }
@@ -115,7 +114,7 @@ impl ConversationTitleUpdater {
             };
             
             if !tags.is_empty() {
-                log::info!("Adding tags to conversation {}: {:?}", conversation_id, tags);
+                log::info!("Adding tags to conversation {conversation_id}: {tags:?}");
                 updated_conversation.tags = tags;
             }
             
@@ -138,7 +137,7 @@ impl ConversationTitleUpdater {
         if let Some(mut conversation) = self.conversation_service.get_conversation(conversation_id).await? {
             // Only update if the title is still the default
             if conversation.title.starts_with("Conversation 20") {
-                log::info!("Updating conversation {} title to '{}'", conversation_id, new_title);
+                log::info!("Updating conversation {conversation_id} title to '{new_title}'");
                 conversation.title = new_title;
                 self.conversation_service.update_conversation(conversation).await?;
             }
@@ -224,15 +223,15 @@ impl ConversationTitleUpdater {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::conversation::types::Conversation;
-    use crate::llm::client::Role;
-    use chrono::Utc;
+    
+    
+    
 
     #[tokio::test]
     async fn test_title_update_skips_custom_titles() {
         // This would require mocking the conversation service
         // For now, just verify the updater can be created
         let title_generator = TitleGenerator::new(TitleGeneratorConfig::default());
-        assert_eq!(title_generator.generate_title(&[]).await.unwrap().len() > 0, true);
+        assert!(!title_generator.generate_title(&[]).await.unwrap().is_empty());
     }
 }

@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use sagitta_search::{EmbeddingPool, embed_single_text_with_pool, embed_text_with_pool, SagittaError};
+use sagitta_search::{EmbeddingPool, embed_single_text_with_pool};
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;
 use sagitta_embed::EmbeddingProcessor;
 
@@ -197,7 +197,7 @@ impl ConversationSearchServiceImpl {
         
         // Add tags
         for (i, tag) in conversation.tags.iter().enumerate() {
-            metadata.insert(format!("tag_{}", i), tag.clone().into());
+            metadata.insert(format!("tag_{i}"), tag.clone().into());
         }
         
         // Add branch and checkpoint counts
@@ -355,12 +355,12 @@ impl ConversationSearchService for ConversationSearchServiceImpl {
         Ok(results)
     }
     
-    async fn find_similar_conversations(&self, conversation_id: Uuid, limit: usize) -> Result<Vec<ConversationSearchResult>> {
+    async fn find_similar_conversations(&self, _conversation_id: Uuid, _limit: usize) -> Result<Vec<ConversationSearchResult>> {
         // For now, return empty results as this requires more complex implementation
         Ok(Vec::new())
     }
     
-    async fn get_conversation_embeddings(&self, conversation_ids: &[Uuid]) -> Result<Vec<ConversationEmbedding>> {
+    async fn get_conversation_embeddings(&self, _conversation_ids: &[Uuid]) -> Result<Vec<ConversationEmbedding>> {
         // For now, return empty results as this requires more complex implementation
         Ok(Vec::new())
     }
@@ -404,7 +404,7 @@ impl ConversationSearchService for ConversationSearchServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::conversation::types::ProjectType;
+    
     use sagitta_embed::EmbeddingConfig;
     use std::sync::Arc;
     

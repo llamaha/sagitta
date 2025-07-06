@@ -77,7 +77,7 @@ mod tests {
         
         // Create many chunks to test parallel processing
         let chunks: Vec<ProcessedChunk> = (0..20)
-            .map(|i| create_test_chunk(&format!("Test content {}", i), &format!("chunk_{}", i)))
+            .map(|i| create_test_chunk(&format!("Test content {i}"), &format!("chunk_{i}")))
             .collect();
         
         let result = pool.process_chunks(chunks).await.unwrap();
@@ -85,7 +85,7 @@ mod tests {
         
         // Verify all chunks were processed
         for (i, embedded_chunk) in result.iter().enumerate() {
-            assert_eq!(embedded_chunk.chunk.id, format!("chunk_{}", i));
+            assert_eq!(embedded_chunk.chunk.id, format!("chunk_{i}"));
             assert_eq!(embedded_chunk.embedding.len(), 384);
         }
     }
@@ -112,7 +112,7 @@ mod tests {
             assert_eq!(embedding.len(), 384);
             // Check normalization
             let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-            assert!((norm - 1.0).abs() < 0.01, "Norm {} should be close to 1.0", norm);
+            assert!((norm - 1.0).abs() < 0.01, "Norm {norm} should be close to 1.0");
         }
     }
 

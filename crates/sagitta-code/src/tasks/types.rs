@@ -4,17 +4,19 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Task priority levels
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
 pub enum TaskPriority {
     Low = 1,
+    #[default]
     Normal = 2,
     High = 3,
     Critical = 4,
 }
 
 /// Task status
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum TaskStatus {
+    #[default]
     Pending,
     InProgress,
     Completed,
@@ -71,6 +73,7 @@ pub struct Task {
 
 /// Task metadata for additional context
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct TaskMetadata {
     /// Estimated effort in hours
     pub estimated_hours: Option<f32>,
@@ -217,17 +220,7 @@ pub enum ArtifactType {
     Other(String),
 }
 
-impl Default for TaskPriority {
-    fn default() -> Self {
-        TaskPriority::Normal
-    }
-}
 
-impl Default for TaskStatus {
-    fn default() -> Self {
-        TaskStatus::Pending
-    }
-}
 
 impl Default for TaskType {
     fn default() -> Self {
@@ -235,18 +228,6 @@ impl Default for TaskType {
     }
 }
 
-impl Default for TaskMetadata {
-    fn default() -> Self {
-        Self {
-            estimated_hours: None,
-            actual_hours: None,
-            file_references: Vec::new(),
-            repository_references: Vec::new(),
-            custom_fields: HashMap::new(),
-            conversation_context: None,
-        }
-    }
-}
 
 impl Task {
     /// Create a new task
@@ -363,7 +344,7 @@ impl From<&Task> for TaskSummary {
             title: task.title.clone(),
             task_type: task.task_type.clone(),
             priority: task.priority,
-            status: task.status.clone(),
+            status: task.status,
             created_at: task.created_at,
             due_date: task.due_date,
             workspace_id: task.workspace_id,

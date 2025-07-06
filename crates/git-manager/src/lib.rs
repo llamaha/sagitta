@@ -116,7 +116,6 @@ pub use indexing::{
 };
 
 use std::sync::Arc;
-use anyhow::Context;
 
 /// Main git manager struct that coordinates all git operations
 ///
@@ -525,10 +524,8 @@ where
         
         let mut tags = Vec::new();
         if let Ok(tag_names) = git2_repo.tag_names(None) {
-            for tag_name in tag_names.iter() {
-                if let Some(tag) = tag_name {
-                    tags.push(tag.to_string());
-                }
+            for tag in tag_names.iter().flatten() {
+                tags.push(tag.to_string());
             }
         }
         

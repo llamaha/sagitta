@@ -7,6 +7,12 @@ use tokio::sync::mpsc;
 /// Stub tool registry - no actual tools
 pub struct ToolRegistry;
 
+impl Default for ToolRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ToolRegistry {
     pub fn new() -> Self {
         ToolRegistry

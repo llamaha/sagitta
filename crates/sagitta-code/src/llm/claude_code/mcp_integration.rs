@@ -1,8 +1,4 @@
-use std::process::Stdio;
-use std::sync::Arc;
-use tokio::process::{Command, Child};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 use anyhow::{anyhow, Result};
 // Tool registry removed - tools now via MCP
 use tempfile::NamedTempFile;
@@ -16,6 +12,12 @@ pub struct McpIntegration {
     server_handle: Option<tokio::task::JoinHandle<()>>,
     shutdown_tx: Option<oneshot::Sender<()>>,
     config_file: Option<NamedTempFile>,
+}
+
+impl Default for McpIntegration {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl McpIntegration {
@@ -60,8 +62,8 @@ impl McpIntegration {
         let config_path = config_file.path().to_string_lossy().to_string();
         self.config_file = Some(config_file);
         
-        log::info!("MCP: Config file created at: {}", config_path);
-        log::info!("MCP: Server name: {}", server_name);
+        log::info!("MCP: Config file created at: {config_path}");
+        log::info!("MCP: Server name: {server_name}");
         
         // Return the config for Claude CLI
         Ok(json!({

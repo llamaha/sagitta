@@ -1,8 +1,7 @@
 use anyhow::{Context, Result};
-use hf_hub::{api::sync::{Api, ApiBuilder}, Repo, RepoType};
+use hf_hub::{api::sync::Api, Repo, RepoType};
 use std::path::{Path, PathBuf};
 use std::fs;
-use std::io::Write;
 use log::{info, debug, warn};
 
 /// Predefined embedding models with their HuggingFace model IDs and file paths
@@ -59,7 +58,7 @@ impl EmbeddingModel {
     }
 
     /// Parse from string representation
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s {
             "bge-small-en-v1.5-q" | "bge-small-fast" => Self::BgeSmallEnV15Quantized,
             "bge-small-en-v1.5-fp16" | "bge-small-fp32" => Self::BgeSmallEnV15Fp32,
@@ -93,32 +92,31 @@ impl ModelDownloader {
         
         // Construct the direct download URL
         let url = format!(
-            "https://huggingface.co/{}/resolve/main/{}",
-            model_id, filename
+            "https://huggingface.co/{model_id}/resolve/main/{filename}"
         );
         
-        info!("Attempting direct download from: {}", url);
+        info!("Attempting direct download from: {url}");
         
         // Create cache directory if it doesn't exist
         if let Some(parent) = cache_path.parent() {
             fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create cache directory: {:?}", parent))?;
+                .with_context(|| format!("Failed to create cache directory: {parent:?}"))?;
         }
         
         // Download the file
         let response = ureq::get(&url)
             .call()
-            .map_err(|e| anyhow::anyhow!("Failed to download {}: {}", filename, e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to download {filename}: {e}"))?;
         
         // Write to cache file
         let mut file = fs::File::create(cache_path)
-            .with_context(|| format!("Failed to create file: {:?}", cache_path))?;
+            .with_context(|| format!("Failed to create file: {cache_path:?}"))?;
             
         let mut reader = response.into_reader();
         std::io::copy(&mut reader, &mut file)
-            .with_context(|| format!("Failed to write file: {:?}", cache_path))?;
+            .with_context(|| format!("Failed to write file: {cache_path:?}"))?;
             
-        info!("Successfully downloaded {} to {:?}", filename, cache_path);
+        info!("Successfully downloaded {filename} to {cache_path:?}");
         Ok(cache_path.to_path_buf())
     }
 
@@ -147,7 +145,7 @@ impl ModelDownloader {
     /// Download a model and return paths to the model and tokenizer
     pub fn download_model(&self, model: &EmbeddingModel) -> Result<ModelPaths> {
         let model_id = model.model_id();
-        info!("Downloading model: {}", model_id);
+        info!("Downloading model: {model_id}");
 
         // Log cache directory
         debug!("Using cache directory: {:?}", self.cache_dir);
@@ -182,8 +180,8 @@ impl ModelDownloader {
             }
             Err(e) => {
                 // Log the error for debugging
-                warn!("hf_hub download failed: {}", e);
-                warn!("Error details: {:?}", e);
+                warn!("hf_hub download failed: {e}");
+                warn!("Error details: {e:?}");
                 
                 // Use direct download as fallback for any hf_hub errors
                 // The hf_hub library has various issues that can cause downloads to fail
@@ -202,8 +200,8 @@ impl ModelDownloader {
                 for file in model.additional_files() {
                     let cache_path = model_cache_dir.join("snapshots").join("main").join(file);
                     match self.download_file_direct(model_id, file, &cache_path) {
-                        Ok(_) => debug!("Downloaded additional file: {}", file),
-                        Err(e) => debug!("Failed to download optional file {}: {}", file, e),
+                        Ok(_) => debug!("Downloaded additional file: {file}"),
+                        Err(e) => debug!("Failed to download optional file {file}: {e}"),
                     }
                 }
                 
@@ -230,26 +228,26 @@ impl ModelDownloader {
 
         // Download model file
         let model_file = model.model_file();
-        debug!("Downloading model file via hf_hub: {}", model_file);
+        debug!("Downloading model file via hf_hub: {model_file}");
         let model_path = repo
             .get(model_file)
-            .with_context(|| format!("Failed to download model file: {}", model_file))?;
+            .with_context(|| format!("Failed to download model file: {model_file}"))?;
 
         // Download tokenizer file
         let tokenizer_file = model.tokenizer_file();
-        debug!("Downloading tokenizer file via hf_hub: {}", tokenizer_file);
+        debug!("Downloading tokenizer file via hf_hub: {tokenizer_file}");
         let tokenizer_path = repo
             .get(tokenizer_file)
-            .with_context(|| format!("Failed to download tokenizer file: {}", tokenizer_file))?;
+            .with_context(|| format!("Failed to download tokenizer file: {tokenizer_file}"))?;
 
         // Download additional files
         let mut additional_paths = Vec::new();
         for file in model.additional_files() {
-            debug!("Downloading additional file: {}", file);
+            debug!("Downloading additional file: {file}");
             match repo.get(file) {
                 Ok(path) => additional_paths.push(path),
                 Err(e) => {
-                    debug!("Optional file {} not found: {}", file, e);
+                    debug!("Optional file {file} not found: {e}");
                     // Continue - some files might be optional
                 }
             }
@@ -297,20 +295,19 @@ impl ModelPaths {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
     #[test]
     fn test_embedding_model_from_str() {
         assert_eq!(
-            EmbeddingModel::from_str("bge-small-fast"),
+            EmbeddingModel::parse("bge-small-fast"),
             EmbeddingModel::BgeSmallEnV15Quantized
         );
         assert_eq!(
-            EmbeddingModel::from_str("bge-small-fp32"),
+            EmbeddingModel::parse("bge-small-fp32"),
             EmbeddingModel::BgeSmallEnV15Fp32
         );
         assert_eq!(
-            EmbeddingModel::from_str("custom/model-id"),
+            EmbeddingModel::parse("custom/model-id"),
             EmbeddingModel::Custom("custom/model-id".to_string())
         );
     }
@@ -340,7 +337,7 @@ mod tests {
         let model = EmbeddingModel::BgeSmallEnV15Quantized;
         let downloader = ModelDownloader::new().expect("Failed to create downloader");
         
-        println!("Testing download for model: {:?}", model);
+        println!("Testing download for model: {model:?}");
         println!("Model ID: {}", model.model_id());
         println!("Model file: {}", model.model_file());
         println!("Tokenizer file: {}", model.tokenizer_file());
@@ -362,9 +359,9 @@ mod tests {
             }
             Err(e) => {
                 // If download fails, provide helpful information
-                eprintln!("Model download failed: {}", e);
-                eprintln!("Full error: {:?}", e);
-                eprintln!("Error string: {}", e.to_string());
+                eprintln!("Model download failed: {e}");
+                eprintln!("Full error: {e:?}");
+                eprintln!("Error string: {e}");
                 eprintln!("\nThis might be due to:");
                 eprintln!("1. Network connectivity issues");
                 eprintln!("2. SSL/TLS certificate problems (try: export HF_HUB_DISABLE_SSL_VERIFY=1)");
@@ -407,11 +404,11 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let cache_path = temp_dir.path().join(filename);
         
-        println!("Testing direct download of {} from {}", filename, model_id);
+        println!("Testing direct download of {filename} from {model_id}");
         
         match downloader.download_file_direct(model_id, filename, &cache_path) {
             Ok(path) => {
-                println!("Direct download succeeded: {:?}", path);
+                println!("Direct download succeeded: {path:?}");
                 assert!(path.exists(), "Downloaded file should exist");
                 
                 // Check file size to ensure it's not empty
@@ -420,7 +417,7 @@ mod tests {
                 println!("File size: {} bytes", metadata.len());
             }
             Err(e) => {
-                eprintln!("Direct download failed: {}", e);
+                eprintln!("Direct download failed: {e}");
                 panic!("Direct download should work");
             }
         }

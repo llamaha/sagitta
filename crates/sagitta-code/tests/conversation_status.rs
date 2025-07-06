@@ -272,7 +272,7 @@ async fn test_manual_status_override_respected() -> Result<()> {
 async fn create_test_manager() -> Result<Arc<dyn ConversationManager>> {
     let manager = ConversationManagerImpl::new(
         Box::new(MockPersistence::new()),
-        Box::new(MockSearchEngine::default()),
+        Box::new(MockSearchEngine),
     ).await?;
     Ok(Arc::new(manager) as Arc<dyn ConversationManager>)
 }

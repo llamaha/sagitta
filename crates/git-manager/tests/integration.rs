@@ -5,8 +5,8 @@
 
 use git_manager::{
     GitManager, GitResult, 
-    RepositoryCloner, CloneOptions, CloneResult,
-    BranchManager, CreateBranchOptions, BranchInfo,
+    RepositoryCloner,
+    BranchManager, CreateBranchOptions,
     ChangeManager, CommitOptions, GitSignature,
     init_repository,
 };
@@ -57,7 +57,7 @@ mod tests {
         
         // Initialize repository
         let result = create_test_repo(&repo_path);
-        assert!(result.is_ok(), "Failed to create test repository: {:?}", result);
+        assert!(result.is_ok(), "Failed to create test repository: {result:?}");
         
         // Verify repository exists and has content
         assert!(repo_path.exists());

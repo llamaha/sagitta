@@ -7,7 +7,6 @@ use crate::config::EmbeddingConfig;
 use std::sync::Arc;
 use tokio::sync::{Semaphore, Mutex, mpsc};
 use std::time::Instant;
-use futures::future::try_join_all;
 
 /// Pool of embedding model instances with controlled GPU memory usage and optimized CPU threading.
 /// This version uses trait-based providers to support different model types.
@@ -86,7 +85,7 @@ impl EmbeddingPool {
                     element_type: "text".to_string(),
                     context: None,
                 },
-                id: format!("text_{}", i),
+                id: format!("text_{i}"),
             }
         }).collect();
 
@@ -97,77 +96,6 @@ impl EmbeddingPool {
             .collect();
 
         Ok(embeddings)
-    }
-
-    /// Get or create an embedding provider instance from the pool.
-    async fn acquire_provider(&self) -> Result<Arc<dyn EmbeddingProvider>> {
-        // Try to get an existing provider from the pool first
-        {
-            let mut providers = self.providers.lock().await;
-            if let Some(provider) = providers.pop() {
-                log::debug!("EmbeddingPool: Reusing existing provider from pool (remaining: {})", providers.len());
-                return Ok(provider);
-            }
-        }
-
-        // No provider available in pool, create a new one
-        log::debug!("EmbeddingPool: Creating new provider (max allowed: {})", self.config.max_embedding_sessions);
-        log::debug!("EmbeddingPool: Embedding config model type: {:?}", self.embedding_config.model_type);
-        let provider = create_embedding_provider(&self.embedding_config)?;
-        log::debug!("EmbeddingPool: Successfully created new provider");
-        Ok(provider)
-    }
-
-    /// Return a provider instance to the pool.
-    async fn release_provider(&self, provider: Arc<dyn EmbeddingProvider>) {
-        let mut providers = self.providers.lock().await;
-        
-        // Only keep up to max_embedding_sessions providers in the pool
-        if providers.len() < self.config.max_embedding_sessions {
-            providers.push(provider);
-            log::debug!("EmbeddingPool: Returned provider to pool (total in pool: {}/{})", providers.len(), self.config.max_embedding_sessions);
-        } else {
-            log::debug!("EmbeddingPool: Pool full, dropping provider");
-            // If pool is full, the provider will be dropped
-        }
-    }
-
-    /// Process a batch of chunks with controlled concurrency.
-    async fn process_batch_internal(&self, chunks: Vec<ProcessedChunk>) -> Result<Vec<EmbeddedChunk>> {
-        if chunks.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Acquire semaphore permit to control concurrency
-        let _permit = self.semaphore.acquire().await
-            .map_err(|e| SagittaEmbedError::thread_safety(format!("Failed to acquire semaphore: {}", e)))?;
-
-        // Acquire a provider from the pool
-        let provider = self.acquire_provider().await?;
-        
-        // Extract text content for embedding
-        let texts: Vec<String> = chunks.iter().map(|c| c.content.clone()).collect();
-        let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
-        
-        // Generate embeddings
-        let embeddings = provider.embed_batch(&text_refs)?;
-        
-        // Return provider to pool
-        self.release_provider(provider).await;
-        
-        // Combine chunks with embeddings
-        let processed_at = Instant::now();
-        let embedded_chunks = chunks
-            .into_iter()
-            .zip(embeddings.into_iter())
-            .map(|(chunk, embedding)| EmbeddedChunk {
-                chunk,
-                embedding,
-                processed_at,
-            })
-            .collect();
-
-        Ok(embedded_chunks)
     }
 
     /// Process multiple chunks in parallel using worker threads.
@@ -182,7 +110,7 @@ impl EmbeddingPool {
 
         let total_chunks = chunks.len();
         let chunk_size = self.config.embedding_batch_size;
-        let total_batches = (total_chunks + chunk_size - 1) / chunk_size;
+        let total_batches = total_chunks.div_ceil(chunk_size);
         let start_time = Instant::now();
 
         log::info!("Processing {} chunks in {} batches using {} CPU workers", 
@@ -194,7 +122,7 @@ impl EmbeddingPool {
 
         // Send batches to work queue
         for batch in chunks.chunks(chunk_size) {
-            if let Err(_) = batch_sender.send(batch.to_vec()).await {
+            if batch_sender.send(batch.to_vec()).await.is_err() {
                 return Err(SagittaEmbedError::thread_safety("Failed to queue batch for processing".to_string()));
             }
         }
@@ -237,12 +165,12 @@ impl EmbeddingPool {
                             ).await;
                             
                             if let Err(ref e) = result {
-                                log::error!("Worker {} failed to process batch: {}", worker_id, e);
+                                log::error!("Worker {worker_id} failed to process batch: {e}");
                             }
                             
                             // Always try to send result, even if it's an error
                             if sender.send(result).await.is_err() {
-                                log::error!("Worker {} failed to send result", worker_id);
+                                log::error!("Worker {worker_id} failed to send result");
                                 break;
                             }
                             
@@ -255,7 +183,7 @@ impl EmbeddingPool {
                     }
                 }
                 
-                log::debug!("Worker {} finished, processed {} batches", worker_id, batches_processed);
+                log::debug!("Worker {worker_id} finished, processed {batches_processed} batches");
             });
             
             worker_handles.push(handle);
@@ -295,10 +223,10 @@ impl EmbeddingPool {
                                               chunks_per_second.unwrap_or(0.0))),
                     }).await;
                     
-                    log::debug!("Received batch {}/{} - {} chunks processed", batches_received, total_batches, chunks_processed);
+                    log::debug!("Received batch {batches_received}/{total_batches} - {chunks_processed} chunks processed");
                 }
                 Err(e) => {
-                    log::warn!("Batch processing failed (will continue with other batches): {}", e);
+                    log::warn!("Batch processing failed (will continue with other batches): {e}");
                     any_errors.push(e);
                     batches_received += 1;
                 }
@@ -309,14 +237,14 @@ impl EmbeddingPool {
         for (i, handle) in worker_handles.into_iter().enumerate() {
             match handle.await {
                 Ok(()) => {
-                    log::debug!("Worker {} completed successfully", i);
+                    log::debug!("Worker {i} completed successfully");
                 }
                 Err(e) if e.is_cancelled() => {
-                    log::debug!("Worker {} was cancelled (this is normal during shutdown)", i);
+                    log::debug!("Worker {i} was cancelled (this is normal during shutdown)");
                 }
                 Err(e) => {
-                    log::error!("Worker {} task failed: {}", i, e);
-                    any_errors.push(SagittaEmbedError::thread_safety(format!("Worker {} failed: {}", i, e)));
+                    log::error!("Worker {i} task failed: {e}");
+                    any_errors.push(SagittaEmbedError::thread_safety(format!("Worker {i} failed: {e}")));
                 }
             }
         }
@@ -351,7 +279,7 @@ impl EmbeddingPool {
 
         // Acquire semaphore permit to control concurrency
         let _permit = semaphore.acquire().await
-            .map_err(|e| SagittaEmbedError::thread_safety(format!("Failed to acquire semaphore: {}", e)))?;
+            .map_err(|e| SagittaEmbedError::thread_safety(format!("Failed to acquire semaphore: {e}")))?;
 
         // Acquire a provider from the pool
         let provider = Self::acquire_provider_static(providers, embedding_config).await?;

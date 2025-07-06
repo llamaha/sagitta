@@ -1,6 +1,6 @@
 use clap::Args;
 use anyhow::{Result, Context, anyhow};
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 use std::io::{self, Write};
 use colored::*;
 use log::info;
@@ -30,7 +30,7 @@ pub async fn handle_repo_remove<C>(
     args: RemoveRepoArgs, 
     config: &mut AppConfig,
     client: Arc<C>,
-    cli_args: &crate::cli::CliArgs,
+    _cli_args: &crate::cli::CliArgs,
     override_path: Option<&PathBuf>,
 ) -> Result<()>
 where
@@ -73,9 +73,9 @@ where
     let repo_config_clone = config.repositories[repo_config_index].clone();
 
     if args.delete_local {
-        info!("Calling core delete_repository_data (includes local files) for repo: {}", repo_name_to_remove);
+        info!("Calling core delete_repository_data (includes local files) for repo: {repo_name_to_remove}");
         sagitta_search::repo_helpers::delete_repository_data(&repo_config_clone, client.clone(), config).await
-            .with_context(|| format!("Failed to delete repository data for '{}'", repo_name_to_remove))?;
+            .with_context(|| format!("Failed to delete repository data for '{repo_name_to_remove}'"))?;
     } else {
         info!("Deleting Qdrant collection(s) for this repository");
         let repo_config = &config.repositories[repo_config_index];
@@ -87,24 +87,24 @@ where
         let current_collection_name = sagitta_search::repo_helpers::get_branch_aware_collection_name(&repo_name_to_remove, current_branch, config);
         match client.delete_collection(current_collection_name.clone()).await {
             Ok(_) => {
-                println!("✓ Deleted Qdrant collection: {}", current_collection_name);
+                println!("✓ Deleted Qdrant collection: {current_collection_name}");
             }
             Err(e) => {
-                eprintln!("⚠ Warning: Failed to delete current branch collection '{}': {}", current_collection_name, e);
+                eprintln!("⚠ Warning: Failed to delete current branch collection '{current_collection_name}': {e}");
             }
         }
         
         // Also try to delete legacy collection for backward compatibility
         let legacy_collection_name = sagitta_search::repo_helpers::get_collection_name(&repo_name_to_remove, config);
-        info!("Deleting Qdrant collection '{}' (delete_local is false).", legacy_collection_name);
+        info!("Deleting Qdrant collection '{legacy_collection_name}' (delete_local is false).");
         match client.delete_collection(legacy_collection_name.clone()).await {
             Ok(deleted) => {
-                if deleted { info!("Successfully deleted Qdrant collection '{}'.", legacy_collection_name); }
-                else { info!("Qdrant collection '{}' did not exist or was already deleted.", legacy_collection_name); }
+                if deleted { info!("Successfully deleted Qdrant collection '{legacy_collection_name}'."); }
+                else { info!("Qdrant collection '{legacy_collection_name}' did not exist or was already deleted."); }
             }
-            Err(e) => log::error!("Failed to delete Qdrant collection '{}': {}. Manual cleanup may be needed.", legacy_collection_name, e),
+            Err(e) => log::error!("Failed to delete Qdrant collection '{legacy_collection_name}': {e}. Manual cleanup may be needed."),
         }
-        info!("Local files for '{}' will NOT be deleted as per --delete-local=false.", repo_name_to_remove);
+        info!("Local files for '{repo_name_to_remove}' will NOT be deleted as per --delete-local=false.");
     }
 
     info!("Removing repository configuration for '{}'.", repo_name_to_remove.cyan());

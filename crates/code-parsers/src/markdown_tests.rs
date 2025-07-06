@@ -13,14 +13,14 @@ mod tests {
     // Helper to check if a chunk's content contains all expected substrings
     fn assert_content_contains_all(content: &str, expected: &[&str]) {
         for item in expected {
-            assert!(content.contains(item), "Expected content to contain '{}', got: \n{}", item, content);
+            assert!(content.contains(item), "Expected content to contain '{item}', got: \n{content}");
         }
     }
 
     // Helper to check if a chunk's content does NOT contain any unexpected substrings
     fn assert_content_not_contains_any(content: &str, not_expected: &[&str]) {
         for item in not_expected {
-            assert!(!content.contains(item), "Expected content NOT to contain '{}', got: \n{}", item, content);
+            assert!(!content.contains(item), "Expected content NOT to contain '{item}', got: \n{content}");
         }
     }
 
@@ -121,15 +121,15 @@ More content.
         // Try to find a newline near the split point
         let split_point = large_content[..approx_split_point].rfind('\n').map_or(approx_split_point, |p| p + 1);
 
-        let content1 = &large_content[..split_point];
-        let content2 = &large_content[split_point..];
+        let _content1 = &large_content[..split_point];
+        let _content2 = &large_content[split_point..];
         
-        let code = format!("{}{}{}", header1, header2, large_content);
+        let code = format!("{header1}{header2}{large_content}");
         
         let mut parser = create_parser();
         let chunks = parser.parse(&code, "test_large.md")?;
         
-        println!("MAX_SECTION_SIZE: {}", MAX_SECTION_SIZE);
+        println!("MAX_SECTION_SIZE: {MAX_SECTION_SIZE}");
         println!("Code length: {}", code.len());
         for (i, chunk) in chunks.iter().enumerate() {
             println!("Chunk {}: type={}, len={}, start={}, end={}, content_preview='{}'", 
@@ -162,7 +162,7 @@ Line five after blank.
         let chunks = parser.parse(code, "test_plain.md")?;
 
         assert_eq!(chunks.len(), 1, "Expected 1 chunk for plain text");
-        println!("Plain text input:\n'{}'", code);
+        println!("Plain text input:\n'{code}'");
         println!("Plain text lines detected: {}", code.lines().count());
         println!("Chunk[0] details: start={}, end={}, type='{}'", chunks[0].start_line, chunks[0].end_line, chunks[0].element_type);
         assert_eq!(chunks[0].element_type, "root_plain_text");
@@ -177,7 +177,7 @@ Line five after blank.
         // Create text longer than MAX_CHUNK_LINES (assuming 500)
         let mut lines = Vec::new();
         for i in 1..=600 {
-            lines.push(format!("Line {}", i));
+            lines.push(format!("Line {i}"));
         }
         let code = lines.join("\n");
         

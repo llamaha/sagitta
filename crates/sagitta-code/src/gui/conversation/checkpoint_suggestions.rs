@@ -3,9 +3,8 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use uuid::Uuid;
-use egui::{Align, Color32, Frame, Layout, RichText, ScrollArea, Stroke, Ui, Vec2};
+use egui::{Align, Color32, Frame, Layout, RichText, ScrollArea, Stroke, Ui};
 
 use crate::agent::conversation::checkpoints::{CheckpointSuggestion, CheckpointReason};
 use crate::gui::theme::AppTheme;
@@ -221,9 +220,7 @@ impl CheckpointSuggestionsUI {
         if total_count > filtered_count {
             ui.add_space(4.0);
             ui.label(RichText::new(format!(
-                "Showing {} of {} suggestions",
-                filtered_count,
-                total_count
+                "Showing {filtered_count} of {total_count} suggestions"
             )).small().weak());
         }
         
@@ -242,10 +239,10 @@ impl CheckpointSuggestionsUI {
         
         let frame_color = self.get_reason_color(&suggestion.reason, theme);
         
-        Frame::none()
+        Frame::NONE
             .fill(theme.panel_background())
             .stroke(Stroke::new(1.0, frame_color))
-            .rounding(4.0)
+            .corner_radius(egui::CornerRadius::same(4))
             .inner_margin(8.0)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -290,13 +287,12 @@ impl CheckpointSuggestionsUI {
                             });
                         }
                         
-                        if self.config.allow_dismiss {
-                            if ui.small_button("✖").on_hover_text("Dismiss suggestion").clicked() {
-                                action = Some(CheckpointSuggestionAction::DismissSuggestion {
-                                    conversation_id,
-                                    message_id: suggestion.message_id,
-                                });
-                            }
+                        if self.config.allow_dismiss 
+                            && ui.small_button("✖").on_hover_text("Dismiss suggestion").clicked() {
+                            action = Some(CheckpointSuggestionAction::DismissSuggestion {
+                                conversation_id,
+                                message_id: suggestion.message_id,
+                            });
                         }
                         
                         // Details toggle

@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use sagitta_search::sync_progress::{SyncProgress, SyncProgressReporter as CoreSyncProgressReporter, SyncStage};
 use sagitta_search::sync_progress::{AddProgress, AddProgressReporter as CoreAddProgressReporter, RepoAddStage};
 use crate::gui::repository::shared_sync_state::{SIMPLE_STATUS, DETAILED_STATUS};
-use crate::gui::repository::types::{SimpleSyncStatus, DisplayableSyncProgress, DisplayableAddProgress};
+use crate::gui::repository::types::{DisplayableSyncProgress, DisplayableAddProgress};
 
 // Using String for RepositoryId as per observations in manager.rs
 pub type RepositoryId = String;
@@ -38,7 +38,7 @@ impl CoreSyncProgressReporter for GuiProgressReporter {
         // Compress into SimpleSyncStatus so the existing panel code can stay almost untouched
         let mut simple = SIMPLE_STATUS
             .entry(self.repo_id.clone())
-            .or_insert_with(SimpleSyncStatus::default);
+            .or_default();
 
         simple.is_running = matches!(progress.stage, 
             SyncStage::GitFetch { .. } | 
@@ -92,7 +92,7 @@ impl CoreAddProgressReporter for GuiProgressReporter {
         // Compress into SimpleSyncStatus so the existing panel code can stay almost untouched
         let mut simple = SIMPLE_STATUS
             .entry(self.repo_id.clone())
-            .or_insert_with(SimpleSyncStatus::default);
+            .or_default();
 
         simple.is_running = matches!(progress.stage, 
             RepoAddStage::Clone { .. } | 
@@ -115,7 +115,7 @@ impl CoreAddProgressReporter for GuiProgressReporter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::sync::mpsc;
+    
     use sagitta_search::sync_progress::{SyncStage, SyncProgressReporter};
     use crate::gui::repository::shared_sync_state::{SIMPLE_STATUS, DETAILED_STATUS};
 

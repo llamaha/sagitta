@@ -7,7 +7,7 @@ use uuid::Uuid;
 use std::collections::HashMap;
 use log::{debug, info, warn, error, trace};
 
-use crate::agent::message::types::{AgentMessage, ToolCall};
+use crate::agent::message::types::AgentMessage;
 use crate::llm::client::{Message as LlmMessage, Role, MessagePart};
 use crate::utils::errors::SagittaCodeError;
 use crate::agent::conversation::manager::{ConversationManager, ConversationManagerImpl};
@@ -32,6 +32,12 @@ pub struct MessageHistory {
     /// Token counter instance
     #[serde(skip)]
     token_counter: Option<TokenCounter>,
+}
+
+impl Default for MessageHistory {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MessageHistory {
@@ -173,7 +179,7 @@ impl MessageHistory {
                 let removed_msg = self.messages.remove(index);
                 let removed_tokens = self.calculate_message_tokens(&removed_msg);
                 self.total_tokens = self.total_tokens.saturating_sub(removed_tokens);
-                debug!("Removed message at index {} (~{} tokens)", index, removed_tokens);
+                debug!("Removed message at index {index} (~{removed_tokens} tokens)");
             } else {
                 break; // Only system messages left
             }
@@ -272,7 +278,7 @@ impl MessageHistory {
     
     /// Add a tool call result to the most recent assistant message
     pub fn add_tool_result(&mut self, tool_call_id: &str, result: serde_json::Value, successful: bool) -> Result<(), SagittaCodeError> {
-        trace!("MessageHistory: Adding tool result for Call ID: '{}'. Successful: {}. Result: {:?}", tool_call_id, successful, result);
+        trace!("MessageHistory: Adding tool result for Call ID: '{tool_call_id}'. Successful: {successful}. Result: {result:?}");
         // Find the most recent assistant message with a matching tool call
         for message in self.messages.iter_mut().rev() {
             if message.role == Role::Assistant {
@@ -287,7 +293,7 @@ impl MessageHistory {
             }
         }
         
-        Err(SagittaCodeError::Unknown(format!("No tool call found with ID {}", tool_call_id)))
+        Err(SagittaCodeError::Unknown(format!("No tool call found with ID {tool_call_id}")))
     }
     
     /// Clear all messages except system messages
@@ -315,6 +321,12 @@ impl MessageHistory {
 #[derive(Debug, Clone)]
 pub struct MessageHistoryManager {
     history: Arc<RwLock<MessageHistory>>,
+}
+
+impl Default for MessageHistoryManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MessageHistoryManager {
@@ -355,7 +367,7 @@ impl MessageHistoryManager {
     pub async fn add_user_message(&self, content: impl Into<String>) {
         let mut history = self.history.write().await;
         let content_str = content.into();
-        debug!("MessageHistoryManager: Adding user message: '{}'", content_str);
+        debug!("MessageHistoryManager: Adding user message: '{content_str}'");
         history.add_user_message(content_str);
     }
     
@@ -363,7 +375,7 @@ impl MessageHistoryManager {
     pub async fn add_assistant_message(&self, content: impl Into<String>) {
         let mut history = self.history.write().await;
         let content_str = content.into();
-        debug!("MessageHistoryManager: Adding assistant message: '{}'", content_str);
+        debug!("MessageHistoryManager: Adding assistant message: '{content_str}'");
         history.add_assistant_message(content_str);
     }
     
@@ -509,9 +521,9 @@ impl ConversationAwareHistoryManager {
         let title = format!("Conversation {}", chrono::Utc::now().format("%Y-%m-%d %H:%M"));
         
         let conversation_id = {
-            let mut manager = self.conversation_manager.lock().await;
+            let manager = self.conversation_manager.lock().await;
             manager.create_conversation(title, self.workspace_id).await
-                .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation: {}", e)))?
+                .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation: {e}")))?
         }; // Release the lock here
         
         // Set as current conversation
@@ -541,27 +553,27 @@ impl ConversationAwareHistoryManager {
                 settings: HashMap::new(),
             };
             
-            let mut manager = self.conversation_manager.lock().await;
+            let manager = self.conversation_manager.lock().await;
             if let Ok(Some(mut conversation)) = manager.get_conversation(conversation_id).await {
                 conversation.project_context = Some(project_context);
                 let _ = manager.update_conversation(conversation).await;
             }
         }
         
-        info!("Created new conversation: {}", conversation_id);
+        info!("Created new conversation: {conversation_id}");
         Ok(conversation_id)
     }
     
     /// Add a message to a specific conversation
     async fn add_message_to_conversation(&self, conversation_id: Uuid, message: AgentMessage) -> Result<(), SagittaCodeError> {
-        let mut manager = self.conversation_manager.lock().await;
+        let manager = self.conversation_manager.lock().await;
         
         if let Ok(Some(mut conversation)) = manager.get_conversation(conversation_id).await {
             conversation.add_message(message);
             manager.update_conversation(conversation).await
-                .map_err(|e| SagittaCodeError::Unknown(format!("Failed to update conversation: {}", e)))?;
+                .map_err(|e| SagittaCodeError::Unknown(format!("Failed to update conversation: {e}")))?;
         } else {
-            return Err(SagittaCodeError::Unknown(format!("Conversation not found: {}", conversation_id)));
+            return Err(SagittaCodeError::Unknown(format!("Conversation not found: {conversation_id}")));
         }
         
         Ok(())
@@ -577,7 +589,7 @@ impl ConversationAwareHistoryManager {
         if let Some(id) = current_id {
             let manager = self.conversation_manager.lock().await;
             manager.get_conversation(id).await
-                .map_err(|e| SagittaCodeError::Unknown(format!("Failed to get conversation: {}", e)))
+                .map_err(|e| SagittaCodeError::Unknown(format!("Failed to get conversation: {e}")))
         } else {
             Ok(None)
         }
@@ -591,10 +603,10 @@ impl ConversationAwareHistoryManager {
         if let Ok(Some(_)) = manager.get_conversation(conversation_id).await {
             let mut current_id_guard = self.current_conversation_id.write().await;
             *current_id_guard = Some(conversation_id);
-            info!("Switched to conversation: {}", conversation_id);
+            info!("Switched to conversation: {conversation_id}");
             Ok(())
         } else {
-            Err(SagittaCodeError::Unknown(format!("Conversation not found: {}", conversation_id)))
+            Err(SagittaCodeError::Unknown(format!("Conversation not found: {conversation_id}")))
         }
     }
     
@@ -610,7 +622,7 @@ impl ConversationAwareHistoryManager {
     pub async fn add_message(&self, message: AgentMessage) {
         if let Ok(conversation_id) = self.ensure_active_conversation().await {
             if let Err(e) = self.add_message_to_conversation(conversation_id, message).await {
-                error!("Failed to add message to conversation: {}", e);
+                error!("Failed to add message to conversation: {e}");
             }
         } else {
             error!("Failed to ensure active conversation for adding message");
@@ -626,7 +638,7 @@ impl ConversationAwareHistoryManager {
     /// Add a user message to the history
     pub async fn add_user_message(&self, content: impl Into<String>) {
         let content_str = content.into();
-        debug!("ConversationAwareHistoryManager: Adding user message: '{}'", content_str);
+        debug!("ConversationAwareHistoryManager: Adding user message: '{content_str}'");
         let message = AgentMessage::user(content_str);
         self.add_message(message).await;
     }
@@ -634,7 +646,7 @@ impl ConversationAwareHistoryManager {
     /// Add an assistant message to the history
     pub async fn add_assistant_message(&self, content: impl Into<String>) {
         let content_str = content.into();
-        debug!("ConversationAwareHistoryManager: Adding assistant message: '{}'", content_str);
+        debug!("ConversationAwareHistoryManager: Adding assistant message: '{content_str}'");
         let message = AgentMessage::assistant(content_str);
         self.add_message(message).await;
     }
@@ -651,7 +663,7 @@ impl ConversationAwareHistoryManager {
     /// Remove a message by its ID
     pub async fn remove_message(&self, id: Uuid) -> Option<AgentMessage> {
         if let Ok(conversation_id) = self.ensure_active_conversation().await {
-            let mut manager = self.conversation_manager.lock().await;
+            let manager = self.conversation_manager.lock().await;
             if let Ok(Some(mut conversation)) = manager.get_conversation(conversation_id).await {
                 if let Some(pos) = conversation.messages.iter().position(|m| m.id == id) {
                     let removed = conversation.messages.remove(pos);
@@ -694,7 +706,7 @@ impl ConversationAwareHistoryManager {
     /// Add a tool call result to the most recent assistant message
     pub async fn add_tool_result(&self, tool_call_id: &str, result: serde_json::Value, successful: bool) -> Result<(), SagittaCodeError> {
         if let Ok(conversation_id) = self.ensure_active_conversation().await {
-            let mut manager = self.conversation_manager.lock().await;
+            let manager = self.conversation_manager.lock().await;
             if let Ok(Some(mut conversation)) = manager.get_conversation(conversation_id).await {
                 // Find the most recent assistant message with a matching tool call
                 for message in conversation.messages.iter_mut().rev() {
@@ -707,7 +719,7 @@ impl ConversationAwareHistoryManager {
                                 
                                 // Update the conversation
                                 manager.update_conversation(conversation).await
-                                    .map_err(|e| SagittaCodeError::Unknown(format!("Failed to update conversation: {}", e)))?;
+                                    .map_err(|e| SagittaCodeError::Unknown(format!("Failed to update conversation: {e}")))?;
                                 return Ok(());
                             }
                         }
@@ -716,13 +728,13 @@ impl ConversationAwareHistoryManager {
             }
         }
         
-        Err(SagittaCodeError::Unknown(format!("No tool call found with ID {}", tool_call_id)))
+        Err(SagittaCodeError::Unknown(format!("No tool call found with ID {tool_call_id}")))
     }
     
     /// Clear all messages except system messages
     pub async fn clear_except_system(&self) {
         if let Ok(conversation_id) = self.ensure_active_conversation().await {
-            let mut manager = self.conversation_manager.lock().await;
+            let manager = self.conversation_manager.lock().await;
             if let Ok(Some(mut conversation)) = manager.get_conversation(conversation_id).await {
                 conversation.messages.retain(|m| m.role == Role::System);
                 let _ = manager.update_conversation(conversation).await;
@@ -733,7 +745,7 @@ impl ConversationAwareHistoryManager {
     /// Clear all messages
     pub async fn clear(&self) {
         if let Ok(conversation_id) = self.ensure_active_conversation().await {
-            let mut manager = self.conversation_manager.lock().await;
+            let manager = self.conversation_manager.lock().await;
             if let Ok(Some(mut conversation)) = manager.get_conversation(conversation_id).await {
                 conversation.messages.clear();
                 let _ = manager.update_conversation(conversation).await;

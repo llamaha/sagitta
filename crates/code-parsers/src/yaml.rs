@@ -11,6 +11,12 @@ pub struct YamlParser {
     query: Query, // Query to find YAML documents
 }
 
+impl Default for YamlParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl YamlParser {
     /// Creates a new `YamlParser` with the YAML grammar and queries.
     pub fn new() -> Self {
@@ -76,7 +82,7 @@ impl SyntaxParser for YamlParser {
 
         // Collect chunks from query matches
         for mat in matches.iter() { // Iterate over the collected matches
-            for (_i, capture) in mat.captures.iter().enumerate() { // Enumerate captures, mark i as unused
+            for capture in mat.captures.iter() {
                 if let Some(chunk) = self.node_to_chunk(capture.node, code, file_path) {
                     chunks.push(chunk);
                 }

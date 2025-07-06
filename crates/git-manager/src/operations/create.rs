@@ -6,14 +6,15 @@
 
 use crate::{GitError, GitResult};
 use git2::{
-    build::RepoBuilder, CredentialType, RemoteCallbacks, Progress, Repository, 
-    FetchOptions, ProxyOptions
+    build::RepoBuilder, CredentialType, RemoteCallbacks, Repository, 
+    FetchOptions
 };
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Options for repository cloning operations
+#[derive(Default)]
 pub struct CloneOptions {
     /// Specific branch to checkout (defaults to remote HEAD)
     pub branch: Option<String>,
@@ -63,20 +64,6 @@ impl Clone for CloneOptions {
     }
 }
 
-impl Default for CloneOptions {
-    fn default() -> Self {
-        Self {
-            branch: None,
-            bare: false,
-            depth: None,
-            ssh_private_key: None,
-            ssh_public_key: None,
-            ssh_passphrase: None,
-            username: None,
-            password: None,
-        }
-    }
-}
 
 /// Result of a repository cloning operation
 #[derive(Debug)]
@@ -191,7 +178,7 @@ impl RepositoryCloner {
         // Perform the clone operation directly (removed spawn_blocking)
         let repo = builder.clone(url, path)
             .map_err(|e| GitError::GitOperationFailed {
-                message: format!("Failed to clone repository: {}", e),
+                message: format!("Failed to clone repository: {e}"),
             })?;
 
         // Check if operation was cancelled
@@ -204,7 +191,7 @@ impl RepositoryCloner {
         // Get information about the cloned repository
         let head_ref = repo.head()
             .map_err(|e| GitError::GitOperationFailed {
-                message: format!("Failed to get HEAD reference: {}", e),
+                message: format!("Failed to get HEAD reference: {e}"),
             })?;
 
         let branch_name = if let Some(name) = head_ref.shorthand() {
@@ -300,7 +287,7 @@ pub fn init_repository(path: &Path, bare: bool) -> GitResult<Repository> {
     };
 
     repo.map_err(|e| GitError::GitOperationFailed {
-        message: format!("Failed to initialize repository: {}", e),
+        message: format!("Failed to initialize repository: {e}"),
     })
 }
 

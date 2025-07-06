@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use qdrant_client::{Qdrant, qdrant::{PointStruct, Filter, Condition, ScoredPoint, SearchPoints, PointId, Value as QdrantValue, point_id::PointIdOptions}};
-use sagitta_search::{EmbeddingPool, EmbeddingProcessor, config::AppConfig};
+use qdrant_client::{Qdrant, qdrant::{PointStruct, Filter, Condition, ScoredPoint, SearchPoints, point_id::PointIdOptions}};
+use sagitta_search::EmbeddingPool;
 
 use super::ConversationSearchEngine;
 use crate::agent::conversation::types::{
@@ -102,7 +102,7 @@ impl SemanticConversationSearchEngine {
         for branch in &conversation.branches {
             content_chunks.push(format!("Branch: {}", branch.title));
             if let Some(description) = &branch.description {
-                content_chunks.push(format!("Branch Description: {}", description));
+                content_chunks.push(format!("Branch Description: {description}"));
             }
             for (i, message) in branch.messages.iter().enumerate() {
                 content_chunks.push(format!("Branch Message {}: {}", i + 1, message.content));
@@ -113,7 +113,7 @@ impl SemanticConversationSearchEngine {
         for checkpoint in &conversation.checkpoints {
             content_chunks.push(format!("Checkpoint: {}", checkpoint.title));
             if let Some(description) = &checkpoint.description {
-                content_chunks.push(format!("Checkpoint Description: {}", description));
+                content_chunks.push(format!("Checkpoint Description: {description}"));
             }
         }
         
@@ -154,7 +154,7 @@ impl SemanticConversationSearchEngine {
             
             // Add tags to payload
             for (j, tag) in conversation.tags.iter().enumerate() {
-                payload.insert(format!("tag_{}", j), tag.clone().into());
+                payload.insert(format!("tag_{j}"), tag.clone().into());
             }
             
             let point = PointStruct::new(
@@ -206,10 +206,9 @@ impl SemanticConversationSearchEngine {
                             
                             // Filter by tags
                             if let Some(tags_to_match) = &query.tags {
-                                if !tags_to_match.is_empty() {
-                                    if !tags_to_match.iter().any(|t| conversation.tags.contains(t)) {
-                                        return false;
-                                    }
+                                if !tags_to_match.is_empty() 
+                                    && !tags_to_match.iter().any(|t| conversation.tags.contains(t)) {
+                                    return false;
                                 }
                             }
                             
@@ -368,7 +367,7 @@ impl ConversationSearchEngine for SemanticConversationSearchEngine {
     }
     
     async fn search(&self, query: &ConversationQuery) -> Result<Vec<ConversationSearchResult>> {
-        if query.text.as_ref().map_or(true, |t| t.is_empty()) {
+        if query.text.as_ref().is_none_or(|t| t.is_empty()) {
             return Ok(Vec::new());
         }
         let query_text = query.text.as_ref().unwrap();
@@ -481,7 +480,7 @@ mod tests {
     use super::*;
     use crate::agent::conversation::types::{Conversation, ConversationQuery};
     use crate::agent::message::types::AgentMessage;
-    use tempfile::TempDir;
+    
     use sagitta_search::config::AppConfig;
 
     async fn create_test_setup() -> (Arc<Qdrant>, EmbeddingPool) {

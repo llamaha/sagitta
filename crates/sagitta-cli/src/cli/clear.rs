@@ -4,9 +4,8 @@ use colored::*;
 use qdrant_client::Qdrant;
 use std::io::{self, Write}; // Import io for confirmation prompt
 use std::sync::Arc;
-use sagitta_search::{AppConfig, RepositoryConfig}; // Added RepositoryConfig
-use sagitta_search::qdrant_client_trait::QdrantClientTrait; // Use core trait
-use sagitta_search::repo_helpers::{get_collection_name, get_branch_aware_collection_name}; // Use core helper
+use sagitta_search::AppConfig; // Added RepositoryConfig
+use sagitta_search::repo_helpers::get_branch_aware_collection_name; // Use core helper
 
 #[derive(Args, Debug)]
 pub struct ClearArgs {
@@ -24,7 +23,7 @@ pub async fn handle_clear(
     args: &ClearArgs, // Changed to reference
     config: AppConfig, // Keep ownership
     client: Arc<Qdrant>, // Accept client
-    cli_args: &crate::cli::CliArgs, // Added cli_args
+    _cli_args: &crate::cli::CliArgs, // Added cli_args
 ) -> Result<()> {
 
     let repo_name_to_clear = match args.repo_name.as_ref().or(config.active_repository.as_ref()) {
@@ -47,7 +46,7 @@ pub async fn handle_clear(
     let collection_name = get_branch_aware_collection_name(&repo_name_to_clear, branch_name, &config);
 
     // --- Check Qdrant Collection Status (Informational) ---
-    log::info!("Preparing to clear data for repository: '{}', collection: '{}'", repo_name_to_clear, collection_name);
+    log::info!("Preparing to clear data for repository: '{repo_name_to_clear}', collection: '{collection_name}'");
 
     // --- Confirmation --- 
     if !args.yes {
@@ -56,7 +55,7 @@ pub async fn handle_clear(
             repo_name_to_clear.yellow().bold(),
             collection_name.yellow().bold()
         );
-        print!("{} (yes/No): ", prompt_message);
+        print!("{prompt_message} (yes/No): ");
         io::stdout().flush().context("Failed to flush stdout")?;
         let mut confirmation = String::new();
         io::stdin().read_line(&mut confirmation)
@@ -69,23 +68,23 @@ pub async fn handle_clear(
 
     // --- Delete Collection --- 
     // Deleting the collection is simpler than deleting all points for repos
-    log::info!("Attempting to delete collection '{}'...", collection_name);
-    println!("Deleting collection '{}'...", collection_name);
+    log::info!("Attempting to delete collection '{collection_name}'...");
+    println!("Deleting collection '{collection_name}'...");
 
     match client.delete_collection(collection_name.clone()).await {
         Ok(op_result) => {
             if op_result.result {
                 println!(
                     "{}",
-                    format!("Successfully deleted collection '{}'.", collection_name).green()
+                    format!("Successfully deleted collection '{collection_name}'.").green()
                 );
-                 log::info!("Collection '{}' deleted successfully.", collection_name);
+                 log::info!("Collection '{collection_name}' deleted successfully.");
             } else {
                  println!(
                      "{}",
-                     format!("Collection '{}' might not have existed or deletion failed server-side.", collection_name).yellow()
+                     format!("Collection '{collection_name}' might not have existed or deletion failed server-side.").yellow()
                  );
-                 log::warn!("Delete operation for collection '{}' returned false.", collection_name);
+                 log::warn!("Delete operation for collection '{collection_name}' returned false.");
             }
         }
         Err(e) => {
@@ -93,16 +92,16 @@ pub async fn handle_clear(
              if e.to_string().contains("Not found") || e.to_string().contains("doesn\'t exist") {
                  println!(
                      "{}",
-                     format!("Collection '{}' did not exist.", collection_name).yellow()
+                     format!("Collection '{collection_name}' did not exist.").yellow()
                  );
-                 log::warn!("Collection '{}' not found during delete attempt.", collection_name);
+                 log::warn!("Collection '{collection_name}' not found during delete attempt.");
              } else {
                  // For other errors, report them
                  eprintln!(
                      "{}",
-                     format!("Failed to delete collection '{}': {}", collection_name, e).red()
+                     format!("Failed to delete collection '{collection_name}': {e}").red()
                  );
-                 return Err(e).context(format!("Failed to delete collection '{}'", collection_name));
+                 return Err(e).context(format!("Failed to delete collection '{collection_name}'"));
              }
         }
     }

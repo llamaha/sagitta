@@ -1,14 +1,10 @@
 use std::sync::Arc;
-use egui::{Ui, RichText, Color32, ScrollArea, Button, Grid, ProgressBar, TextEdit, Layout, Align};
+use egui::{Ui, RichText, ScrollArea, Button, ProgressBar};
 use tokio::sync::{Mutex, oneshot};
-use super::manager::{RepositoryManager, SyncStatus as ManagerSyncStatus};
-use std::collections::HashMap;
-use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
+use super::manager::RepositoryManager;
 
-use super::types::{RepoPanelState, RepoInfo, SimpleSyncStatus, DisplayableSyncProgress};
+use super::types::{RepoPanelState, SimpleSyncStatus};
 use crate::gui::repository::shared_sync_state::{SIMPLE_STATUS, DETAILED_STATUS};
-use crate::gui::theme::AppTheme;
 
 /// Watchdog configuration for sync operations
 /// Maximum time without progress updates before considering sync stuck (in seconds)
@@ -183,7 +179,7 @@ pub fn render_sync_repo(
     ui.separator();
 
     let mut is_any_selected_syncing = false;
-    let mut is_any_repo_syncing_at_all = false;
+    let _is_any_repo_syncing_at_all = false;
     
     // Try to get sync status with better error handling
     for repo_name in &state.selected_repos {
@@ -250,7 +246,7 @@ pub fn render_sync_repo(
 
             ui.group(|ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(&format!("Repository: {}", repo_name)).strong());
+                    ui.label(RichText::new(format!("Repository: {repo_name}")).strong());
                     
                     // Check simple status first for immediate feedback
                     if let Some(ss) = &simple_status {
@@ -342,20 +338,20 @@ pub fn render_sync_repo(
                 if let Some(ds) = detailed_status {
                     ui.label(RichText::new(&ds.message).small());
                     if let Some(file) = &ds.stage_detail.current_file {
-                        ui.label(RichText::new(format!("Current File: {}", file)).small());
+                        ui.label(RichText::new(format!("Current File: {file}")).small());
                     }
                     if let Some((curr, total)) = ds.stage_detail.current_progress {
                         if total > 0 {
-                            ui.label(RichText::new(format!("Step Progress: {}/{}", curr, total)).small());
+                            ui.label(RichText::new(format!("Step Progress: {curr}/{total}")).small());
                         }
                     }
                     if let Some(fps) = ds.stage_detail.files_per_second {
-                        ui.label(RichText::new(format!("Speed: {:.2} files/s", fps)).small());
+                        ui.label(RichText::new(format!("Speed: {fps:.2} files/s")).small());
                     }
                     if let Some(ss) = &simple_status {
                         if let Some(final_elapsed) = ss.final_elapsed_seconds {
                             // Show static elapsed time for completed syncs
-                            ui.label(RichText::new(format!("Elapsed: {:.1}s", final_elapsed)).small());
+                            ui.label(RichText::new(format!("Elapsed: {final_elapsed:.1}s")).small());
                         } else if let Some(started_at) = ss.started_at {
                             // Show live elapsed time for running syncs
                             ui.label(RichText::new(format!("Elapsed: {:.1}s", started_at.elapsed().as_secs_f32())).small());
@@ -411,7 +407,7 @@ fn trigger_sync(repo_names: &[String], repo_manager: Arc<Mutex<RepositoryManager
         let repo_manager_clone = Arc::clone(&repo_manager);
         let rn = repo_name.clone();
         
-        log::info!("Triggering sync for repository: {} (force: {})", rn, force_sync);
+        log::info!("Triggering sync for repository: {rn} (force: {force_sync})");
         
         // Start the actual sync operation
         tokio::spawn(async move {
@@ -419,17 +415,17 @@ fn trigger_sync(repo_names: &[String], repo_manager: Arc<Mutex<RepositoryManager
             // The lock is now held only within this async task
             match repo_manager_clone.lock().await.sync_repository_with_options(&rn, force_sync).await {
                 Ok(_) => {
-                    log::info!("Sync task for repository '{}' reported success.", rn);
+                    log::info!("Sync task for repository '{rn}' reported success.");
                 }
                 Err(e) => {
-                    log::error!("Sync task for repository '{}' failed: {}", rn, e);
+                    log::error!("Sync task for repository '{rn}' failed: {e}");
                     let final_elapsed = started_at.elapsed().as_secs_f64();
                     // Ensure the status reflects the failure if the task itself errors out
                     SIMPLE_STATUS.entry(rn.clone()).and_modify(|s| {
                         s.is_running = false;
                         s.is_complete = true;
                         s.is_success = false;
-                        s.final_message = format!("❌ Sync task failed: {}", e);
+                        s.final_message = format!("❌ Sync task failed: {e}");
                         s.final_elapsed_seconds = Some(final_elapsed);
                     });
                 }
@@ -446,7 +442,7 @@ mod tests {
 
     #[test]
     fn test_sync_watchdog_timeout_detection() {
-        let mut status = SimpleSyncStatus {
+        let status = SimpleSyncStatus {
             is_running: true,
             is_complete: false,
             is_success: false,
@@ -466,7 +462,7 @@ mod tests {
 
     #[test]
     fn test_sync_not_timed_out() {
-        let mut status = SimpleSyncStatus {
+        let status = SimpleSyncStatus {
             is_running: true,
             is_complete: false,
             is_success: false,
@@ -508,7 +504,7 @@ mod tests {
         use std::path::PathBuf;
         
         // Create a state with repositories
-        let mut state = RepoPanelState {
+        let state = RepoPanelState {
             repositories: vec![
                 RepoInfo {
                     name: "test-repo-1".to_string(),
@@ -559,7 +555,7 @@ mod tests {
         use std::path::PathBuf;
         
         // Create a state with enhanced repositories
-        let mut state = RepoPanelState {
+        let state = RepoPanelState {
             enhanced_repositories: vec![
                 EnhancedRepoInfo {
                     name: "enhanced-repo-1".to_string(),
@@ -608,7 +604,7 @@ mod tests {
         // 1. Enhanced repositories are populated (successful enhanced repository load)
         // 2. Basic repositories list is empty (user reported seeing "No repositories available")
         // 3. use_enhanced_repos is true
-        let mut state = RepoPanelState {
+        let state = RepoPanelState {
             repositories: vec![], // Empty basic repository list (this was the issue)
             enhanced_repositories: vec![
                 EnhancedRepoInfo {
@@ -926,10 +922,10 @@ mod tests {
         let mut repositories = Vec::new();
         for i in 1..=25 {
             repositories.push(RepoInfo {
-                name: format!("test-repo-{:02}", i),
-                remote: Some(format!("https://github.com/test/repo{}.git", i)),
+                name: format!("test-repo-{i:02}"),
+                remote: Some(format!("https://github.com/test/repo{i}.git")),
                 branch: Some("main".to_string()),
-                local_path: Some(PathBuf::from(format!("/tmp/repo{}", i))),
+                local_path: Some(PathBuf::from(format!("/tmp/repo{i}"))),
                 is_syncing: i % 3 == 0, // Some repos syncing
             });
         }
@@ -1164,7 +1160,7 @@ mod tests {
     #[test]
     fn test_force_sync_trigger_parameters() {
         // Test that trigger_sync function accepts force parameter correctly
-        let repo_names = vec!["test-repo".to_string()];
+        let repo_names = ["test-repo".to_string()];
         let force_sync = true;
         
         // This test verifies the function signature accepts the force parameter

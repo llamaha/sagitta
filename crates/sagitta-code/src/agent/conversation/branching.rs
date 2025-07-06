@@ -2,15 +2,15 @@
 // TODO: Implement actual branching algorithms
 
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::agent::conversation::types::{Conversation, ConversationBranch, BranchStatus};
+use crate::agent::conversation::types::{Conversation, ConversationBranch};
 use crate::agent::message::types::AgentMessage;
 use crate::llm::client::Role;
-use crate::llm::fast_model::{FastModelProvider, FastModelOperations};
+use crate::llm::fast_model::FastModelOperations;
 use std::sync::Arc;
 
 /// Context-aware conversation branching manager
@@ -311,7 +311,7 @@ impl ConversationBranchingManager {
                     }
                 }
                 Err(e) => {
-                    log::debug!("Fast model branch suggestion failed: {}, falling back to rule-based", e);
+                    log::debug!("Fast model branch suggestion failed: {e}, falling back to rule-based");
                     // Fall back to rule-based analysis
                     return self.analyze_branch_opportunities_rule_based(conversation);
                 }
@@ -379,7 +379,7 @@ impl ConversationBranchingManager {
         &self,
         message: &AgentMessage,
         context_messages: &[&AgentMessage],
-        message_index: usize,
+        _message_index: usize,
         conversation: &Conversation,
     ) -> Result<Option<BranchSuggestion>> {
         let content = &message.content.to_lowercase();
@@ -623,7 +623,7 @@ impl BranchSuccessPredictor {
         prediction += context_factor;
         
         // Look up historical patterns
-        let pattern_key = format!("{:?}", reason);
+        let pattern_key = format!("{reason:?}");
         if let Some(&historical_success) = self.success_patterns.get(&pattern_key) {
             prediction = prediction * (1.0 - self.config.pattern_weight) + 
                         historical_success * self.config.pattern_weight;
@@ -751,7 +751,7 @@ mod tests {
         
         let prediction = predictor.predict_success(&message, &context, &BranchReason::UserRequested).unwrap();
         
-        assert!(prediction >= 0.0 && prediction <= 1.0);
+        assert!((0.0..=1.0).contains(&prediction));
         assert!(prediction > 0.5); // User-requested should have higher success probability
     }
 

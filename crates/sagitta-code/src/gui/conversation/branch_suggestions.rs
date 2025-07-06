@@ -1,9 +1,8 @@
 use anyhow::Result;
-use egui::{Align, Color32, Layout, RichText, Ui, Vec2, Stroke, Rect, Pos2, Shape};
+use egui::{Align, Color32, Layout, RichText, Ui, Vec2, Stroke};
 use uuid::Uuid;
 
-use crate::agent::conversation::branching::{BranchSuggestion, BranchReason, ConversationState};
-use crate::agent::conversation::types::Conversation;
+use crate::agent::conversation::branching::{BranchSuggestion, BranchReason};
 use crate::gui::theme::AppTheme;
 
 /// Action that can be triggered from the branch suggestions UI
@@ -262,7 +261,7 @@ impl BranchSuggestionsUI {
         &self,
         ui: &mut Ui,
         suggestion: &BranchSuggestion,
-        theme: &AppTheme,
+        _theme: &AppTheme,
     ) -> Result<()> {
         ui.collapsing("Suggestion Details", |ui| {
             ui.label(format!("Message ID: {}", suggestion.message_id));
@@ -270,7 +269,7 @@ impl BranchSuggestionsUI {
             ui.label(format!("Reason: {:?}", suggestion.reason));
             
             if let Some(success_prob) = suggestion.success_probability {
-                ui.label(format!("Success Probability: {:.2}", success_prob));
+                ui.label(format!("Success Probability: {success_prob:.2}"));
             }
             
             ui.label(format!("Conversation State: {:?}", suggestion.context.conversation_state));
@@ -279,7 +278,7 @@ impl BranchSuggestionsUI {
                 ui.label("Trigger Keywords:");
                 ui.indent("keywords", |ui| {
                     for keyword in &suggestion.context.trigger_keywords {
-                        ui.label(format!("• {}", keyword));
+                        ui.label(format!("• {keyword}"));
                     }
                 });
             }
@@ -288,13 +287,13 @@ impl BranchSuggestionsUI {
                 ui.label("Mentioned Tools:");
                 ui.indent("tools", |ui| {
                     for tool in &suggestion.context.mentioned_tools {
-                        ui.label(format!("• {}", tool));
+                        ui.label(format!("• {tool}"));
                     }
                 });
             }
             
             if let Some(ref project) = suggestion.context.project_context {
-                ui.label(format!("Project Context: {}", project));
+                ui.label(format!("Project Context: {project}"));
             }
         });
         
@@ -328,7 +327,7 @@ impl BranchSuggestionsUI {
     }
     
     /// Get color for confidence level
-    fn get_confidence_color(&self, confidence: f32, theme: &AppTheme) -> Color32 {
+    fn get_confidence_color(&self, confidence: f32, _theme: &AppTheme) -> Color32 {
         if confidence >= 0.8 {
             Color32::from_rgb(0, 255, 0) // Green
         } else if confidence >= 0.6 {
@@ -339,7 +338,7 @@ impl BranchSuggestionsUI {
     }
     
     /// Get color for success probability
-    fn get_success_color(&self, success_prob: f32, theme: &AppTheme) -> Color32 {
+    fn get_success_color(&self, success_prob: f32, _theme: &AppTheme) -> Color32 {
         if success_prob >= 0.7 {
             Color32::from_rgb(0, 255, 0) // Green
         } else if success_prob >= 0.5 {
@@ -355,7 +354,7 @@ impl BranchSuggestionsUI {
         suggestion: &BranchSuggestion,
         theme: &AppTheme,
     ) -> bool {
-        let (icon, color) = match suggestion.reason {
+        let (_icon, color) = match suggestion.reason {
             BranchReason::MultipleSolutions => ("🔀", theme.accent_color()),
             BranchReason::ErrorRecovery => ("🔧", Color32::from_rgb(255, 165, 0)),
             BranchReason::UserUncertainty => ("❓", Color32::from_rgb(255, 255, 0)),
@@ -412,7 +411,7 @@ impl Default for BranchSuggestionsUI {
 mod tests {
     use super::*;
     use crate::agent::conversation::branching::{BranchContext, ConversationState};
-    use chrono::Utc;
+    
     
     fn create_test_suggestion() -> BranchSuggestion {
         BranchSuggestion {

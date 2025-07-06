@@ -10,16 +10,12 @@ use crate::qdrant_client_trait::QdrantClientTrait;
 // Other dependencies
 use anyhow::anyhow;
 use clap::Args; // Keep Args
-use colored::*;
-use git2::{Repository, build::RepoBuilder, Signature};
-use std::{fs, path::PathBuf, sync::Arc, collections::HashMap};
+use std::{fs, path::PathBuf, sync::Arc};
 use thiserror::Error;
-use log::{info, error, warn};
+use log::{info, error};
 use crate::config::AppConfig;
-use crate::config::EmbeddingEngineConfig;
 // Use ManualMock
-use std::io::Write;
-use crate::sync_progress::{AddProgressReporter, NoOpAddProgressReporter};
+use crate::sync_progress::AddProgressReporter;
 
 /// Arguments for the `repo add` command.
 #[derive(Args, Debug)]
@@ -119,9 +115,9 @@ where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
     info!("[handle_repo_add] Starting repository addition process");
-    info!("[handle_repo_add] Args: {:?}", args);
+    info!("[handle_repo_add] Args: {args:?}");
     info!("[handle_repo_add] Repo base path: {}", repo_base_path_for_add.display());
-    info!("[handle_repo_add] Embedding dim: {}", embedding_dim);
+    info!("[handle_repo_add] Embedding dim: {embedding_dim}");
     
     // Validate basic arguments
     info!("[handle_repo_add] Validating arguments...");
@@ -135,7 +131,7 @@ where
     info!("[handle_repo_add] Determining repository name...");
     let repo_name = match &args.name {
         Some(name) => {
-            info!("[handle_repo_add] Using provided name: {}", name);
+            info!("[handle_repo_add] Using provided name: {name}");
             name.clone()
         },
         None => {
@@ -147,7 +143,7 @@ where
                     .and_then(|s| s.to_str())
                     .map(|s| s.trim_end_matches(".git").to_string())
                     .ok_or_else(|| AddRepoError::NameDerivationError("URL".to_string()))?;
-                info!("[handle_repo_add] Derived name from URL: {}", derived_name);
+                info!("[handle_repo_add] Derived name from URL: {derived_name}");
                 derived_name
             } else {
                 // If only local path is provided, derive name from the directory name
@@ -157,12 +153,12 @@ where
                     .and_then(|s| s.to_str())
                     .map(|s| s.to_string())
                     .ok_or_else(|| AddRepoError::NameDerivationError("local path".to_string()))?;
-                info!("[handle_repo_add] Derived name from local path: {}", derived_name);
+                info!("[handle_repo_add] Derived name from local path: {derived_name}");
                 derived_name
             }
         },
     };
-    info!("[handle_repo_add] Repository name determined: {}", repo_name);
+    info!("[handle_repo_add] Repository name determined: {repo_name}");
 
     // Use the passed-in base path
     info!("[handle_repo_add] Setting up repository base path...");
@@ -182,11 +178,11 @@ where
 
     // If URL is not provided but required for a new clone scenario (checked by prepare_repository)
     let repo_url = args.url.clone();
-    info!("[handle_repo_add] Repository URL: {:?}", repo_url);
+    info!("[handle_repo_add] Repository URL: {repo_url:?}");
 
     // Flag to indicate if the repo was added by specifying a local path initially
     let added_as_local_path_flag = args.local_path.is_some();
-    info!("[handle_repo_add] Added as local path: {}", added_as_local_path_flag);
+    info!("[handle_repo_add] Added as local path: {added_as_local_path_flag}");
 
     info!("[handle_repo_add] About to call prepare_repository...");
     info!("[handle_repo_add] prepare_repository args:");
@@ -199,26 +195,29 @@ where
     info!("[handle_repo_add]   ssh_key: {:?}", args.ssh_key.as_ref());
     info!("[handle_repo_add]   ssh_passphrase: {:?}", args.ssh_passphrase.as_deref().map(|_| "***"));
     info!("[handle_repo_add]   repo_base_path: {}", repo_base_path.display());
-    info!("[handle_repo_add]   embedding_dim: {}", embedding_dim);
+    info!("[handle_repo_add]   embedding_dim: {embedding_dim}");
 
     // Call prepare_repository for both new clones and existing local paths.
     // It handles cloning if necessary and ensures the Qdrant collection (tenant-specific).
-    let new_repo_config = helpers::prepare_repository(
-        repo_url.as_deref().unwrap_or_default(), // Pass URL, or empty if only local path given
-        Some(&repo_name),
-        if added_as_local_path_flag { Some(&local_path) } else { None }, // Pass local_path if it was an arg
-        args.branch.as_deref(),
-        args.target_ref.as_deref(),
-        args.remote.as_deref(),
-        args.ssh_key.as_ref(),
-        args.ssh_passphrase.as_deref(),
-        &repo_base_path, // Base path for new clones if local_path is not set by arg
-        client.clone(),
+    let prepare_params = helpers::PrepareRepositoryParams {
+        url: repo_url.as_deref().unwrap_or_default(), // Pass URL, or empty if only local path given
+        name_opt: Some(&repo_name),
+        local_path_opt: if added_as_local_path_flag { Some(&local_path) } else { None }, // Pass local_path if it was an arg
+        branch_opt: args.branch.as_deref(),
+        target_ref_opt: args.target_ref.as_deref(),
+        remote_opt: args.remote.as_deref(),
+        ssh_key_path_opt: args.ssh_key.as_ref(),
+        ssh_passphrase_opt: args.ssh_passphrase.as_deref(),
+        base_path_for_new_clones: &repo_base_path, // Base path for new clones if local_path is not set by arg
         embedding_dim,
         config,      // Pass AppConfig for collection_name_prefix and other settings
-        progress_reporter,
+        add_progress_reporter: progress_reporter,
+    };
+    let new_repo_config = helpers::prepare_repository(
+        prepare_params,
+        client.clone(),
     ).await.map_err(|e| {
-        error!("[handle_repo_add] prepare_repository failed: {}", e);
+        error!("[handle_repo_add] prepare_repository failed: {e}");
         // Map internal Error to AddRepoError
         match e {
             crate::error::SagittaError::GitMessageError(msg) => AddRepoError::GitError(anyhow!(msg)),
@@ -251,7 +250,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AppConfig, IndexingConfig, PerformanceConfig};
+    use crate::config::{AppConfig, IndexingConfig, PerformanceConfig, EmbeddingEngineConfig};
     // use crate::qdrant_client_trait::MockQdrantClientTrait; // Remove mockall
     use crate::test_utils::ManualMockQdrantClient; // Use ManualMock
     use std::path::Path;

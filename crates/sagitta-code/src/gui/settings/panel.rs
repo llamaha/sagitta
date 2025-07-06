@@ -1,19 +1,13 @@
 // Settings panel UI will go here
 
 use std::sync::Arc;
-use anyhow::Result;
-use egui::{Context, Ui, RichText, Color32, Window, SidePanel, Grid, Button, TextEdit, ScrollArea, TextStyle, Checkbox, ComboBox};
+use egui::{Context, RichText, Color32, Grid, TextEdit, ScrollArea};
 use tokio::sync::Mutex;
 use rfd::FileDialog;
-use std::path::{Path, PathBuf};
-use serde::{Serialize, Deserialize};
-use sagitta_search::config::{AppConfig, load_config, save_config, get_config_path_or_default, get_repo_base_path};
-use uuid::Uuid;
-use log::{info, warn, error};
+use std::path::PathBuf;
+use sagitta_search::config::{AppConfig, get_repo_base_path};
 
-use crate::config::{SagittaCodeConfig, load_merged_config, save_config as save_sagitta_code_config};
-use crate::config::types::ClaudeCodeConfig;
-use crate::config::paths::{get_sagitta_code_app_config_path};
+use crate::config::{SagittaCodeConfig, save_config as save_sagitta_code_config};
 use crate::llm::claude_code::models::CLAUDE_CODE_MODELS;
 
 /// Settings panel for configuring Sagitta core settings
@@ -196,7 +190,7 @@ impl SettingsPanel {
                                         ui.label("Max Turns:");
                                         ui.horizontal(|ui| {
                                             ui.add(egui::DragValue::new(&mut self.claude_code_max_turns)
-                                                .clamp_range(0..=100)
+                                                .range(0..=100)
                                                 .suffix(" turns"))
                                                 .on_hover_text("Maximum number of turns for multi-turn conversations (0 = unlimited)");
                                             if self.claude_code_max_turns == 0 {
@@ -396,7 +390,7 @@ impl SettingsPanel {
                                     let default_repo_path = self.get_default_repo_base_path_display();
                                     ui.add(TextEdit::singleline(&mut repos_path_str)
                                         .desired_width(250.0)
-                                        .hint_text(&format!("Default: {}", default_repo_path)));
+                                        .hint_text(format!("Default: {default_repo_path}")));
                                     self.repositories_base_path = if repos_path_str.is_empty() { None } else { Some(repos_path_str) };
                                     if ui.button("Browse").clicked() {
                                         if let Some(path) = FileDialog::new()
@@ -425,20 +419,20 @@ impl SettingsPanel {
                                     .show(ui, |ui| {
                                         ui.label("Max Concurrent Upserts:");
                                         ui.add(egui::DragValue::new(&mut self.indexing_max_concurrent_upserts)
-                                            .clamp_range(1..=32)
+                                            .range(1..=32)
                                             .speed(0.1));
                                         ui.end_row();
                                         
                                         ui.label("Batch Size:");
                                         ui.add(egui::DragValue::new(&mut self.performance_batch_size)
-                                            .clamp_range(32..=512)
+                                            .range(32..=512)
                                             .speed(1.0));
                                         ui.end_row();
                                         
                                         ui.label("Embedding Batch Size:")
                                             .on_hover_text("Higher batch sizes will use more VRAM but can improve throughput.");
                                         ui.add(egui::DragValue::new(&mut self.embedding_batch_size)
-                                            .clamp_range(1..=1024)
+                                            .range(1..=1024)
                                             .speed(1.0));
                                         ui.end_row();
                                         
@@ -448,7 +442,7 @@ impl SettingsPanel {
                                         
                                         ui.label("Max File Size (bytes):");
                                         ui.add(egui::DragValue::new(&mut self.performance_max_file_size_bytes)
-                                            .clamp_range(1024..=20971520) // 1KB to 20MB
+                                            .range(1024..=20971520) // 1KB to 20MB
                                             .speed(1024.0));
                                         ui.end_row();
                                     });
@@ -485,8 +479,8 @@ impl SettingsPanel {
                 changes_made = true;
             }
             Err(e) => {
-                self.status_message = Some((format!("Error saving Sagitta Code settings: {}", e), theme.error_color()));
-                log::error!("SettingsPanel: Error saving Sagitta Code config: {}", e);
+                self.status_message = Some((format!("Error saving Sagitta Code settings: {e}"), theme.error_color()));
+                log::error!("SettingsPanel: Error saving Sagitta Code config: {e}");
             }
         }
         
@@ -510,13 +504,13 @@ impl SettingsPanel {
             Ok(_) => {
                 let current_status = self.status_message.take().unwrap_or(("".to_string(), theme.success_color()));
                 self.status_message = Some((format!("{} Sagitta Core settings saved.", current_status.0).trim().to_string(), theme.success_color()));
-                log::info!("SettingsPanel: Sagitta Core config saved to {:?}", shared_config_path);
+                log::info!("SettingsPanel: Sagitta Core config saved to {shared_config_path:?}");
                 changes_made = true;
             }
             Err(e) => {
                 let current_status = self.status_message.take().unwrap_or(("".to_string(), theme.error_color()));
                 self.status_message = Some((format!("{} Error saving Sagitta Core settings: {}", current_status.0, e).trim().to_string(), theme.error_color()));
-                log::error!("SettingsPanel: Error saving Sagitta Core config to {:?}: {}", shared_config_path, e);
+                log::error!("SettingsPanel: Error saving Sagitta Core config to {shared_config_path:?}: {e}");
             }
         }
         
@@ -633,12 +627,12 @@ impl SettingsPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
-    use std::fs;
-    use sagitta_search::config::{AppConfig, IndexingConfig, PerformanceConfig};
-    use crate::config::types::{SagittaCodeConfig, UiConfig, LoggingConfig, ConversationConfig};
+    
+    
+    use sagitta_search::config::AppConfig;
+    use crate::config::types::{SagittaCodeConfig, UiConfig, LoggingConfig, ConversationConfig, ClaudeCodeConfig};
     // Import specific loader functions for more direct testing of file operations
-    use crate::config::loader::{load_config_from_path as load_sagitta_code_config_from_path, save_config_to_path as save_sagitta_code_config_to_path};
+    
 
     fn create_test_sagitta_config() -> AppConfig {
         AppConfig {
@@ -698,7 +692,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_settings_panel_config_population() {
-        let mut panel = SettingsPanel::new(create_test_sagitta_code_config(), create_test_sagitta_config());
+        let panel = SettingsPanel::new(create_test_sagitta_code_config(), create_test_sagitta_config());
         
         assert_eq!(panel.qdrant_url, "http://localhost:6334");
         assert_eq!(panel.onnx_model_path, Some("/test/model.onnx".to_string()));
@@ -773,7 +767,7 @@ mod tests {
         let config = panel.create_updated_sagitta_code_config();
         
         assert_eq!(config.claude_code.claude_path, "/custom/claude");
-        assert_eq!(config.claude_code.verbose, true);
+        assert!(config.claude_code.verbose);
         assert_eq!(config.claude_code.max_output_tokens, 10000);
     }
 
@@ -820,7 +814,7 @@ mod tests {
         // Verify changes were applied
         assert_eq!(updated_sagitta_config.qdrant_url, "http://new_url:6334");
         assert_eq!(updated_sagitta_code_config.claude_code.claude_path, "/new/claude");
-        assert_eq!(updated_sagitta_code_config.claude_code.verbose, true);
+        assert!(updated_sagitta_code_config.claude_code.verbose);
     }
 
     #[test]

@@ -5,9 +5,7 @@ use anyhow::Result;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::RwLock;
 use tracing::{error, info, warn, instrument};
-use sagitta_search::config::AppConfig;
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;
 
 #[instrument(skip(server))]
@@ -80,7 +78,7 @@ async fn handle_connection<C: QdrantClientTrait + Send + Sync + 'static>(
                         Some(Response::error(
                             ErrorObject {
                                 code: error_codes::PARSE_ERROR,
-                                message: format!("Failed to parse request: {}", e),
+                                message: format!("Failed to parse request: {e}"),
                                 data: None,
                             },
                             None, // No ID if request parsing failed

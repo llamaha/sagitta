@@ -1,43 +1,34 @@
 // Agent orchestration logic will go here
 
-use futures_util::{Stream, StreamExt};
+use futures_util::Stream;
 use serde_json::Value;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use tokio::sync::{mpsc, broadcast};
+use tokio::sync::broadcast;
 use uuid::Uuid;
-use async_trait::async_trait;
-use serde_json::Value as JsonValue;
-use log::{debug, info, warn, error, trace};
-use chrono;
-use std::time::Duration;
+use log::{debug, info, trace};
 use std::collections::HashMap;
 use std::boxed::Box;
 
-use crate::agent::message::history::{MessageHistoryManager, ConversationAwareHistoryManager};
+use crate::agent::message::history::ConversationAwareHistoryManager;
 use crate::agent::message::types::{AgentMessage, ToolCall};
-use crate::agent::message::history::MessageHistory;
-use crate::agent::state::manager::{StateManager, StateEvent};
-use crate::agent::state::types::{AgentState, AgentMode, ConversationStatus, AgentStateInfo};
+use crate::agent::state::manager::StateManager;
+use crate::agent::state::types::{AgentState, AgentMode, AgentStateInfo};
 use crate::agent::conversation::manager::{ConversationManager, ConversationManagerImpl};
-use crate::agent::conversation::persistence::disk::DiskConversationPersistence;
-use crate::agent::conversation::search::text::TextConversationSearchEngine;
 use crate::agent::conversation::context_manager::ConversationContextManager;
 use crate::agent::events::{AgentEvent, EventHandler};
 use crate::agent::recovery::{RecoveryManager, RecoveryConfig, RecoveryState};
 use crate::agent::streaming::StreamingProcessor;
 use crate::config::types::SagittaCodeConfig;
-use crate::llm::client::{LlmClient, LlmResponse, Message, Role, StreamChunk as SagittaCodeStreamChunk, MessagePart as SagittaCodeMessagePart, ToolDefinition as LlmToolDefinition, ThinkingConfig};
+use crate::llm::client::{LlmClient, StreamChunk as SagittaCodeStreamChunk, ThinkingConfig};
 // Tool imports removed - tools now via MCP
 use crate::utils::errors::SagittaCodeError;
 // Import the EmbeddingProvider trait for generic use
 use sagitta_embed::provider::EmbeddingProvider;
 
 // Tokio stream wrappers
-use tokio_stream::wrappers::UnboundedReceiverStream;
 
 // Import agent's Role for mapping
-use crate::llm::client::Role as LlmClientRole;
 
 // Import prompt providers
 use crate::agent::prompts::{SystemPromptProvider, claude_code::ClaudeCodeSystemPrompt}; 
@@ -98,7 +89,7 @@ impl Agent {
     pub async fn new(
         config: SagittaCodeConfig,
         tool_registry: Option<Arc<crate::tools::registry::ToolRegistry>>,
-        embedding_provider: Arc<dyn EmbeddingProvider + Send + Sync + 'static>,
+        _embedding_provider: Arc<dyn EmbeddingProvider + Send + Sync + 'static>,
         persistence: Box<dyn ConversationPersistence>,
         search_engine: Box<dyn ConversationSearchEngine>,
         llm_client: Arc<dyn LlmClient>,
@@ -133,13 +124,13 @@ impl Agent {
             provider.generate_system_prompt(&tool_definitions_for_prompt)
         };
         info!("System prompt constructed. Length: {}", system_prompt.len());
-        trace!("System prompt content: {}", system_prompt);
+        trace!("System prompt content: {system_prompt}");
 
         // Set up conversation management system
         debug!("Setting up conversation management system...");
         
         // Determine storage path
-        let storage_path = if let Some(path) = &config.conversation.storage_path {
+        let _storage_path = if let Some(path) = &config.conversation.storage_path {
             path.clone()
         } else {
             // Use default path in user's config directory
@@ -155,7 +146,7 @@ impl Agent {
             persistence, // Use passed-in persistence
             search_engine, // Use passed-in search_engine
         ).await
-        .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation manager: {}", e)))?
+        .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation manager: {e}")))?
         .with_auto_save(config.conversation.auto_save);
         debug!("Conversation manager created.");
         
@@ -169,7 +160,7 @@ impl Agent {
             max_context_tokens,
             system_prompt.clone(),
         ).await
-        .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation-aware history manager: {}", e)))?;
+        .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation-aware history manager: {e}")))?;
         debug!("Conversation-aware history manager created.");
         
         // Get current conversation ID for context manager
@@ -178,13 +169,13 @@ impl Agent {
         } else {
             // Create a new conversation and get its ID
             let new_id = Uuid::new_v4();
-            info!("No current conversation found, will use new ID for context manager: {}", new_id);
+            info!("No current conversation found, will use new ID for context manager: {new_id}");
             new_id
         };
         
         // Create conversation context manager for Phase 3 features
         let context_manager = Arc::new(ConversationContextManager::new(current_conversation_id));
-        debug!("Conversation context manager created for conversation: {}", current_conversation_id);
+        debug!("Conversation context manager created for conversation: {current_conversation_id}");
 
         // Create shared loop break flag
         let loop_break_requested_initial = Arc::new(tokio::sync::Mutex::new(false));
@@ -201,7 +192,7 @@ impl Agent {
             continue_reasoning_flag,
         ));
 
-        let mut agent_self = Self {
+        let agent_self = Self {
             llm_client,
             tool_registry,
             history: Arc::new(history_manager),
@@ -245,7 +236,7 @@ impl Agent {
     }
     
     /// Set recovery configuration
-    pub fn with_recovery_config(self, config: RecoveryConfig) -> Self {
+    pub fn with_recovery_config(self, _config: RecoveryConfig) -> Self {
         // Note: This creates a new recovery manager with the new config
         // In practice, you might want to update the existing one
         self
@@ -264,12 +255,12 @@ impl Agent {
         -> Result<Pin<Box<dyn Stream<Item = Result<SagittaCodeStreamChunk, SagittaCodeError>> + Send + '_>>, SagittaCodeError> 
     {
         let message_text = message.into();
-        info!("Processing user message (stream with thinking - FIXED): '{}'", message_text);
+        info!("Processing user message (stream with thinking - FIXED): '{message_text}'");
         
         self.state_manager.set_thinking("Processing user message with thinking").await?;
         
         // Get current conversation ID for analytics reporting
-        let current_conversation_id = self.history.get_current_conversation().await.ok().flatten().map(|c| c.id);
+        let _current_conversation_id = self.history.get_current_conversation().await.ok().flatten().map(|c| c.id);
         
         // Use direct LLM streaming
         info!("Using direct LLM streaming");
@@ -356,9 +347,9 @@ impl Agent {
     /// Create a new conversation
     pub async fn create_new_conversation(&self, title: String) -> Result<uuid::Uuid, SagittaCodeError> {
         let manager = self.get_conversation_manager();
-        let mut manager_guard = manager.lock().await;
+        let manager_guard = manager.lock().await;
         manager_guard.create_conversation(title, None).await
-            .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation: {}", e)))
+            .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation: {e}")))
     }
     
     /// List all conversations
@@ -366,7 +357,7 @@ impl Agent {
         let manager = self.get_conversation_manager();
         let manager_guard = manager.lock().await;
         manager_guard.list_conversations(None).await
-            .map_err(|e| SagittaCodeError::Unknown(format!("Failed to list conversations: {}", e)))
+            .map_err(|e| SagittaCodeError::Unknown(format!("Failed to list conversations: {e}")))
     }
 
     // Added getter for StateManager's state Arc

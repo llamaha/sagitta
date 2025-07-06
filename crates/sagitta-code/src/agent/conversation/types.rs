@@ -95,6 +95,7 @@ pub struct ProjectContext {
 
 /// Project type enumeration for different programming languages and contexts
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Copy)]
+#[derive(Default)]
 pub enum ProjectType {
     /// Rust programming language projects
     Rust,
@@ -115,14 +116,10 @@ pub enum ProjectType {
     /// HTML web projects
     Html,
     /// Mixed or unknown project type
+    #[default]
     Unknown,
 }
 
-impl Default for ProjectType {
-    fn default() -> Self {
-        ProjectType::Unknown
-    }
-}
 
 impl ProjectType {
     /// Detect project type from file extension
@@ -212,7 +209,7 @@ impl ProjectType {
             if let Ok(entries) = std::fs::read_dir(path) {
                 for entry in entries.flatten() {
                     if let Some(name) = entry.file_name().to_str() {
-                        if let Some(ext) = name.split('.').last() {
+                        if let Some(ext) = name.split('.').next_back() {
                             let project_type = Self::from_extension(ext);
                             if project_type != ProjectType::Unknown {
                                 *file_counts.entry(project_type).or_insert(0) += 1;

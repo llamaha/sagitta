@@ -22,7 +22,7 @@ pub struct SearchFileArgs {
     pub json: bool,
 }
 
-pub async fn handle_simple_search_file(args: &SearchFileArgs) -> Result<()> {
+pub async fn handle_simple_search_file(_args: &SearchFileArgs) -> Result<()> {
     println!("Handling simple search-file..."); // Placeholder
     // TODO: Implement search logic for simple command (search CWD or specified paths).
     Ok(())

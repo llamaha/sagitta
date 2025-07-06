@@ -457,7 +457,7 @@ where
     async fn perform_sync(
         &self,
         requirement: &SyncRequirement,
-        options: &SyncOptions,
+        _options: &SyncOptions,
         repo_path: &Path,
     ) -> GitResult<SyncResult> {
         tracing::info!("Starting sync operation: {:?}", requirement.sync_type);
@@ -505,7 +505,7 @@ where
                                 files_added: 0,
                                 files_updated: 0,
                                 files_removed: 0,
-                                error_message: Some(format!("Sync failed: {}", e)),
+                                error_message: Some(format!("Sync failed: {e}")),
                             })
                         }
                     }
@@ -584,7 +584,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_branch_switcher_creation() {
-        let switcher = BranchSwitcher::new();
+        let _switcher = BranchSwitcher::new();
         // Just test that it can be created
         assert!(true);
     }
@@ -599,7 +599,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_git_tree_diff_with_actual_changes() {
-        use git2::{Repository, Signature, ObjectType};
+        use git2::{Repository, Signature};
         
         // Create a test repository with actual git history
         let temp_dir = TempDir::new().unwrap();
@@ -702,7 +702,7 @@ mod tests {
         assert!(reverse_diff.deleted.contains(&std::path::PathBuf::from("file3.txt")));
         
         // Test sync requirement calculation
-        let mut state_manager = StateManager::new();
+        let mut _state_manager = StateManager::new();
         let mut git_repo = crate::core::GitRepository::open(repo_path).unwrap();
         let sync_req = switcher.calculate_sync_requirements(
             &mut git_repo,

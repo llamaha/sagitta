@@ -455,7 +455,7 @@ impl RepoMapper {
             return;
         }
 
-        output.push_str(&format!("\n📁 {}\n", file));
+        output.push_str(&format!("\n📁 {file}\n"));
 
         for method in methods {
             let icon = method.method_type.icon();
@@ -476,7 +476,7 @@ impl RepoMapper {
                 // Level 1 verbosity: Show docstrings and method calls
                 if self.options.verbosity >= 1 {
                     if let Some(doc) = &method.docstring {
-                        output.push_str(&format!("    📝 {}\n", doc));
+                        output.push_str(&format!("    📝 {doc}\n"));
                     }
                     if !method.calls.is_empty() {
                         output.push_str(&format!("    📞 Calls: {}\n", method.calls.join(", ")));
@@ -487,7 +487,7 @@ impl RepoMapper {
                 if self.options.verbosity >= 2 {
                     output.push_str("    📄 Context:\n");
                     for line in method.context.lines() {
-                        output.push_str(&format!("       {}\n", line));
+                        output.push_str(&format!("       {line}\n"));
                     }
                 }
             }
@@ -679,8 +679,8 @@ mod tests {
         // Create a repo with many files
         let temp_dir = tempdir().unwrap();
         for i in 0..50 {
-            let file = temp_dir.path().join(format!("file{}.rs", i));
-            fs::write(&file, format!("fn func{}() {{}}", i)).unwrap();
+            let file = temp_dir.path().join(format!("file{i}.rs"));
+            fs::write(&file, format!("fn func{i}() {{}}")).unwrap();
         }
         
         let options = RepoMapOptions {
@@ -702,8 +702,8 @@ mod tests {
     fn test_manual_pagination() {
         let temp_dir = tempdir().unwrap();
         for i in 0..30 {
-            let file = temp_dir.path().join(format!("test{}.py", i));
-            fs::write(&file, format!("def test_func_{}():\n    pass", i)).unwrap();
+            let file = temp_dir.path().join(format!("test{i}.py"));
+            fs::write(&file, format!("def test_func_{i}():\n    pass")).unwrap();
         }
         
         // Test with explicit pagination parameters
@@ -772,8 +772,8 @@ mod tests {
         
         // Create just a few files
         for i in 0..3 {
-            let file = temp_dir.path().join(format!("small{}.js", i));
-            fs::write(&file, format!("function small{}() {{}}", i)).unwrap();
+            let file = temp_dir.path().join(format!("small{i}.js"));
+            fs::write(&file, format!("function small{i}() {{}}")).unwrap();
         }
         
         let options = RepoMapOptions {

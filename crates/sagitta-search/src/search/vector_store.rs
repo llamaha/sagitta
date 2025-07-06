@@ -24,11 +24,11 @@ pub enum VectorStoreError {
 impl fmt::Display for VectorStoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            VectorStoreError::Connection(msg) => write!(f, "Connection error: {}", msg),
-            VectorStoreError::CollectionNotFound(name) => write!(f, "Collection not found: {}", name),
-            VectorStoreError::InvalidQuery(msg) => write!(f, "Invalid query: {}", msg),
-            VectorStoreError::Serialization(msg) => write!(f, "Serialization error: {}", msg),
-            VectorStoreError::Operation(msg) => write!(f, "Operation error: {}", msg),
+            VectorStoreError::Connection(msg) => write!(f, "Connection error: {msg}"),
+            VectorStoreError::CollectionNotFound(name) => write!(f, "Collection not found: {name}"),
+            VectorStoreError::InvalidQuery(msg) => write!(f, "Invalid query: {msg}"),
+            VectorStoreError::Serialization(msg) => write!(f, "Serialization error: {msg}"),
+            VectorStoreError::Operation(msg) => write!(f, "Operation error: {msg}"),
         }
     }
 }
@@ -74,9 +74,10 @@ pub struct CollectionConfig {
 }
 
 /// Distance metrics supported by the vector store.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum DistanceMetric {
     /// Cosine similarity (default for most text embeddings)
+    #[default]
     Cosine,
     /// Euclidean distance
     Euclidean,
@@ -194,11 +195,6 @@ pub struct ScrollResult {
     pub next_offset: Option<String>,
 }
 
-impl Default for DistanceMetric {
-    fn default() -> Self {
-        DistanceMetric::Cosine
-    }
-}
 
 impl fmt::Display for DistanceMetric {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

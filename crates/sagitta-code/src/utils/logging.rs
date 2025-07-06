@@ -1,5 +1,5 @@
-use env_logger::{Builder, Env};
-use log::{LevelFilter, Record, Metadata, SetLoggerError, Level, Log};
+use env_logger::Builder;
+use log::{LevelFilter, Record, Metadata};
 use std::io::Write;
 use std::sync::{Mutex, Arc};
 use lazy_static::lazy_static;
@@ -133,14 +133,14 @@ pub fn init_logger() {
     } else {
         "stdout"
     };
-    log::info!("Logger initialized with target: {}, effective filters: sagitta_code=info, zbus=error, hyper=warn, egui=warn (and all submodules)", target);
+    log::info!("Logger initialized with target: {target}, effective filters: sagitta_code=info, zbus=error, hyper=warn, egui=warn (and all submodules)");
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use log::{Level, Record, Metadata, Log};
-    use std::sync::Arc;
+    
 
     #[test]
     fn test_sagitta_code_log_collector_enabled() {
@@ -239,7 +239,7 @@ mod tests {
             
             collector.log(&Record::builder()
                 .metadata(metadata)
-                .args(format_args!("{}", message))
+                .args(format_args!("{message}"))
                 .build());
         }
         
@@ -253,11 +253,11 @@ mod tests {
             
             // Check that our specific test messages with unique identifier are present
             let log_text = logs.iter().map(|(_, msg)| msg.as_str()).collect::<Vec<_>>().join(" ");
-            assert!(log_text.contains("Test ERROR message UNIQUE_12345"), "ERROR level log not found in: {}", log_text);
-            assert!(log_text.contains("Test WARN message UNIQUE_12345"), "WARN level log not found in: {}", log_text);
-            assert!(log_text.contains("Test INFO message UNIQUE_12345"), "INFO level log not found in: {}", log_text);
-            assert!(log_text.contains("Test DEBUG message UNIQUE_12345"), "DEBUG level log not found in: {}", log_text);
-            assert!(log_text.contains("Test TRACE message UNIQUE_12345"), "TRACE level log not found in: {}", log_text);
+            assert!(log_text.contains("Test ERROR message UNIQUE_12345"), "ERROR level log not found in: {log_text}");
+            assert!(log_text.contains("Test WARN message UNIQUE_12345"), "WARN level log not found in: {log_text}");
+            assert!(log_text.contains("Test INFO message UNIQUE_12345"), "INFO level log not found in: {log_text}");
+            assert!(log_text.contains("Test DEBUG message UNIQUE_12345"), "DEBUG level log not found in: {log_text}");
+            assert!(log_text.contains("Test TRACE message UNIQUE_12345"), "TRACE level log not found in: {log_text}");
         }
     }
 
@@ -340,7 +340,7 @@ mod tests {
         
         // Use a unique identifier for this test to avoid race conditions
         let unique_test_id = "TEST_MESSAGE_FORMAT_UNIQUE_987654321";
-        let expected_message = format!("Warning message with args: {}", unique_test_id);
+        let expected_message = format!("Warning message with args: {unique_test_id}");
         
         let metadata = Metadata::builder()
             .level(Level::Warn)
@@ -349,7 +349,7 @@ mod tests {
         
         collector.log(&Record::builder()
             .metadata(metadata)
-            .args(format_args!("{}", expected_message))
+            .args(format_args!("{expected_message}"))
             .build());
         
         // Check the message format by searching for our specific test message
@@ -358,20 +358,20 @@ mod tests {
             
             // Find our specific log message instead of assuming it's the last one
             let our_log = logs.iter().find(|(_, msg)| msg.contains(unique_test_id));
-            assert!(our_log.is_some(), "Could not find our test log message with unique ID: {}", unique_test_id);
+            assert!(our_log.is_some(), "Could not find our test log message with unique ID: {unique_test_id}");
             
             let (_, log_message) = our_log.unwrap();
             
             // Print the actual log message for debugging
-            eprintln!("Collected log for test_log_collector_message_format: '{}'", log_message);
+            eprintln!("Collected log for test_log_collector_message_format: '{log_message}'");
             
             // Should contain timestamp, level, and message
-            assert!(log_message.contains("WARN"), "Log message should contain WARN level string. Actual: '{}'", log_message);
-            assert!(log_message.contains(&expected_message), "Log message should contain the original arguments. Expected to contain: '{}', Actual: '{}'", expected_message, log_message);
+            assert!(log_message.contains("WARN"), "Log message should contain WARN level string. Actual: '{log_message}'");
+            assert!(log_message.contains(&expected_message), "Log message should contain the original arguments. Expected to contain: '{expected_message}', Actual: '{log_message}'");
             
             // Should have timestamp format [HH:MM:SS LEVEL]
-            assert!(log_message.starts_with('['), "Log message should start with '['. Actual: '{}'", log_message);
-            assert!(log_message.contains(']'), "Log message should contain ']'. Actual: '{}'", log_message);
+            assert!(log_message.starts_with('['), "Log message should start with '['. Actual: '{log_message}'");
+            assert!(log_message.contains(']'), "Log message should contain ']'. Actual: '{log_message}'");
         }
     }
 
@@ -480,7 +480,7 @@ mod tests {
         let special_message = "UNIQUE_SPECIAL_CHARS_TEST: !@#$%^&*()[]|:;'<>,.?/~`";
         collector.log(&Record::builder()
             .metadata(metadata)
-            .args(format_args!("{}", special_message))
+            .args(format_args!("{special_message}"))
             .build());
         
         // Check that special characters are preserved

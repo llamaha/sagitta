@@ -1,7 +1,7 @@
 //! Processing pipeline components for decoupled file processing and embedding.
 
 use crate::error::Result;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
@@ -209,7 +209,7 @@ impl ProcessingConfig {
 #[async_trait::async_trait]
 pub trait FileProcessor: Send + Sync {
     /// Process a single file and return chunks ready for embedding.
-    async fn process_file(&self, file_path: &PathBuf) -> Result<Vec<ProcessedChunk>>;
+    async fn process_file(&self, file_path: &Path) -> Result<Vec<ProcessedChunk>>;
     
     /// Process multiple files concurrently.
     async fn process_files(&self, file_paths: &[PathBuf]) -> Result<Vec<ProcessedChunk>>;

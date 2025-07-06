@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 
 use super::{TagSuggestion, TagSource};
 use super::suggester::{TagSuggester, TagSuggesterConfig};
-use super::rules::{RuleBasedTagger, TagRule, TagRuleType};
+use super::rules::{RuleBasedTagger, TagRule};
 use super::ui::{TagManagementUI, TagUIAction};
 use crate::agent::conversation::types::{Conversation, ConversationSummary};
 use crate::agent::conversation::manager::ConversationManager;
@@ -137,7 +137,7 @@ impl TaggingPipeline {
             match suggester.suggest_tags(&conversation).await {
                 Ok(suggestions) => all_suggestions.extend(suggestions),
                 Err(e) => {
-                    log::warn!("Failed to get embedding-based tag suggestions: {}", e);
+                    log::warn!("Failed to get embedding-based tag suggestions: {e}");
                 }
             }
         }
@@ -191,7 +191,7 @@ impl TaggingPipeline {
             match suggester.suggest_tags_for_summary(summary).await {
                 Ok(summary_suggestions) => suggestions.extend(summary_suggestions),
                 Err(e) => {
-                    log::warn!("Failed to get embedding-based tag suggestions for summary: {}", e);
+                    log::warn!("Failed to get embedding-based tag suggestions for summary: {e}");
                 }
             }
         }
@@ -408,6 +408,7 @@ mod tests {
     use super::*;
     use crate::agent::conversation::types::{Conversation, ProjectContext, ProjectType};
     use crate::agent::message::types::AgentMessage;
+    use crate::conversation::TagRuleType;
     use std::collections::HashMap;
     use uuid::Uuid;
     

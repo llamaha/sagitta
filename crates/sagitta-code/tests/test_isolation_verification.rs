@@ -8,7 +8,6 @@ fn init_test_isolation() {
 
 use std::env;
 use std::fs;
-use tempfile::TempDir;
 use sagitta_code::config::{SagittaCodeConfig, save_config};
 
 #[test]
@@ -17,7 +16,7 @@ fn test_save_config_uses_test_isolation() {
     let test_config_path = env::var("SAGITTA_TEST_CONFIG_PATH")
         .expect("SAGITTA_TEST_CONFIG_PATH should be set by test isolation");
     
-    println!("Test config path: {}", test_config_path);
+    println!("Test config path: {test_config_path}");
     
     // Create a test config
     let test_config = SagittaCodeConfig::default();
@@ -60,7 +59,7 @@ async fn test_async_save_config_uses_test_isolation() {
     let test_config_path = env::var("SAGITTA_TEST_CONFIG_PATH")
         .expect("SAGITTA_TEST_CONFIG_PATH should be set by test isolation");
     
-    println!("Async test config path: {}", test_config_path);
+    println!("Async test config path: {test_config_path}");
     
     // Create a test config
     let test_config = SagittaCodeConfig::default();

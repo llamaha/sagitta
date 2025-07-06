@@ -4,10 +4,9 @@
 //! creating, deleting, listing, and information about git branches.
 
 use crate::{GitError, GitResult};
-use git2::{Branch, BranchType, Repository, Reference};
+use git2::{Branch, BranchType, Repository};
 use std::collections::HashMap;
 use std::path::Path;
-use std::path::PathBuf;
 
 /// Information about a git branch
 #[derive(Debug, Clone)]
@@ -37,7 +36,7 @@ pub struct BranchInfo {
 }
 
 /// Options for creating a new branch
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CreateBranchOptions {
     /// Starting point for the new branch (commit SHA, branch name, or tag)
     pub start_point: Option<String>,
@@ -47,15 +46,6 @@ pub struct CreateBranchOptions {
     pub track: Option<String>,
 }
 
-impl Default for CreateBranchOptions {
-    fn default() -> Self {
-        Self {
-            start_point: None,
-            force: false,
-            track: None,
-        }
-    }
-}
 
 /// Branch manager for git operations
 pub struct BranchManager {
@@ -66,7 +56,7 @@ impl BranchManager {
     /// Create a new branch manager for the given repository
     pub fn new(repo_path: &Path) -> GitResult<Self> {
         let repo = Repository::open(repo_path)
-            .map_err(|e| GitError::RepositoryNotFound {
+            .map_err(|_e| GitError::RepositoryNotFound {
                 path: repo_path.to_path_buf(),
             })?;
 
@@ -83,13 +73,13 @@ impl BranchManager {
             None => self.repo.branches(None),
         }
         .map_err(|e| GitError::GitOperationFailed {
-            message: format!("Failed to list branches: {}", e),
+            message: format!("Failed to list branches: {e}"),
         })?;
 
         for branch_result in branch_iter {
             let (branch, branch_type) = branch_result
                 .map_err(|e| GitError::GitOperationFailed {
-                    message: format!("Failed to process branch: {}", e),
+                    message: format!("Failed to process branch: {e}"),
                 })?;
 
             if let Some(branch_info) = self.extract_branch_info(&branch, branch_type, &current_branch)? {
@@ -111,7 +101,7 @@ impl BranchManager {
         let current_branch = self.get_current_branch_name()?;
         
         // Determine branch type by checking if the branch name contains "remotes/"
-        let branch_type = if branch.name().ok().flatten().map_or(false, |name| name.contains("remotes/")) {
+        let branch_type = if branch.name().ok().flatten().is_some_and(|name| name.contains("remotes/")) {
             BranchType::Remote
         } else {
             BranchType::Local
@@ -144,14 +134,14 @@ impl BranchManager {
             self.repo.head()
                 .and_then(|head| head.peel_to_commit())
                 .map_err(|e| GitError::GitOperationFailed {
-                    message: format!("Failed to get HEAD commit: {}", e),
+                    message: format!("Failed to get HEAD commit: {e}"),
                 })?
         };
 
         // Create the branch
         let branch = self.repo.branch(branch_name, &commit, options.force)
             .map_err(|e| GitError::GitOperationFailed {
-                message: format!("Failed to create branch '{}': {}", branch_name, e),
+                message: format!("Failed to create branch '{branch_name}': {e}"),
             })?;
 
         // Set up tracking if requested
@@ -185,13 +175,13 @@ impl BranchManager {
         // Check if branch has unmerged commits (unless force is true)
         if !force && self.has_unmerged_commits(&branch)? {
             return Err(GitError::InvalidState {
-                message: format!("Branch '{}' has unmerged commits. Use force to delete anyway.", branch_name),
+                message: format!("Branch '{branch_name}' has unmerged commits. Use force to delete anyway."),
             });
         }
 
         branch.delete()
             .map_err(|e| GitError::GitOperationFailed {
-                message: format!("Failed to delete branch '{}': {}", branch_name, e),
+                message: format!("Failed to delete branch '{branch_name}': {e}"),
             })
     }
 
@@ -204,7 +194,7 @@ impl BranchManager {
 
         branch.rename(new_name, force)
             .map_err(|e| GitError::GitOperationFailed {
-                message: format!("Failed to rename branch '{}' to '{}': {}", old_name, new_name, e),
+                message: format!("Failed to rename branch '{old_name}' to '{new_name}': {e}"),
             })
             .map(|_| ()) // Discard the returned Branch and return ()
     }
@@ -225,21 +215,21 @@ impl BranchManager {
         }
 
         // Get the target commit
-        let commit = branch.get().peel_to_commit()
+        let _commit = branch.get().peel_to_commit()
             .map_err(|e| GitError::GitOperationFailed {
-                message: format!("Failed to get commit for branch '{}': {}", branch_name, e),
+                message: format!("Failed to get commit for branch '{branch_name}': {e}"),
             })?;
 
         // Switch HEAD to point to the branch
-        self.repo.set_head(&format!("refs/heads/{}", branch_name))
+        self.repo.set_head(&format!("refs/heads/{branch_name}"))
             .map_err(|e| GitError::GitOperationFailed {
-                message: format!("Failed to switch HEAD to branch '{}': {}", branch_name, e),
+                message: format!("Failed to switch HEAD to branch '{branch_name}': {e}"),
             })?;
 
         // Update working directory
         self.repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
             .map_err(|e| GitError::GitOperationFailed {
-                message: format!("Failed to checkout branch '{}': {}", branch_name, e),
+                message: format!("Failed to checkout branch '{branch_name}': {e}"),
             })?;
 
         Ok(())
@@ -269,7 +259,7 @@ impl BranchManager {
     pub fn has_uncommitted_changes(&self) -> GitResult<bool> {
         let statuses = self.repo.statuses(None)
             .map_err(|e| GitError::GitOperationFailed {
-                message: format!("Failed to get repository status: {}", e),
+                message: format!("Failed to get repository status: {e}"),
             })?;
 
         Ok(!statuses.is_empty())
@@ -280,7 +270,7 @@ impl BranchManager {
         let mut status_map = HashMap::new();
         let statuses = self.repo.statuses(None)
             .map_err(|e| GitError::GitOperationFailed {
-                message: format!("Failed to get repository status: {}", e),
+                message: format!("Failed to get repository status: {e}"),
             })?;
 
         for entry in statuses.iter() {
@@ -316,7 +306,7 @@ impl BranchManager {
         let commit_message = commit.message().unwrap_or("").to_string();
         let author = commit.author().name().unwrap_or("Unknown").to_string();
         let timestamp = chrono::DateTime::from_timestamp(commit.time().seconds(), 0)
-            .unwrap_or_else(|| chrono::Utc::now());
+            .unwrap_or_else(chrono::Utc::now);
 
         let has_uncommitted_changes = if is_current {
             Some(self.has_uncommitted_changes()?)
@@ -347,21 +337,21 @@ impl BranchManager {
     fn find_commit(&self, rev_spec: &str) -> GitResult<git2::Commit> {
         let obj = self.repo.revparse_single(rev_spec)
             .map_err(|e| GitError::GitOperationFailed {
-                message: format!("Failed to resolve '{}': {}", rev_spec, e),
+                message: format!("Failed to resolve '{rev_spec}': {e}"),
             })?;
 
         obj.peel_to_commit()
             .map_err(|e| GitError::GitOperationFailed {
-                message: format!("'{}' does not point to a commit: {}", rev_spec, e),
+                message: format!("'{rev_spec}' does not point to a commit: {e}"),
             })
     }
 
-    fn set_upstream(&self, branch: &Branch, upstream: &str) -> GitResult<()> {
+    fn set_upstream(&self, _branch: &Branch, _upstream: &str) -> GitResult<()> {
         // TODO: Implement upstream tracking
         Ok(())
     }
 
-    fn has_unmerged_commits(&self, branch: &Branch) -> GitResult<bool> {
+    fn has_unmerged_commits(&self, _branch: &Branch) -> GitResult<bool> {
         // TODO: Implement unmerged commit detection
         Ok(false)
     }
@@ -371,7 +361,7 @@ impl BranchManager {
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    use std::fs;
+    use std::path::PathBuf;
 
     fn create_test_repo() -> (TempDir, PathBuf) {
         let temp_dir = TempDir::new().unwrap();

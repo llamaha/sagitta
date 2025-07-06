@@ -40,7 +40,6 @@ pub fn create_embedding_provider(config: &EmbeddingConfig) -> Result<Arc<dyn Emb
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn test_create_default_provider() {

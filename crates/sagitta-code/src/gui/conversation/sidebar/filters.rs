@@ -14,17 +14,15 @@ impl ConversationSidebar {
                 }
 
                 // Filter by status
-                if !self.filters.statuses.is_empty() {
-                    if !self.filters.statuses.contains(&conv.status) {
-                        return false;
-                    }
+                if !self.filters.statuses.is_empty() 
+                    && !self.filters.statuses.contains(&conv.status) {
+                    return false;
                 }
 
                 // Filter by tags - tags is Vec<String>, not Option<Vec<String>>
-                if !self.filters.tags.is_empty() {
-                    if !self.filters.tags.iter().any(|tag| conv.tags.contains(tag)) {
-                        return false;
-                    }
+                if !self.filters.tags.is_empty() 
+                    && !self.filters.tags.iter().any(|tag| conv.tags.contains(tag)) {
+                    return false;
                 }
 
                 // Filter by date range - use last_active since updated_at doesn't exist
@@ -47,17 +45,13 @@ impl ConversationSidebar {
                 // Skip checkpoints filter since checkpoint_count field doesn't exist
 
                 // Filter by branches - use has_branches field
-                if self.filters.branches_only {
-                    if !conv.has_branches {
-                        return false;
-                    }
+                if self.filters.branches_only && !conv.has_branches {
+                    return false;
                 }
 
                 // Filter by checkpoints - use has_checkpoints field
-                if self.filters.checkpoints_only {
-                    if !conv.has_checkpoints {
-                        return false;
-                    }
+                if self.filters.checkpoints_only && !conv.has_checkpoints {
+                    return false;
                 }
 
                 true

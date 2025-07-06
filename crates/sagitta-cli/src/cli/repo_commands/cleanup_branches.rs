@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::collections::HashSet;
 use git_manager::GitManager;
 use sagitta_search::{AppConfig, save_config, qdrant_client_trait::QdrantClientTrait};
-use sagitta_search::repo_helpers::{get_branch_aware_collection_name, get_branch_sync_metadata};
+use sagitta_search::repo_helpers::get_branch_sync_metadata;
 use colored::*;
 use crate::cli::CliArgs;
 
@@ -43,7 +43,7 @@ pub async fn handle_cleanup_branches<C>(
     args: CleanupBranchesArgs,
     config: &mut AppConfig,
     client: Arc<C>,
-    cli_args: &CliArgs,
+    _cli_args: &CliArgs,
     override_path: Option<&PathBuf>,
 ) -> Result<()>
 where
@@ -99,20 +99,20 @@ where
     // Analyze each collection
     for collection_name in &collections {
         // Extract branch name from collection name
-        if let Some(branch_name) = extract_branch_from_collection_name(&collection_name, &repo_config.name, config) {
+        if let Some(branch_name) = extract_branch_from_collection_name(collection_name, &repo_config.name, config) {
             let mut should_delete = false;
             let mut reasons = Vec::new();
 
             // Check git cleanup
             if git_cleanup && !current_git_branches.contains(&branch_name) {
                 should_delete = true;
-                reasons.push(format!("branch '{}' no longer exists in Git", branch_name));
+                reasons.push(format!("branch '{branch_name}' no longer exists in Git"));
             }
 
             // Check tracked cleanup
             if tracked_cleanup && !tracked_branches.contains(&branch_name) {
                 should_delete = true;
-                reasons.push(format!("branch '{}' not in tracked branches", branch_name));
+                reasons.push(format!("branch '{branch_name}' not in tracked branches"));
             }
 
             // Check empty cleanup
@@ -125,7 +125,7 @@ where
                 ).await {
                     if metadata.files_count == 0 {
                         should_delete = true;
-                        reasons.push(format!("collection for branch '{}' is empty", branch_name));
+                        reasons.push(format!("collection for branch '{branch_name}' is empty"));
                     }
                 }
             }
@@ -144,7 +144,7 @@ where
 
     // Display what will be cleaned up
     println!("\n🗑️  Collections to be cleaned up:");
-    for (collection_name, branch_name, reasons) in &cleanup_reasons {
+    for (collection_name, _branch_name, reasons) in &cleanup_reasons {
         println!("  {} {} ({})", 
             "●".red(), 
             collection_name.yellow(), 
@@ -162,7 +162,7 @@ where
 
     // Confirmation prompt
     if !args.force {
-        print!("\n❓ Are you sure you want to delete {} collections? [y/N]: ", total_size);
+        print!("\n❓ Are you sure you want to delete {total_size} collections? [y/N]: ");
         use std::io::{self, Write};
         io::stdout().flush().unwrap();
         
@@ -203,7 +203,7 @@ where
         
         let removed_count = original_count - repo_config_mut.tracked_branches.len();
         if removed_count > 0 {
-            println!("  🔧 Removed {} non-existent branches from tracked list", removed_count);
+            println!("  🔧 Removed {removed_count} non-existent branches from tracked list");
             save_config(config, override_path)?;
         }
     }

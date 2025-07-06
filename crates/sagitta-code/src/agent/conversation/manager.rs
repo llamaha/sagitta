@@ -12,12 +12,10 @@ use super::types::{
 };
 use super::persistence::ConversationPersistence;
 use super::search::ConversationSearchEngine;
-use super::tagging::{TaggingPipeline, TaggingPipelineConfig, TaggingResult, TagMetadata, TagSuggestion};
+use super::tagging::{TaggingPipeline, TaggingResult, TagMetadata, TagSuggestion};
 use crate::agent::state::types::ConversationStatus;
 use crate::agent::conversation::types::BranchStatus;
-use crate::agent::events::AgentEvent;
-use crate::config::types::ConversationConfig;
-use crate::llm::title::{TitleGenerator, TitleGeneratorConfig};
+use crate::llm::title::TitleGenerator;
 
 /// Trait for managing conversations
 #[async_trait]
@@ -201,7 +199,7 @@ impl ConversationManagerImpl {
         if let Some(pipeline) = self.tagging_pipeline.clone() {
             tokio::spawn(async move {
                 if let Err(e) = pipeline.process_conversation(conversation_id).await {
-                    log::warn!("Failed to tag conversation {}: {}", conversation_id, e);
+                    log::warn!("Failed to tag conversation {conversation_id}: {e}");
                 }
             });
         }
@@ -257,7 +255,7 @@ impl ConversationManagerImpl {
                     log::info!("Triggering title generation for conversation {} with current title: '{}'", conversation_id, conversation.title);
                     match title_generator.generate_title(&conversation.messages).await {
                         Ok(new_title) => {
-                            log::info!("Generated title '{}' for conversation {}", new_title, conversation_id);
+                            log::info!("Generated title '{new_title}' for conversation {conversation_id}");
                             
                             // Update the conversation with the new title
                             let mut updated_conversation = conversation.clone();
@@ -272,19 +270,19 @@ impl ConversationManagerImpl {
                             // Save to persistence if auto-save is enabled (without triggering title generation again)
                             if self.auto_save {
                                 if let Err(e) = self.persistence.save_conversation(&updated_conversation).await {
-                                    log::error!("Failed to save conversation after title generation: {}", e);
+                                    log::error!("Failed to save conversation after title generation: {e}");
                                 }
                                 
                                 // Update search index
                                 if let Err(e) = self.search_engine.index_conversation(&updated_conversation).await {
-                                    log::error!("Failed to update search index after title generation: {}", e);
+                                    log::error!("Failed to update search index after title generation: {e}");
                                 }
                             }
                             
-                            log::debug!("Title generation completed for conversation {}", conversation_id);
+                            log::debug!("Title generation completed for conversation {conversation_id}");
                         },
                         Err(e) => {
-                            log::warn!("Failed to generate title for conversation {}: {}", conversation_id, e);
+                            log::warn!("Failed to generate title for conversation {conversation_id}: {e}");
                         }
                     }
                 } else {
@@ -354,7 +352,7 @@ impl ConversationManager for ConversationManagerImpl {
         {
             let conversations = self.conversations.read().await;
             if let Some(conversation) = conversations.get(&id) {
-                log::debug!("Conversation {} found in cache", id);
+                log::debug!("Conversation {id} found in cache");
                 return Ok(Some(conversation.clone()));
             }
         }
@@ -368,11 +366,11 @@ impl ConversationManager for ConversationManagerImpl {
                     let mut conversations = self.conversations.write().await;
                     conversations.insert(id, conversation.clone());
                 }
-                log::debug!("Conversation {} loaded from persistence and cached", id);
+                log::debug!("Conversation {id} loaded from persistence and cached");
                 Ok(Some(conversation))
             }
             None => {
-                log::debug!("Conversation {} not found in persistence", id);
+                log::debug!("Conversation {id} not found in persistence");
                 Ok(None)
             }
         }
@@ -655,7 +653,7 @@ mod tests {
     use super::*;
     use crate::agent::conversation::persistence::MockConversationPersistence;
     use crate::agent::conversation::search::MockConversationSearchEngine;
-    use mockall::predicate::*;
+    
 
     #[tokio::test]
     async fn test_conversation_manager_creation() {
@@ -689,7 +687,7 @@ mod tests {
             .expect_index_conversation()
             .returning(|_| Ok(()));
         
-        let mut manager = ConversationManagerImpl::new(
+        let manager = ConversationManagerImpl::new(
             Box::new(mock_persistence),
             Box::new(mock_search),
         ).await.unwrap();
@@ -716,7 +714,7 @@ mod tests {
             .expect_index_conversation()
             .returning(|_| Ok(()));
         
-        let mut manager = ConversationManagerImpl::new(
+        let manager = ConversationManagerImpl::new(
             Box::new(mock_persistence),
             Box::new(mock_search),
         ).await.unwrap();
@@ -746,7 +744,7 @@ mod tests {
             .expect_index_conversation()
             .returning(|_| Ok(()));
         
-        let mut manager = ConversationManagerImpl::new(
+        let manager = ConversationManagerImpl::new(
             Box::new(mock_persistence),
             Box::new(mock_search),
         ).await.unwrap();
@@ -775,7 +773,7 @@ mod tests {
             .expect_index_conversation()
             .returning(|_| Ok(()));
         
-        let mut manager = ConversationManagerImpl::new(
+        let manager = ConversationManagerImpl::new(
             Box::new(mock_persistence),
             Box::new(mock_search),
         ).await.unwrap();
@@ -875,7 +873,7 @@ mod tests {
             .expect_index_conversation()
             .returning(|_| Ok(()));
         
-        let mut manager = ConversationManagerImpl::new(
+        let manager = ConversationManagerImpl::new(
             Box::new(mock_persistence),
             Box::new(mock_search),
         ).await.unwrap();
@@ -909,7 +907,7 @@ mod tests {
             .expect_index_conversation()
             .returning(|_| Ok(()));
         
-        let mut manager = ConversationManagerImpl::new(
+        let manager = ConversationManagerImpl::new(
             Box::new(mock_persistence),
             Box::new(mock_search),
         ).await.unwrap();

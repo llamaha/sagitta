@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 /// Main configuration for Sagitta Code
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct SagittaCodeConfig {
     
     /// Claude Code configuration
@@ -27,17 +28,6 @@ pub struct SagittaCodeConfig {
     pub conversation: ConversationConfig,
 }
 
-impl Default for SagittaCodeConfig {
-    fn default() -> Self {
-        Self {
-            claude_code: ClaudeCodeConfig::default(),
-            sagitta: SagittaDbConfig::default(),
-            ui: UiConfig::default(),
-            logging: LoggingConfig::default(),
-            conversation: ConversationConfig::default(),
-        }
-    }
-}
 
 impl SagittaCodeConfig {
     /// Gets the path to the shared sagitta-search config file.
@@ -162,6 +152,7 @@ impl Default for ClaudeCodeConfig {
 
 /// Configuration for Sagitta Core
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct SagittaDbConfig {
     /// Base directory for repositories
     pub repositories_base_path: Option<PathBuf>,
@@ -171,14 +162,6 @@ pub struct SagittaDbConfig {
     pub repositories: Vec<String>,
 }
 
-impl Default for SagittaDbConfig {
-    fn default() -> Self {
-        Self {
-            repositories_base_path: None,
-            repositories: Vec::new(),
-        }
-    }
-}
 
 /// Configuration for the UI
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -460,8 +443,6 @@ impl Default for ConversationConfig {
 }
 
 /// Configuration for project workspaces
-
-
 fn default_dark_mode() -> bool {
     true
 }
@@ -582,13 +563,13 @@ mod tests {
     #[test]
     fn test_ui_config_default() {
         let config = UiConfig::default();
-        assert_eq!(config.dark_mode, true); // default_dark_mode() returns true
+        assert!(config.dark_mode); // default_dark_mode() returns true
         assert_eq!(config.theme, "default"); // default_theme() returns "default"
         assert_eq!(config.custom_theme_path, None);
         assert_eq!(config.window_width, 900); // default_window_width() returns 900
         assert_eq!(config.window_height, 700); // default_window_height() returns 700
         assert_eq!(config.current_repository_context, None);
-        assert_eq!(config.auto_create_claude_md, true); // default_auto_create_claude_md() returns true
+        assert!(config.auto_create_claude_md); // default_auto_create_claude_md() returns true
         assert!(!config.claude_md_template.is_empty()); // Should contain default template
     }
 

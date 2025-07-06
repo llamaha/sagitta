@@ -8,12 +8,8 @@ use chrono::{DateTime, Utc};
 use anyhow::Result;
 
 use crate::agent::conversation::manager::ConversationManager;
-use crate::agent::conversation::types::*;
-use crate::agent::state::types::ConversationStatus;
-use crate::agent::message::types::AgentMessage;
-use crate::llm::client::Role;
 
-use super::types::{Conversation, ConversationBranch, ConversationCheckpoint, ConversationQuery, ConversationSearchResult};
+use super::types::{Conversation, ConversationQuery, ConversationSearchResult};
 use super::search::ConversationSearchEngine;
 
 /// Advanced conversation navigation and timeline management
@@ -233,8 +229,8 @@ impl ConversationNavigationManager {
         // Filter by time range
         let filtered_conversations: Vec<_> = conversations.into_iter()
             .filter(|conv| {
-                let in_start_range = start_time.map_or(true, |start| conv.created_at >= start);
-                let in_end_range = end_time.map_or(true, |end| conv.created_at <= end);
+                let in_start_range = start_time.is_none_or(|start| conv.created_at >= start);
+                let in_end_range = end_time.is_none_or(|end| conv.created_at <= end);
                 in_start_range && in_end_range
             })
             .collect();
@@ -544,7 +540,7 @@ impl ConversationNavigationManager {
     /// Calculate activity score for a conversation
     async fn calculate_activity_score(&self, conversation: &Conversation) -> f32 {
         let now = Utc::now();
-        let age_days = (now - conversation.created_at).num_days() as f32;
+        let _age_days = (now - conversation.created_at).num_days() as f32;
         let recency_days = (now - conversation.last_active).num_days() as f32;
         
         let message_score = (conversation.messages.len() as f32).ln().max(1.0);
@@ -608,7 +604,7 @@ impl ConversationNavigationManager {
     }
     
     /// Generate conversation clusters
-    async fn generate_clusters(&self, nodes: &[ConversationNode], edges: &[ConversationEdge]) -> Vec<ConversationCluster> {
+    async fn generate_clusters(&self, nodes: &[ConversationNode], _edges: &[ConversationEdge]) -> Vec<ConversationCluster> {
         let mut clusters = Vec::new();
         
         // Simple clustering by workspace
@@ -616,7 +612,7 @@ impl ConversationNavigationManager {
         for node in nodes {
             if node.node_type == NodeType::Conversation {
                 workspace_groups.entry(node.metadata.workspace_id)
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(node.id);
             }
         }
@@ -625,7 +621,7 @@ impl ConversationNavigationManager {
             if conversation_ids.len() > 1 {
                 clusters.push(ConversationCluster {
                     id: Uuid::new_v4(),
-                    title: format!("Workspace Cluster {:?}", workspace_id),
+                    title: format!("Workspace Cluster {workspace_id:?}"),
                     conversation_ids,
                     center: (0.0, 0.0), // Would be calculated by layout algorithm
                     radius: 1.0,
@@ -674,7 +670,7 @@ impl ConversationNavigationManager {
     async fn filter_by_code_context(
         &self,
         results: Vec<ConversationSearchResult>,
-        code_context: &CodeSearchContext,
+        _code_context: &CodeSearchContext,
     ) -> Vec<ConversationSearchResult> {
         // TODO: Implement code-aware filtering
         // This would analyze conversation content for:
@@ -716,7 +712,7 @@ impl ConversationNavigationManager {
         let mut contextualized = results;
         
         // Boost results related to current conversation
-        if let Some(current_id) = nav_context.current_conversation_id {
+        if let Some(_current_id) = nav_context.current_conversation_id {
             for result in &mut contextualized {
                 if nav_context.related_conversations.contains(&result.id) {
                     result.relevance_score *= 1.2;
@@ -829,8 +825,10 @@ fn truncate_text(text: &str, max_length: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::conversation::manager::ConversationManager;
+    
     use crate::agent::conversation::types::*;
+    use crate::agent::message::types::AgentMessage;
+    use crate::{Role, ConversationStatus};
     
     #[tokio::test]
     async fn test_navigation_manager_creation() {

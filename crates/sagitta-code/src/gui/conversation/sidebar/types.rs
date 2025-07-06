@@ -1,7 +1,6 @@
-use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use uuid::Uuid;
 use egui::Color32;
 use std::time::Instant;
@@ -10,7 +9,7 @@ use crate::agent::conversation::types::{ConversationSummary, ProjectType};
 use crate::agent::conversation::clustering::ConversationCluster;
 use crate::agent::conversation::branching::BranchSuggestion;
 use crate::agent::conversation::checkpoints::CheckpointSuggestion;
-use crate::agent::state::types::{AgentMode, ConversationStatus};
+use crate::agent::state::types::ConversationStatus;
 use super::super::branch_suggestions::{BranchSuggestionsUI, BranchSuggestionAction};
 use super::super::checkpoint_suggestions::{CheckpointSuggestionsUI, CheckpointSuggestionAction};
 
@@ -521,8 +520,8 @@ impl ConversationSidebar {
 
     /// Toggle group expansion
     pub fn toggle_group(&mut self, group_id: &str) {
-        let collapsed_key = format!("collapsed_{}", group_id);
-        let expanded_key = format!("expanded_{}", group_id);
+        let collapsed_key = format!("collapsed_{group_id}");
+        let expanded_key = format!("expanded_{group_id}");
         
         // Determine current state
         let is_currently_expanded = if self.expanded_groups.contains(&collapsed_key) {
@@ -647,7 +646,7 @@ impl ConversationSidebar {
             CheckpointSuggestionAction::CreateCheckpoint { conversation_id, suggestion } => {
                 Some(SidebarAction::CreateCheckpoint(conversation_id, suggestion.message_id, suggestion.suggested_title))
             },
-            CheckpointSuggestionAction::DismissSuggestion { conversation_id, message_id } => {
+            CheckpointSuggestionAction::DismissSuggestion { conversation_id: _conversation_id, message_id } => {
                 self.checkpoint_suggestions_ui.dismiss_suggestion(message_id);
                 None
             },
@@ -660,7 +659,7 @@ impl ConversationSidebar {
                 // Trigger refresh - this would be handled by the app
                 None
             },
-            CheckpointSuggestionAction::JumpToMessage { conversation_id, message_id } => {
+            CheckpointSuggestionAction::JumpToMessage { conversation_id: _conversation_id, message_id: _message_id } => {
                 // Handle jumping to a specific message - this could be a new sidebar action or handled directly
                 // For now, we'll return None since this doesn't require a sidebar action
                 None

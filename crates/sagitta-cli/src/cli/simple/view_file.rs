@@ -21,7 +21,7 @@ pub struct ViewFileArgs {
     pub json: bool,
 }
 
-pub async fn handle_simple_view_file(args: &ViewFileArgs) -> Result<()> {
+pub async fn handle_simple_view_file(_args: &ViewFileArgs) -> Result<()> {
     println!("Handling simple view-file..."); // Placeholder
     // TODO: Implement file viewing logic for simple command.
     Ok(())

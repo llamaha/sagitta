@@ -2,10 +2,8 @@ use std::process::{Command, Stdio, Child};
 use std::io::{BufReader, BufRead};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio::time::{timeout, Duration};
 use crate::config::types::ClaudeCodeConfig;
 use super::error::ClaudeCodeError;
-use super::message_converter::ClaudeMessage;
 
 /// Manages the Claude process lifecycle
 pub struct ClaudeProcess {
@@ -38,7 +36,7 @@ impl ClaudeProcess {
         log::info!("CLAUDE_CODE: Spawning claude process");
         log::info!("CLAUDE_CODE: Binary path: {}", self.config.claude_path);
         log::info!("CLAUDE_CODE: Model: {}", self.config.model);
-        log::debug!("CLAUDE_CODE: Prompt: {}", prompt);
+        log::debug!("CLAUDE_CODE: Prompt: {prompt}");
         
         let mut args = vec![
             "-p".to_string(),
@@ -65,7 +63,7 @@ impl ClaudeProcess {
         if let Some(mcp_path) = mcp_config_path {
             args.push("--mcp-config".to_string());
             args.push(mcp_path.to_string());
-            log::info!("CLAUDE_CODE: Using MCP config: {}", mcp_path);
+            log::info!("CLAUDE_CODE: Using MCP config: {mcp_path}");
             
             // Allow all MCP tools from our server
             // Claude CLI prefixes MCP tools with mcp__servername__toolname
@@ -121,11 +119,11 @@ impl ClaudeProcess {
             log::info!("CLAUDE_CODE: Disallowing native tools: {}", disallowed_tools.join(","));
         }
         
-        log::trace!("CLAUDE_CODE: Full args: {:?}", args);
+        log::trace!("CLAUDE_CODE: Full args: {args:?}");
         
         // Log the full command for debugging
         let full_command = format!("{} {}", self.config.claude_path, args.join(" "));
-        log::debug!("CLAUDE_CODE: Full command: {}", full_command);
+        log::debug!("CLAUDE_CODE: Full command: {full_command}");
         
         let mut cmd = Command::new(&self.config.claude_path);
         cmd.args(&args)

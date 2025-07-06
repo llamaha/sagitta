@@ -4,7 +4,6 @@ use egui::{
     ScrollArea, 
     Color32, 
     RichText, 
-    Rounding, 
     Stroke, 
     Ui, 
     Vec2, 
@@ -12,17 +11,10 @@ use egui::{
     Frame,
     Align, 
     Layout,
-    Response,
-    Rect,
     CornerRadius,
-    TextStyle,
-    FontId,
-    FontFamily,
-    Sense,
-    Pos2,
 };
 use syntect::{
-    highlighting::{ThemeSet, Style as SyntectStyle, Theme},
+    highlighting::{ThemeSet, Style as SyntectStyle},
     parsing::SyntaxSet,
     easy::HighlightLines,
     util::LinesWithEndings,
@@ -34,20 +26,14 @@ use crate::gui::symbols;
 use crate::gui::app::RunningToolInfo;
 use crate::agent::events::ToolRunId;
 use super::{ChatItem, ToolCard, ToolCardStatus};
-use catppuccin_egui::Theme as CatppuccinTheme;
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use std::cell::RefCell;
-use std::thread::LocalKey;
 use serde_json;
 use uuid;
 use std::time::Instant;
 use std::collections::HashMap;
 use regex;
 
-#[cfg(feature = "gui")]
-use egui_notify::Toasts;
-#[cfg(feature = "gui")]
-use egui_modal::Modal;
 
 /// Convert raw tool names (including MCP format) to human-friendly display names
 fn get_human_friendly_tool_name(raw_name: &str) -> String {
@@ -174,11 +160,11 @@ thread_local! {
 }
 
 fn get_syntax_set() -> &'static SyntaxSet {
-    SYNTAX_SET.get_or_init(|| SyntaxSet::load_defaults_newlines())
+    SYNTAX_SET.get_or_init(SyntaxSet::load_defaults_newlines)
 }
 
 fn get_theme_set() -> &'static ThemeSet {
-    THEME_SET.get_or_init(|| ThemeSet::load_defaults())
+    THEME_SET.get_or_init(ThemeSet::load_defaults)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -460,15 +446,15 @@ pub fn chat_view_ui(ui: &mut egui::Ui, messages: &[ChatMessage], app_theme: AppT
 pub fn modern_chat_view_ui(ui: &mut egui::Ui, items: &[ChatItem], app_theme: AppTheme, copy_state: &mut CopyButtonState, running_tools: &HashMap<ToolRunId, RunningToolInfo>, collapsed_thinking: &mut HashMap<String, bool>, tool_results: &HashMap<String, String>) -> Option<(String, String)> {
     // Use the app theme's colors directly
     let bg_color = app_theme.panel_background();
-    let text_color = app_theme.text_color();
-    let accent_color = app_theme.accent_color();
+    let _text_color = app_theme.text_color();
+    let _accent_color = app_theme.accent_color();
 
     // Get the total available width - use full width for compact design
     let total_width = ui.available_width();
 
     let mut clicked_tool = None;
 
-    Frame::none()
+    Frame::NONE
         .fill(bg_color)
         .inner_margin(Vec2::new(16.0, 8.0)) // Add horizontal and vertical margins
         .outer_margin(0.0)
@@ -489,12 +475,12 @@ pub fn modern_chat_view_ui(ui: &mut egui::Ui, items: &[ChatItem], app_theme: App
                     let copy_all_button = egui::Button::new(&button_text)
                         .fill(button_color)
                         .stroke(Stroke::new(1.0, app_theme.border_color()))
-                        .rounding(CornerRadius::same(6));
+                        .corner_radius(CornerRadius::same(6));
                     
                     if ui.add(copy_all_button).on_hover_text("Copy entire conversation for sharing").clicked() {
                         // Extract messages and tool cards from ChatItems for conversation copying
                         let conversation_text = format_conversation_with_tools_for_copying(items);
-                        ui.output_mut(|o| o.copied_text = conversation_text.clone());
+                        ui.ctx().copy_text(conversation_text.clone());
                         copy_state.start_copy_feedback(conversation_text);
                         ui.ctx().request_repaint(); // Request repaint for animation
                     }
@@ -545,7 +531,7 @@ pub fn modern_chat_view_ui(ui: &mut egui::Ui, items: &[ChatItem], app_theme: App
         if title == "Tool Result" {
             // Look up the actual tool result
             if let Some(result) = tool_results.get(tool_call_id) {
-                return Some((format!("Tool Result for {}", tool_call_id), result.clone()));
+                return Some((format!("Tool Result for {tool_call_id}"), result.clone()));
             }
         }
     }
@@ -632,7 +618,7 @@ fn render_message_group(
         if message_group.len() > 1 {
             let last_time = message_group.last().unwrap().format_time();
             if first_time != last_time {
-                ui.label(RichText::new(format!("{} - {}", first_time, last_time))
+                ui.label(RichText::new(format!("{first_time} - {last_time}"))
                     .small()
                     .color(app_theme.timestamp_color())
                     .size(10.0));
@@ -667,14 +653,14 @@ fn render_message_group(
             let copy_button = egui::Button::new(button_text)
                 .fill(button_color)
                 .stroke(Stroke::new(1.0, app_theme.border_color()))
-                .rounding(CornerRadius::same(4));
+                .corner_radius(CornerRadius::same(4));
             
             if ui.add(copy_button).on_hover_text("Copy all messages in group").clicked() {
                 let combined_content = message_group.iter()
                     .map(|msg| msg.content.clone())
                     .collect::<Vec<_>>()
                     .join("\n\n");
-                ui.output_mut(|o| o.copied_text = combined_content.clone());
+                ui.ctx().copy_text(combined_content.clone());
                 copy_state.start_copy_feedback(combined_content);
                 ui.ctx().request_repaint(); // Request repaint for animation
             }
@@ -704,14 +690,14 @@ fn render_message_group(
                 ui.vertical(|ui| {
                     ui.set_max_width(total_width - 80.0); // Leave space for timestamp
                     
-                    if let Some(tool_info) = render_single_message_content(ui, message, &bg_color, total_width - 80.0, app_theme, running_tools, copy_state, collapsed_thinking) {
+                    if let Some(tool_info) = render_single_message_content(ui, message, bg_color, total_width - 80.0, app_theme, running_tools, copy_state, collapsed_thinking) {
                         clicked_tool = Some(tool_info);
                     }
                 });
             });
         } else {
             // Single message in group - use full width
-            if let Some(tool_info) = render_single_message_content(ui, message, &bg_color, total_width, app_theme, running_tools, copy_state, collapsed_thinking) {
+            if let Some(tool_info) = render_single_message_content(ui, message, bg_color, total_width, app_theme, running_tools, copy_state, collapsed_thinking) {
                 clicked_tool = Some(tool_info);
             }
         }
@@ -756,7 +742,7 @@ fn render_single_message_content(
     
     // Thinking content (if any) - now with streaming and fade support
     if message.should_show_thinking() {
-        render_thinking_content(ui, message, &bg_color, max_width, app_theme, collapsed_thinking);
+        render_thinking_content(ui, message, bg_color, max_width, app_theme, collapsed_thinking);
         ui.add_space(2.0); // Reduced spacing
     }
     
@@ -775,7 +761,7 @@ fn render_single_message_content(
         if *pos > last_pos && last_pos < content.len() {
             let content_chunk = &content[last_pos..*pos.min(&content.len())];
             if !content_chunk.is_empty() {
-                if let Some(tool_info) = render_text_content_compact(ui, content_chunk, &bg_color, max_width, app_theme) {
+                if let Some(tool_info) = render_text_content_compact(ui, content_chunk, bg_color, max_width, app_theme) {
                     clicked_tool = Some(tool_info);
                 }
             }
@@ -783,7 +769,7 @@ fn render_single_message_content(
         
         // Render the tool call
         ui.add_space(1.0);
-        if let Some(tool_info) = render_single_tool_call(ui, tool_call, &bg_color, max_width, app_theme, running_tools, copy_state) {
+        if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state) {
             clicked_tool = Some(tool_info);
         }
         ui.add_space(1.0);
@@ -795,7 +781,7 @@ fn render_single_message_content(
     if last_pos < content.len() {
         let remaining_content = &content[last_pos..];
         if !remaining_content.is_empty() {
-            if let Some(tool_info) = render_text_content_compact(ui, remaining_content, &bg_color, max_width, app_theme) {
+            if let Some(tool_info) = render_text_content_compact(ui, remaining_content, bg_color, max_width, app_theme) {
                 clicked_tool = Some(tool_info);
             }
         }
@@ -809,7 +795,7 @@ fn render_single_message_content(
     if !unpositioned_tools.is_empty() {
         ui.add_space(1.0);
         for tool_call in unpositioned_tools {
-            if let Some(tool_info) = render_single_tool_call(ui, tool_call, &bg_color, max_width, app_theme, running_tools, copy_state) {
+            if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state) {
                 clicked_tool = Some(tool_info);
             }
             ui.add_space(4.0);
@@ -820,7 +806,7 @@ fn render_single_message_content(
 }
 
 /// Render thinking content with streaming support and fade-out effects
-fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &Color32, max_width: f32, app_theme: AppTheme, collapsed_thinking: &mut HashMap<String, bool>) {
+fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, _bg_color: &Color32, max_width: f32, app_theme: AppTheme, collapsed_thinking: &mut HashMap<String, bool>) {
     // Check if we should show thinking content
     if !message.should_show_thinking() {
         return;
@@ -849,7 +835,7 @@ fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &C
             // Thinking icon with animation if streaming
             if message.thinking_is_streaming {
                 let time = ui.input(|i| i.time);
-                let rotation = (time * 2.0) as f32;
+                let _rotation = (time * 2.0) as f32;
                 ui.label(RichText::new(symbols::get_thinking_symbol()).size(14.0)); // Brain emoji for active thinking
             } else {
                 ui.label(RichText::new("💭").size(14.0));
@@ -888,10 +874,10 @@ fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &C
                 ui.set_max_width(max_width - 40.0);
                 
                 // Thinking content in a subtle frame
-                Frame::none()
+                Frame::NONE
                     .fill(app_theme.thinking_background())
                     .inner_margin(Vec2::new(8.0, 6.0))
-                    .rounding(CornerRadius::same(6))
+                    .corner_radius(CornerRadius::same(6))
                     .stroke(Stroke::new(0.5, app_theme.border_color()))
                     .show(ui, |ui| {
                         ui.set_max_width(max_width - 56.0);
@@ -921,7 +907,7 @@ fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &C
 }
 
 /// Render a single tool call as a compact, clickable card
-fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, copy_state: &mut CopyButtonState) -> Option<(String, String)> {
+fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, _copy_state: &mut CopyButtonState) -> Option<(String, String)> {
     let mut clicked_tool_result = None;
     
     // Limit tool card width to 90% of max_width
@@ -940,7 +926,7 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
             MessageStatus::Sending => "⏳",
             _ => "🔧",
         };
-        let header_text = format!("{} 🔧 {}", status_icon, friendly_name);
+        let header_text = format!("{status_icon} 🔧 {friendly_name}");
         
         // Create parameter tooltip text
         let mut tooltip_text = String::new();
@@ -950,7 +936,7 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                 if !params.is_empty() {
                     tooltip_text.push_str("Parameters:\n");
                     for (key, value) in params.iter() {
-                        tooltip_text.push_str(&format!("  {}: {}\n", key, value));
+                        tooltip_text.push_str(&format!("  {key}: {value}\n"));
                     }
                 }
             }
@@ -960,7 +946,7 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
         match &tool_call.status {
             MessageStatus::Complete => tooltip_text.push_str("\nStatus: Completed"),
             MessageStatus::Streaming => tooltip_text.push_str("\nStatus: Running..."),
-            MessageStatus::Error(err) => tooltip_text.push_str(&format!("\nStatus: Failed - {}", err)),
+            MessageStatus::Error(err) => tooltip_text.push_str(&format!("\nStatus: Failed - {err}")),
             MessageStatus::Sending => tooltip_text.push_str("\nStatus: Starting..."),
             _ => {}
         }
@@ -1077,7 +1063,7 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                             egui::ScrollArea::vertical()
                                 .max_height(400.0)
                                 .min_scrolled_height(min_height)
-                                .id_source(format!("tool_result_{}", tool_call.id))
+                                .id_salt(format!("tool_result_{}", tool_call.id))
                                 .auto_shrink([false, false])  // Don't auto-shrink to preserve content visibility
                                 .show(ui, |ui| {
                                     ui.set_max_width(tool_card_width - 24.0);
@@ -1089,13 +1075,13 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                                         render_diff_output(ui, &result_json, app_theme);
                                     } else {
                                         // Default rendering with markdown support
-                                        ui.style_mut().wrap = Some(true);
+                                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                                         
                                         // Use markdown rendering for formatted results
                                         crate::gui::chat::view::COMMONMARK_CACHE.with(|cache| {
                                             let mut cache = cache.borrow_mut();
                                             let viewer = egui_commonmark::CommonMarkViewer::new();
-                                            viewer.show(ui, &mut *cache, &formatted_result);
+                                            viewer.show(ui, &mut cache, &formatted_result);
                                         });
                                     }
                                 });
@@ -1110,13 +1096,13 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                                 render_diff_output(ui, &result_json, app_theme);
                             } else {
                                 // Default rendering with markdown support
-                                ui.style_mut().wrap = Some(true);
+                                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                                 
                                 // Use markdown rendering for formatted results
                                 crate::gui::chat::view::COMMONMARK_CACHE.with(|cache| {
                                     let mut cache = cache.borrow_mut();
                                     let viewer = egui_commonmark::CommonMarkViewer::new();
-                                    viewer.show(ui, &mut *cache, &formatted_result);
+                                    viewer.show(ui, &mut cache, &formatted_result);
                                 });
                             }
                         }
@@ -1151,7 +1137,7 @@ fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Co
 }
 
 /// Render a standalone tool card
-fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, copy_state: &mut CopyButtonState) -> Option<(String, String)> {
+fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_width: f32, app_theme: AppTheme, _running_tools: &HashMap<ToolRunId, RunningToolInfo>, _copy_state: &mut CopyButtonState) -> Option<(String, String)> {
     let mut clicked_tool_result = None;
     
     // Limit tool card width to 90% of max_width
@@ -1170,7 +1156,7 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
             ToolCardStatus::Running => "🔄",
             ToolCardStatus::Cancelled => "⏹️",
         };
-        let header_text = format!("{} 🔧 {}", status_icon, friendly_name);
+        let header_text = format!("{status_icon} 🔧 {friendly_name}");
         
         // Create parameter tooltip text
         let mut tooltip_text = String::new();
@@ -1178,7 +1164,7 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
         if !params.is_empty() {
             tooltip_text.push_str("Parameters:\n");
             for (key, value) in params.iter() {
-                tooltip_text.push_str(&format!("  {}: {}\n", key, value));
+                tooltip_text.push_str(&format!("  {key}: {value}\n"));
             }
         }
         
@@ -1189,7 +1175,7 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
         }
         
         // Use CollapsingHeader for the tool card (but default to open for standalone cards)
-        let id = egui::Id::new(&tool_card.run_id);
+        let id = egui::Id::new(tool_card.run_id);
         let mut collapsing_response = egui::CollapsingHeader::new(header_text)
             .id_salt(id)
             .default_open(true) // Default to open for standalone tool cards
@@ -1225,7 +1211,7 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
                         ToolCardStatus::Failed { error } => {
                             ui.add_space(4.0);
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(&format!("Error: {}", error))
+                                ui.label(RichText::new(format!("Error: {error}"))
                                     .color(app_theme.error_color())
                                     .size(11.0));
                             });
@@ -1267,7 +1253,7 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
                         // Large content - use scroll area
                         egui::ScrollArea::vertical()
                             .max_height(400.0)  // Reduced from 600 for better UI
-                            .id_source(format!("tool_result_{}", tool_card.run_id))
+                            .id_salt(format!("tool_result_{}", tool_card.run_id))
                             .auto_shrink([false, true])  // Auto-shrink vertically
                             .show(ui, |ui| {
                                 ui.set_max_width(tool_card_width - 24.0);
@@ -1279,13 +1265,13 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
                                     render_diff_output(ui, result, app_theme);
                                 } else {
                                     // Default rendering with markdown support
-                                    ui.style_mut().wrap = Some(true);
+                                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                                     
                                     // Use markdown rendering for formatted results
                                     crate::gui::chat::view::COMMONMARK_CACHE.with(|cache| {
                                         let mut cache = cache.borrow_mut();
                                         let viewer = egui_commonmark::CommonMarkViewer::new();
-                                        viewer.show(ui, &mut *cache, &formatted_result);
+                                        viewer.show(ui, &mut cache, &formatted_result);
                                     });
                                 }
                             });
@@ -1300,13 +1286,13 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
                             render_diff_output(ui, result, app_theme);
                         } else {
                             // Default rendering with markdown support
-                            ui.style_mut().wrap = Some(true);
+                            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                             
                             // Use markdown rendering for formatted results
                             crate::gui::chat::view::COMMONMARK_CACHE.with(|cache| {
                                 let mut cache = cache.borrow_mut();
                                 let viewer = egui_commonmark::CommonMarkViewer::new();
-                                viewer.show(ui, &mut *cache, &formatted_result);
+                                viewer.show(ui, &mut cache, &formatted_result);
                             });
                         }
                     }
@@ -1327,18 +1313,18 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
 fn render_message_content_compact(ui: &mut Ui, message: &StreamingMessage, bg_color: &Color32, max_width: f32, app_theme: AppTheme) -> Option<(String, String)> {
     // Use message_type for summary/finalization
     if message.message_type == MessageType::Summary {
-        return render_text_content_compact(ui, &message.content, &bg_color, max_width, app_theme);
+        return render_text_content_compact(ui, &message.content, bg_color, max_width, app_theme);
     }
     
     // Set up content area
     ui.set_max_width(max_width - 20.0);
-    ui.style_mut().wrap = Some(true);
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
     
     // Render content based on type
     let clicked_tool = if message.content.contains("```") {
-        render_mixed_content_compact(ui, &message.content, &bg_color, max_width - 20.0, app_theme)
+        render_mixed_content_compact(ui, &message.content, bg_color, max_width - 20.0, app_theme)
     } else {
-        render_text_content_compact(ui, &message.content, &bg_color, max_width - 20.0, app_theme)
+        render_text_content_compact(ui, &message.content, bg_color, max_width - 20.0, app_theme)
     };
     
     // Show streaming cursor if message is still streaming but not in thinking_is_streaming phase
@@ -1367,7 +1353,7 @@ fn render_text_content_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_
         render_text_with_tool_links(ui, text, bg_color, max_width, app_theme)
     } else {
         // Set the text color from theme before rendering
-        let original_text_color = ui.style().visuals.text_color();
+        let _original_text_color = ui.style().visuals.text_color();
         ui.style_mut().visuals.override_text_color = Some(app_theme.text_color());
         
         COMMONMARK_CACHE.with(|cache| {
@@ -1377,8 +1363,8 @@ fn render_text_content_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_
                 .default_width(Some(max_width as usize));
             
             ui.set_max_width(max_width);
-            ui.style_mut().wrap = Some(true);
-            viewer.show(ui, &mut *cache, text);
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+            viewer.show(ui, &mut cache, text);
         });
         
         // Restore original text color
@@ -1388,7 +1374,7 @@ fn render_text_content_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_
 }
 
 /// Render text with tool:// links as clickable buttons
-fn render_text_with_tool_links(ui: &mut Ui, text: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) -> Option<(String, String)> {
+fn render_text_with_tool_links(ui: &mut Ui, text: &str, _bg_color: &Color32, max_width: f32, app_theme: AppTheme) -> Option<(String, String)> {
     let mut clicked_tool = None;
     
     // Parse all [text](tool://id) patterns in the text
@@ -1404,14 +1390,14 @@ fn render_text_with_tool_links(ui: &mut Ui, text: &str, bg_color: &Color32, max_
         tool_links.push((link_text.to_string(), tool_call_id.to_string()));
         
         // Replace the markdown link with a placeholder
-        let placeholder = format!("__TOOL_LINK_{}__", i);
+        let placeholder = format!("__TOOL_LINK_{i}__");
         processed_text = processed_text.replace(&caps[0], &placeholder);
     }
     
     
     if tool_links.is_empty() {
         // No tool links, render normally with CommonMark
-        let original_text_color = ui.style().visuals.text_color();
+        let _original_text_color = ui.style().visuals.text_color();
         ui.style_mut().visuals.override_text_color = Some(app_theme.text_color());
         
         COMMONMARK_CACHE.with(|cache| {
@@ -1421,8 +1407,8 @@ fn render_text_with_tool_links(ui: &mut Ui, text: &str, bg_color: &Color32, max_
                 .default_width(Some(max_width as usize));
             
             ui.set_max_width(max_width);
-            ui.style_mut().wrap = Some(true);
-            viewer.show(ui, &mut *cache, text);
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+            viewer.show(ui, &mut cache, text);
         });
         
         ui.style_mut().visuals.override_text_color = None;
@@ -1433,13 +1419,13 @@ fn render_text_with_tool_links(ui: &mut Ui, text: &str, bg_color: &Color32, max_
     let mut remaining_text = processed_text.as_str();
     
     for (i, (link_text, tool_call_id)) in tool_links.iter().enumerate() {
-        let placeholder = format!("__TOOL_LINK_{}__", i);
+        let placeholder = format!("__TOOL_LINK_{i}__");
         
         if let Some(split_pos) = remaining_text.find(&placeholder) {
             // Render text before the placeholder using CommonMark
             let before_text = &remaining_text[..split_pos];
             if !before_text.trim().is_empty() {
-                let original_text_color = ui.style().visuals.text_color();
+                let _original_text_color = ui.style().visuals.text_color();
                 ui.style_mut().visuals.override_text_color = Some(app_theme.text_color());
                 
                 COMMONMARK_CACHE.with(|cache| {
@@ -1449,8 +1435,8 @@ fn render_text_with_tool_links(ui: &mut Ui, text: &str, bg_color: &Color32, max_
                         .default_width(Some(max_width as usize));
                     
                     ui.set_max_width(max_width);
-                    ui.style_mut().wrap = Some(true);
-                    viewer.show(ui, &mut *cache, before_text);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                    viewer.show(ui, &mut cache, before_text);
                 });
                 
                 ui.style_mut().visuals.override_text_color = None;
@@ -1458,7 +1444,7 @@ fn render_text_with_tool_links(ui: &mut Ui, text: &str, bg_color: &Color32, max_
             
             // Render the clickable button
             ui.horizontal(|ui| {
-                let button = ui.small_button(format!("📋 {}", link_text));
+                let button = ui.small_button(format!("📋 {link_text}"));
                 if button.clicked() {
                     clicked_tool = Some(("Tool Result".to_string(), tool_call_id.to_string()));
                 }
@@ -1471,7 +1457,7 @@ fn render_text_with_tool_links(ui: &mut Ui, text: &str, bg_color: &Color32, max_
     
     // Render any remaining text after the last placeholder using CommonMark
     if !remaining_text.trim().is_empty() {
-        let original_text_color = ui.style().visuals.text_color();
+        let _original_text_color = ui.style().visuals.text_color();
         ui.style_mut().visuals.override_text_color = Some(app_theme.text_color());
         
         COMMONMARK_CACHE.with(|cache| {
@@ -1481,8 +1467,8 @@ fn render_text_with_tool_links(ui: &mut Ui, text: &str, bg_color: &Color32, max_
                 .default_width(Some(max_width as usize));
             
             ui.set_max_width(max_width);
-            ui.style_mut().wrap = Some(true);
-            viewer.show(ui, &mut *cache, remaining_text);
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+            viewer.show(ui, &mut cache, remaining_text);
         });
         
         ui.style_mut().visuals.override_text_color = None;
@@ -1493,13 +1479,13 @@ fn render_text_with_tool_links(ui: &mut Ui, text: &str, bg_color: &Color32, max_
 
 /// Render code block compactly
 fn render_code_block_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) {
-    let opacity = 0.3; // Default opacity for UI elements
+    let _opacity = 0.3; // Default opacity for UI elements
     let mut lines = text.lines();
     let first_line = lines.next().unwrap_or("");
     let (language, remaining_text) = if first_line.trim().is_empty() {
         ("text", text)
     } else {
-        (first_line.trim(), text.splitn(2, '\n').nth(1).unwrap_or(""))
+        (first_line.trim(), text.split_once('\n').map(|x| x.1).unwrap_or(""))
     };
     
     // Compact code block header
@@ -1511,10 +1497,10 @@ fn render_code_block_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_wi
             let copy_button = egui::Button::new("📋")
                 .fill(app_theme.input_background())
                 .stroke(Stroke::new(1.0, app_theme.border_color()))
-                .rounding(CornerRadius::same(4));
+                .corner_radius(CornerRadius::same(4));
             
             if ui.add(copy_button).on_hover_text("Copy code").clicked() {
-                ui.output_mut(|o| o.copied_text = remaining_text.to_string());
+                ui.ctx().copy_text(remaining_text.to_string());
             }
         });
     });
@@ -1522,10 +1508,10 @@ fn render_code_block_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_wi
     ui.add_space(2.0);
     
     // Code content in a subtle frame
-    Frame::none()
+    Frame::NONE
         .fill(app_theme.code_background())
         .inner_margin(Vec2::new(8.0, 6.0))
-        .rounding(CornerRadius::same(4))
+        .corner_radius(CornerRadius::same(4))
         .stroke(Stroke::new(0.5, app_theme.border_color()))
         .show(ui, |ui| {
             ui.set_max_width(max_width - 16.0);
@@ -1534,7 +1520,7 @@ fn render_code_block_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_wi
             let line_count = remaining_text.lines().count();
             if line_count > 10 {
                 // Show line count indicator
-                ui.label(RichText::new(format!("{} lines of code", line_count))
+                ui.label(RichText::new(format!("{line_count} lines of code"))
                     .small()
                     .color(app_theme.hint_text_color()));
                 ui.add_space(2.0);
@@ -1544,16 +1530,16 @@ fn render_code_block_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_wi
                     .max_height(120.0) // Approximately 10 lines at 12px line height
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        render_syntax_highlighted_code(ui, remaining_text, language, &bg_color, max_width - 32.0);
+                        render_syntax_highlighted_code(ui, remaining_text, language, bg_color, max_width - 32.0);
                     });
             } else {
-                render_syntax_highlighted_code(ui, remaining_text, language, &bg_color, max_width - 16.0);
+                render_syntax_highlighted_code(ui, remaining_text, language, bg_color, max_width - 16.0);
             }
         });
 }
 
 /// Render syntax highlighted code
-fn render_syntax_highlighted_code(ui: &mut Ui, text: &str, language: &str, bg_color: &Color32, max_width: f32) {
+fn render_syntax_highlighted_code(ui: &mut Ui, text: &str, language: &str, _bg_color: &Color32, max_width: f32) {
     let syntax_set = get_syntax_set();
     let theme_set = get_theme_set();
     
@@ -1565,12 +1551,12 @@ fn render_syntax_highlighted_code(ui: &mut Ui, text: &str, language: &str, bg_co
     
     let mut highlighter = HighlightLines::new(syntax, syntect_theme);
     
-    ui.style_mut().wrap = Some(true);
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
     
     // Use a more compact approach by building the layout job directly
     let mut layout_job = egui::text::LayoutJob::default();
     
-    for (line_index, line) in LinesWithEndings::from(text).enumerate().take(20) {
+    for (_line_index, line) in LinesWithEndings::from(text).enumerate().take(20) {
         let ranges = highlighter.highlight_line(line, syntax_set).unwrap_or_default();
             
             for (style, text_part) in ranges {
@@ -1618,10 +1604,10 @@ fn render_internal_diff_display_logic(ui: &mut Ui, old_content: &str, new_conten
             .unwrap_or_else(|| syntax_set.find_syntax_plain_text())
     };
 
-    ui.style_mut().wrap = Some(true);
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
     ui.set_max_width(max_width);
     ui.spacing_mut().item_spacing.y = 0.0; // Remove spacing between items
-    render_diff_lines(ui, &diff, syntax, syntect_theme, &syntax_set, app_theme);
+    render_diff_lines(ui, &diff, syntax, syntect_theme, syntax_set, app_theme);
 }
 
 /// Render a unified diff view of two code snippets with syntax highlighting
@@ -1630,7 +1616,7 @@ fn render_code_diff(ui: &mut Ui, old_content: &str, new_content: &str, language:
     let total_lines = diff.iter_all_changes().count();
 
     if total_lines > DIFF_COLLAPSING_THRESHOLD_LINES { // Use the constant
-        egui::CollapsingHeader::new(RichText::new(format!("{} lines changed", total_lines)).small())
+        egui::CollapsingHeader::new(RichText::new(format!("{total_lines} lines changed")).small())
             .default_open(false) // Keep it closed by default
             .show(ui, |header_ui| {
                 ScrollArea::vertical()
@@ -1820,7 +1806,7 @@ fn detect_diff_content(content: &str) -> Option<(String, String, Option<String>)
                     // Look at both a/filename and b/filename
                     for part in &parts[2..] {
                         if let Some(filename) = part.strip_prefix("b/").or_else(|| part.strip_prefix("a/")) {
-                            if let Some(ext) = filename.split('.').last() {
+                            if let Some(ext) = filename.split('.').next_back() {
                                 if ext != filename && ext.len() <= 5 { // reasonable extension length
                                     language = Some(ext.to_string());
                                     break;
@@ -2027,23 +2013,23 @@ fn extract_tool_result_summary(text: &str) -> String {
                     if let Some(obj) = json.as_object() {
                         // For file operations
                         if let Some(file_path) = obj.get("file_path").and_then(|v| v.as_str()) {
-                            return format!("{}: {}", tool_name, file_path);
+                            return format!("{tool_name}: {file_path}");
                         }
                         
                         // For search operations
                         if let Some(query) = obj.get("query").and_then(|v| v.as_str()) {
-                            return format!("{}: \"{}\"", tool_name, query);
+                            return format!("{tool_name}: \"{query}\"");
                         }
                         
                         // For content operations
                         if obj.contains_key("content") {
-                            return format!("{}: Content retrieved", tool_name);
+                            return format!("{tool_name}: Content retrieved");
                         }
                     }
                 }
             }
             
-            return format!("{} result", tool_name);
+            return format!("{tool_name} result");
         }
     }
     
@@ -2078,17 +2064,17 @@ fn extract_tool_result_summary(text: &str) -> String {
             // Check for web search results (has query + source_count but no files array)
             if let Some(query) = obj.get("query").and_then(|v| v.as_str()) {
                 if let Some(source_count) = obj.get("source_count").and_then(|v| v.as_u64()) {
-                    return format!("Web search: \"{}\" ({} sources)", query, source_count);
+                    return format!("Web search: \"{query}\" ({source_count} sources)");
                 }
                 // Only treat as web search if it doesn't have file-specific fields
                 if !obj.contains_key("files") {
-                    return format!("Web search: \"{}\"", query);
+                    return format!("Web search: \"{query}\"");
                 }
             }
             
             // Check for file operations
             if let Some(file_path) = obj.get("file_path").and_then(|v| v.as_str()) {
-                return format!("File: {}", file_path);
+                return format!("File: {file_path}");
             }
             
             // Check for other tool types
@@ -2166,23 +2152,22 @@ fn render_mixed_content_compact(ui: &mut Ui, content: &str, bg_color: &Color32, 
             ui.label(RichText::new("🔄").size(12.0));
             ui.label(RichText::new("Diff").monospace().color(app_theme.hint_text_color()).size(10.0));
             if let Some(lang) = &language {
-                ui.label(RichText::new(format!("({})", lang)).monospace().color(app_theme.hint_text_color()).size(9.0));
+                ui.label(RichText::new(format!("({lang})")).monospace().color(app_theme.hint_text_color()).size(9.0));
             }
             
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let copy_button = egui::Button::new("📋")
                     .fill(app_theme.input_background())
                     .stroke(Stroke::new(1.0, app_theme.border_color()))
-                    .rounding(CornerRadius::same(4));
+                    .corner_radius(CornerRadius::same(4));
                 
                 if ui.add(copy_button).on_hover_text("Copy diff").clicked() {
                     let diff_text = format!("--- Original\n+++ Modified\n{}", 
                         similar::TextDiff::from_lines(&old_content, &new_content)
                             .unified_diff()
                             .context_radius(3)
-                            .to_string()
                     );
-                    ui.output_mut(|o| o.copied_text = diff_text);
+                    ui.ctx().copy_text(diff_text);
                 }
             });
         });
@@ -2193,10 +2178,10 @@ fn render_mixed_content_compact(ui: &mut Ui, content: &str, bg_color: &Color32, 
             egui::vec2(ui.available_width(), desired_min_height_for_diff_component),
             Layout::top_down(Align::Min).with_cross_align(Align::Min),
             |ui_for_diff_frame| {
-                Frame::none()
+                Frame::NONE
                     .fill(app_theme.code_background())
                     .inner_margin(Vec2::new(8.0, 6.0))
-                    .rounding(CornerRadius::same(4))
+                    .corner_radius(CornerRadius::same(4))
                     .stroke(Stroke::new(0.5, app_theme.border_color()))
                     .show(ui_for_diff_frame, |frame_content_ui| {
                         render_code_diff(frame_content_ui, &old_content, &new_content, language.as_deref(), bg_color, frame_content_ui.available_width(), app_theme);
@@ -2215,18 +2200,18 @@ fn render_mixed_content_compact(ui: &mut Ui, content: &str, bg_color: &Color32, 
                         ui.label(RichText::new("🔄").size(12.0));
                         ui.label(RichText::new("Diff").monospace().color(app_theme.hint_text_color()).size(10.0));
                         if let Some(lang) = &language {
-                            ui.label(RichText::new(format!("({})", lang)).monospace().color(app_theme.hint_text_color()).size(9.0));
+                            ui.label(RichText::new(format!("({lang})")).monospace().color(app_theme.hint_text_color()).size(9.0));
                         }
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             let copy_button = egui::Button::new("📋")
                                 .fill(app_theme.input_background())
                                 .stroke(Stroke::new(1.0, app_theme.border_color()))
-                                .rounding(CornerRadius::same(4));
+                                .corner_radius(CornerRadius::same(4));
                             if ui.add(copy_button).on_hover_text("Copy diff").clicked() {
                                 let diff_text = format!("--- Original\n+++ Modified\n{}", 
                                     similar::TextDiff::from_lines(&old_content, &new_content)
-                                        .unified_diff().context_radius(3).to_string());
-                                ui.output_mut(|o| o.copied_text = diff_text);
+                                        .unified_diff().context_radius(3));
+                                ui.ctx().copy_text(diff_text);
                             }
                         });
                     });
@@ -2236,24 +2221,22 @@ fn render_mixed_content_compact(ui: &mut Ui, content: &str, bg_color: &Color32, 
                         egui::vec2(ui.available_width(), desired_min_height_for_diff_component),
                         Layout::top_down(Align::Min).with_cross_align(Align::Min),
                         |ui_for_diff_frame| {
-                            Frame::none()
+                            Frame::NONE
                                 .fill(app_theme.code_background())
                                 .inner_margin(Vec2::new(8.0, 6.0))
-                                .rounding(CornerRadius::same(4))
+                                .corner_radius(CornerRadius::same(4))
                                 .stroke(Stroke::new(0.5, app_theme.border_color()))
                                 .show(ui_for_diff_frame, |frame_content_ui| {
                                     render_code_diff(frame_content_ui, &old_content, &new_content, language.as_deref(), bg_color, frame_content_ui.available_width(), app_theme);
                                 });
                         }
                     );
-                } else {
-                    if let Some(tool_info) = render_text_content_compact(ui, part, &bg_color, max_width, app_theme) {
-                        return Some(tool_info);
-                    }
+                } else if let Some(tool_info) = render_text_content_compact(ui, part, bg_color, max_width, app_theme) {
+                    return Some(tool_info);
                 }
             }
         } else {
-            render_code_block_compact(ui, part, &bg_color, max_width, app_theme);
+            render_code_block_compact(ui, part, bg_color, max_width, app_theme);
         }
     }
     None
@@ -2448,19 +2431,19 @@ index 1234567..abcdefg 100644
             "timed_out": false
         }"#;
         let summary = extract_tool_result_summary(shell_result);
-        println!("Shell summary: '{}'", summary);
+        println!("Shell summary: '{summary}'");
         assert!(summary.contains("Created") || summary.contains("fields"));
         
         // File search result
         let file_result = r#"{"files": ["main.rs", "lib.rs"], "query": "fn main"}"#;
         let summary = extract_tool_result_summary(file_result);
-        println!("File summary: '{}'", summary);
+        println!("File summary: '{summary}'");
         assert!(summary.contains("2 files") || summary.contains("File search") || summary.contains("main.rs"));
         
         // Web search result  
         let web_result = r#"{"query": "rust fibonacci", "source_count": 5}"#;
         let summary = extract_tool_result_summary(web_result);
-        println!("Web summary: '{}'", summary);
+        println!("Web summary: '{summary}'");
         assert!(summary.contains("2 fields") || summary.contains("rust fibonacci"));
     }
 
@@ -2476,7 +2459,7 @@ index 1234567..abcdefg 100644
         
         // Large content format 
         let large_content = "x".repeat(1000);
-        assert!(is_tool_result_message(&format!("{{\"data\": \"{}\"}}", large_content)));
+        assert!(is_tool_result_message(&format!("{{\"data\": \"{large_content}\"}}")));
         
         // Non-tool result messages
         assert!(!is_tool_result_message("This is just a regular message"));
@@ -2753,7 +2736,7 @@ index 1234567..abcdefg 100644
         let lines: Vec<&str> = formatted.split('\n').collect();
         assert!(lines.len() > 5, "Should have multiple lines with proper formatting");
         
-        println!("Formatted conversation:\n{}", formatted);
+        println!("Formatted conversation:\n{formatted}");
     }
 }
 
@@ -2775,13 +2758,13 @@ fn format_conversation_with_tools_for_copying(items: &[ChatItem]) -> String {
                 let timestamp = message.format_time();
                 
                 // Add message header
-                conversation.push(format!("{} {}", author_name, timestamp));
+                conversation.push(format!("{author_name} {timestamp}"));
                 conversation.push("".to_string()); // Empty line
                 
                 // Add thinking content if present
                 if let Some(thinking) = message.get_thinking_content() {
                     if !thinking.is_empty() {
-                        conversation.push(format!("💭 {}", thinking));
+                        conversation.push(format!("💭 {thinking}"));
                         conversation.push("".to_string());
                     }
                 }
@@ -2811,7 +2794,7 @@ fn format_conversation_with_tools_for_copying(items: &[ChatItem]) -> String {
                 if !params.is_empty() {
                     conversation.push("Parameters:".to_string());
                     for (key, value) in params {
-                        conversation.push(format!("  {}: {}", key, value));
+                        conversation.push(format!("  {key}: {value}"));
                     }
                 }
                 
@@ -2833,7 +2816,7 @@ fn format_conversation_with_tools_for_copying(items: &[ChatItem]) -> String {
                     
                     let formatted_result = formatter.format_tool_result_for_preview(&tool_card.tool_name, &tool_result);
                     for line in formatted_result.lines() {
-                        conversation.push(format!("  {}", line));
+                        conversation.push(format!("  {line}"));
                     }
                 }
                 
@@ -2864,13 +2847,13 @@ fn format_conversation_for_copying(messages: &[StreamingMessage]) -> String {
         let timestamp = message.format_time();
         
         // Add message header
-        conversation.push(format!("{} {}", author_name, timestamp));
+        conversation.push(format!("{author_name} {timestamp}"));
         conversation.push("".to_string()); // Empty line
         
         // Add thinking content if present
         if let Some(thinking) = message.get_thinking_content() {
             if !thinking.is_empty() {
-                conversation.push(format!("💭 {}", thinking));
+                conversation.push(format!("💭 {thinking}"));
                 conversation.push("".to_string());
             }
         }
@@ -2897,7 +2880,7 @@ fn format_conversation_for_copying(messages: &[StreamingMessage]) -> String {
             if let Some(result) = &tool_call.result {
                 let summary = extract_tool_result_summary(result);
                 if !summary.is_empty() && summary != "Tool execution result" {
-                    conversation.push(format!("Result: {}", summary));
+                    conversation.push(format!("Result: {summary}"));
                 }
             }
         }
@@ -2915,21 +2898,13 @@ fn format_conversation_for_copying(messages: &[StreamingMessage]) -> String {
 
 /// State for managing copy button visual feedback
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct CopyButtonState {
     pub is_copying: bool,
     pub copy_feedback_start: Option<Instant>,
     pub last_copied_text: String,
 }
 
-impl Default for CopyButtonState {
-    fn default() -> Self {
-        Self {
-            is_copying: false,
-            copy_feedback_start: None,
-            last_copied_text: String::new(),
-        }
-    }
-}
 
 impl CopyButtonState {
     /// Start the copy feedback animation
@@ -2997,7 +2972,7 @@ fn render_terminal_output(ui: &mut egui::Ui, result: &serde_json::Value, app_the
             if let Some(exit_code) = result.get("exit_code").and_then(|v| v.as_i64()) {
                 let exit_color = if exit_code == 0 { app_theme.success_color() } else { app_theme.error_color() };
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new(format!("Exit: {}", exit_code)).color(exit_color).small());
+                    ui.label(egui::RichText::new(format!("Exit: {exit_code}")).color(exit_color).small());
                 });
             }
         });
@@ -3016,9 +2991,9 @@ fn render_terminal_output(ui: &mut egui::Ui, result: &serde_json::Value, app_the
         if let Some(stderr) = result.get("stderr").and_then(|v| v.as_str()) {
             if !stderr.is_empty() {
                 if !output.is_empty() {
-                    output.push_str("\n");
+                    output.push('\n');
                 }
-                output.push_str(&format!("STDERR:\n{}", stderr));
+                output.push_str(&format!("STDERR:\n{stderr}"));
             }
         }
         
@@ -3039,7 +3014,7 @@ fn render_diff_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme: 
         ui.separator();
         
         if let Some(file_path) = result.get("file_path").and_then(|v| v.as_str()) {
-            ui.label(egui::RichText::new(format!("File: {}", file_path)).color(app_theme.hint_text_color()).small());
+            ui.label(egui::RichText::new(format!("File: {file_path}")).color(app_theme.hint_text_color()).small());
             ui.add_space(4.0);
         }
         
@@ -3051,7 +3026,7 @@ fn render_diff_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme: 
         
         // Render diff lines with appropriate colors
         for line in diff_content.lines() {
-            let (text_color, prefix) = if line.starts_with('+') && !line.starts_with("+++") {
+            let (text_color, _prefix) = if line.starts_with('+') && !line.starts_with("+++") {
                 (app_theme.success_color(), "+ ")
             } else if line.starts_with('-') && !line.starts_with("---") {
                 (app_theme.error_color(), "- ")

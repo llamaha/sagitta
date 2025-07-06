@@ -1,6 +1,5 @@
 use std::sync::Arc;
-use std::path::PathBuf;
-use egui::{Ui, RichText, Color32, Grid, TextEdit, Button, Checkbox, Layout, Align, Spinner};
+use egui::{Ui, RichText, Grid, TextEdit, Button, Checkbox, Spinner};
 use tokio::sync::Mutex;
 use super::manager::RepositoryManager;
 use rfd::FileDialog;
@@ -104,12 +103,10 @@ pub fn render_add_repo(
                         state.add_repo_form.adding = false;
                         return;
                     }
-                } else {
-                    if state.add_repo_form.url.is_empty() {
-                        state.add_repo_form.error_message = Some("Repository URL is required".to_string());
-                        state.add_repo_form.adding = false;
-                        return;
-                    }
+                } else if state.add_repo_form.url.is_empty() {
+                    state.add_repo_form.error_message = Some("Repository URL is required".to_string());
+                    state.add_repo_form.adding = false;
+                    return;
                 }
                 
                 // Clone form data for the async operation
@@ -125,7 +122,7 @@ pub fn render_add_repo(
                 // Schedule the add operation
                 let handle = tokio::runtime::Handle::current();
                 handle.spawn(async move {
-                    let mut manager = repo_manager_clone.lock().await;
+                    let manager = repo_manager_clone.lock().await;
                     let result: Result<(), anyhow::Error> = if form.use_local {
                         manager.add_local_repository(&form.name, &form.local_path).await
                     } else {
@@ -147,14 +144,14 @@ pub fn render_add_repo(
             
             match res {
                 Ok(name) => {
-                    state.add_repo_form.status_message = Some(format!("Repository '{}' added successfully", name));
+                    state.add_repo_form.status_message = Some(format!("Repository '{name}' added successfully"));
                     state.add_repo_form = super::types::AddRepoForm::default();
                     state.active_tab = super::types::RepoPanelTab::List;
                     // Trigger repository list refresh
                     state.is_loading_repos = true;
                 }
                 Err(e) => {
-                    state.add_repo_form.error_message = Some(format!("Failed to add repository: {}", e));
+                    state.add_repo_form.error_message = Some(format!("Failed to add repository: {e}"));
                     state.add_repo_form.adding = false;
                 }
             }

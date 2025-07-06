@@ -2,7 +2,6 @@
 
 use crate::config::IOBindingConfig;
 use crate::provider::onnx::memory_pool::TensorMemoryPool;
-use std::sync::Arc;
 
 /// Statistics for I/O binding operations
 #[derive(Debug, Clone, Default)]
@@ -16,17 +15,13 @@ pub struct IOBindingStats {
 /// Advanced I/O binding for optimized ONNX inference
 #[derive(Debug)]
 pub struct AdvancedIOBinding {
-    config: IOBindingConfig,
-    memory_pool: TensorMemoryPool,
     stats: IOBindingStats,
 }
 
 impl AdvancedIOBinding {
     /// Create a new advanced I/O binding instance
-    pub fn new(config: IOBindingConfig, memory_pool: TensorMemoryPool) -> Self {
+    pub fn new(_config: IOBindingConfig, _memory_pool: TensorMemoryPool) -> Self {
         Self {
-            config,
-            memory_pool,
             stats: IOBindingStats::default(),
         }
     }

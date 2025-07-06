@@ -8,7 +8,6 @@ use sagitta_embed::{
     provider::EmbeddingProvider,
 };
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
 use tempfile::tempdir;
 use std::fs;
 
@@ -255,13 +254,13 @@ fn test_phase2_comprehensive_optimization() {
     }
     
     // Verify all configuration options are properly set
-    assert_eq!(config.io_binding_config.enable_pre_allocated_buffers, true);
+    assert!(config.io_binding_config.enable_pre_allocated_buffers);
     assert_eq!(config.io_binding_config.pre_allocated_input_buffers, 8);
-    assert_eq!(config.memory_pool_config.enable_pool, true);
+    assert!(config.memory_pool_config.enable_pool);
     assert_eq!(config.memory_pool_config.max_pool_size, 32);
-    assert_eq!(config.dynamic_batch_config.enable_dynamic_batching, true);
+    assert!(config.dynamic_batch_config.enable_dynamic_batching);
     assert_eq!(config.execution_providers.len(), 3); // Auto + Cuda + Cpu
-    assert_eq!(config.enable_provider_auto_selection, true);
-    assert_eq!(config.enable_cuda_memory_streams, true);
-    assert_eq!(config.enable_hardware_detection, true);
+    assert!(config.enable_provider_auto_selection);
+    assert!(config.enable_cuda_memory_streams);
+    assert!(config.enable_hardware_detection);
 } 

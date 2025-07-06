@@ -10,6 +10,12 @@ pub struct HtmlParser {
     fallback_parser: FallbackParser,
 }
 
+impl Default for HtmlParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HtmlParser {
     /// Creates a new `HtmlParser`.
     pub fn new() -> Self {

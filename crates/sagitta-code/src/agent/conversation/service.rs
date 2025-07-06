@@ -3,13 +3,11 @@ use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
-use std::sync::Mutex as StdMutex;
-use std::collections::HashMap;
 
 use super::types::{Conversation, ConversationSummary};
-use super::clustering::{ConversationCluster, ConversationClusteringManager, ClusteringResult};
+use super::clustering::{ConversationCluster, ConversationClusteringManager};
 use super::analytics::{ConversationAnalyticsManager, AnalyticsReport};
-use super::manager::{ConversationManager, ConversationManagerImpl};
+use super::manager::ConversationManager;
 
 /// Events emitted by the conversation service
 #[derive(Debug, Clone)]
@@ -125,7 +123,7 @@ impl ConversationService {
                     let _ = self.event_sender.send(ConversationEvent::ClustersUpdated(clusters));
                 },
                 Err(e) => {
-                    log::warn!("Failed to refresh clusters: {}", e);
+                    log::warn!("Failed to refresh clusters: {e}");
                 }
             }
         }
@@ -239,7 +237,7 @@ impl ConversationService {
                     let _ = self.event_sender.send(ConversationEvent::ClustersUpdated(clusters));
                 },
                 Err(e) => {
-                    log::error!("Failed to refresh clusters: {}", e);
+                    log::error!("Failed to refresh clusters: {e}");
                     return Err(e);
                 }
             }
@@ -266,10 +264,11 @@ impl ConversationService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::conversation::analytics::AnalyticsConfig;
+    
     use crate::agent::conversation::persistence::MockConversationPersistence;
     use crate::agent::conversation::search::MockConversationSearchEngine;
     use crate::agent::conversation::types::ConversationSummary;
+    use crate::conversation::ConversationManagerImpl;
     use std::sync::Arc;
     use std::sync::Mutex as StdMutex;
     use std::collections::HashMap;

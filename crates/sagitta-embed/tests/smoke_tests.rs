@@ -67,7 +67,7 @@ async fn test_embed_texts_async_api() {
                 println!("✅ Single text embedding successful: dimension {}", embeddings[0].len());
             },
             Err(e) => {
-                println!("⚠️  Single text embedding failed as expected in test environment: {}", e);
+                println!("⚠️  Single text embedding failed as expected in test environment: {e}");
             }
         }
         
@@ -82,7 +82,7 @@ async fn test_embed_texts_async_api() {
                 }
             },
             Err(e) => {
-                println!("⚠️  Multiple text embedding failed as expected in test environment: {}", e);
+                println!("⚠️  Multiple text embedding failed as expected in test environment: {e}");
             }
         }
     } else {
@@ -120,9 +120,9 @@ async fn test_embedding_consistency() {
                 
                 // Should be very close to 1.0 (identical embeddings)
                 assert!((cosine_similarity - 1.0).abs() < 0.001, 
-                        "Cosine similarity should be ~1.0, got {}", cosine_similarity);
+                        "Cosine similarity should be ~1.0, got {cosine_similarity}");
                 
-                println!("✅ Embedding consistency test passed: cosine similarity = {:.6}", cosine_similarity);
+                println!("✅ Embedding consistency test passed: cosine similarity = {cosine_similarity:.6}");
             },
             _ => {
                 println!("⚠️  Embedding consistency test skipped (model files not available)");
@@ -136,11 +136,9 @@ async fn test_embedding_dimension_consistency() {
     let config = create_test_embedding_config();
     
     if let Ok(pool) = EmbeddingPool::with_configured_sessions(config) {
-        let test_texts = vec![
-            "Short text",
+        let test_texts = ["Short text",
             "This is a longer text that contains more words and should still produce embeddings of the same dimension",
-            "Another text with different content but same expected output dimension",
-        ];
+            "Another text with different content but same expected output dimension"];
         
         let test_text_refs: Vec<&str> = test_texts.iter().map(|s| s.as_ref()).collect();
         let result = pool.embed_texts_async(&test_text_refs).await;
@@ -161,10 +159,10 @@ async fn test_embedding_dimension_consistency() {
                 // Verify dimension matches pool configuration
                 assert_eq!(expected_dim, pool.dimension());
                 
-                println!("✅ Dimension consistency test passed: all embeddings have dimension {}", expected_dim);
+                println!("✅ Dimension consistency test passed: all embeddings have dimension {expected_dim}");
             },
             Err(e) => {
-                println!("⚠️  Dimension consistency test skipped: {}", e);
+                println!("⚠️  Dimension consistency test skipped: {e}");
             }
         }
     }
@@ -229,7 +227,7 @@ fn test_embedding_config_validation() {
 #[test]
 fn test_api_surface() {
     // Verify that the expected API surface is available
-    use sagitta_embed::{EmbeddingPool, EmbeddingConfig, EmbeddingProcessor, ProcessingConfig};
+    use sagitta_embed::{EmbeddingConfig, EmbeddingProcessor, ProcessingConfig};
     
     // These should compile without issues
     let _config = EmbeddingConfig::default();
