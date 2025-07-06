@@ -652,7 +652,7 @@ fn default_input_format() -> String {
 }
 
 fn default_fast_model() -> String {
-    "sonnet".to_string()
+    "claude-sonnet-4-20250514".to_string()
 }
 
 fn default_enable_fast_model() -> bool {
