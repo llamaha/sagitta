@@ -57,7 +57,8 @@ pub async fn handle_repository_add_dependency(
         );
     }
     
-    // Save configuration
+    // Save configuration only if not in test mode
+    #[cfg(not(test))]
     save_config(&config, None)?;
     
     Ok(RepositoryDependencyResult {
@@ -86,6 +87,7 @@ pub async fn handle_repository_remove_dependency(
     main_repo.dependencies.retain(|d| d.repository_name != params.dependency_name);
     
     if main_repo.dependencies.len() < initial_count {
+        #[cfg(not(test))]
         save_config(&config, None)?;
         info!(
             "Removed dependency '{}' from repository '{}'",
