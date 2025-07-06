@@ -1164,7 +1164,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                                     let repo_path = std::path::Path::new(&repo_config.local_path);
                                     match working_dir_manager_clone.set_repository_context(Some(repo_path)) {
                                         Ok(()) => {
-                                            log::info!("Changed working directory to repository '{repo_name_clone}' at path '{}'", repo_config.local_path);
+                                            log::info!("Changed working directory to repository '{repo_name_clone}' at path '{}'", repo_config.local_path.display());
                                             
                                             // Write the current repository path to state file for MCP server
                                             let mut state_path = dirs::config_dir().unwrap_or_default();
@@ -1175,7 +1175,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                                                 log::warn!("Failed to create state directory: {e}");
                                             } else {
                                                 state_path.push("current_repository.txt");
-                                                if let Err(e) = tokio::fs::write(&state_path, &repo_config.local_path).await {
+                                                if let Err(e) = tokio::fs::write(&state_path, repo_config.local_path.to_string_lossy().as_bytes()).await {
                                                     log::warn!("Failed to write repository state file: {e}");
                                                 } else {
                                                     log::debug!("Wrote current repository path to state file: {}", state_path.display());
