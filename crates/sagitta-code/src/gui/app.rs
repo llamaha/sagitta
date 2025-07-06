@@ -639,7 +639,10 @@ impl SagittaCodeApp {
         // Only initialize file watcher and auto-committer if their respective features are enabled
         if config_guard.auto_sync.file_watcher.enabled && config_guard.auto_sync.auto_commit.enabled {
             // Create commit message generator
-            let fast_model_provider = crate::llm::fast_model::FastModelProvider::new(config_guard.clone());
+            let mut fast_model_provider = crate::llm::fast_model::FastModelProvider::new(config_guard.clone());
+            if let Err(e) = fast_model_provider.initialize().await {
+                log::warn!("Failed to initialize fast model provider for auto-commit: {e}");
+            }
             let commit_generator = CommitMessageGenerator::new(
                 fast_model_provider,
                 config_guard.auto_sync.auto_commit.clone(),

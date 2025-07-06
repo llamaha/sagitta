@@ -652,7 +652,7 @@ fn default_input_format() -> String {
 }
 
 fn default_fast_model() -> String {
-    "claude-3-5-haiku-latest".to_string()
+    "haiku".to_string()
 }
 
 fn default_enable_fast_model() -> bool {

@@ -106,9 +106,11 @@ pub fn render_repo_list(
         ui.text_edit_singleline(&mut state.repository_filter.search_term);
         
         if ui.button("Refresh").clicked() {
-            // Set loading flag to trigger refresh in panel.rs
+            // Force refresh by setting flag and ensuring it's processed
             state.is_loading_repos = true;
             state.use_enhanced_repos = false; // Reset to trigger enhanced reload
+            
+            log::info!("Repository List: Refresh button clicked, forcing refresh");
         }
     });
     

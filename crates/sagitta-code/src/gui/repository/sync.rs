@@ -4,7 +4,7 @@ use tokio::sync::{Mutex, oneshot};
 use super::manager::RepositoryManager;
 
 use super::types::{RepoPanelState, SimpleSyncStatus};
-use crate::gui::repository::shared_sync_state::{SIMPLE_STATUS, DETAILED_STATUS};
+use crate::gui::repository::shared_sync_state::{SIMPLE_STATUS, DETAILED_STATUS, schedule_sync_status_cleanup};
 
 /// Watchdog configuration for sync operations
 /// Maximum time without progress updates before considering sync stuck (in seconds)
@@ -83,15 +83,11 @@ pub fn render_sync_repo(
     
     let repos_info: Vec<_> = available_repos.iter().map(|repo| {
         let is_selected = state.selected_repos.contains(&repo.name);
-        let default_branch = repo.branch.clone().unwrap_or_else(|| "main".to_string());
-        let branch = state.branch_overrides.get(&repo.name)
-            .cloned()
-            .unwrap_or_else(|| default_branch.clone());
-        (repo.clone(), is_selected, branch, default_branch)
+        let current_branch = repo.branch.clone().unwrap_or_else(|| "main".to_string());
+        (repo.clone(), is_selected, current_branch)
     }).collect();
     
     let mut repo_selection_changes = Vec::new();
-    let mut branch_override_changes = Vec::new();
     
     // Use a more generous max height and ensure scrolling works for long lists
     let max_height = if repos_info.len() > 10 {
@@ -106,9 +102,8 @@ pub fn render_sync_repo(
         .max_height(max_height)
         .auto_shrink([false, true]) // Don't shrink horizontally, shrink vertically if content is smaller
         .show(ui, |ui| {
-            for (repo, is_selected, branch, default_branch) in &repos_info { 
+            for (repo, is_selected, current_branch) in &repos_info { 
                 let mut selected = *is_selected;
-                let mut current_branch = branch.clone();
                 
                 ui.horizontal(|ui| {
                     // Improve checkbox layout with better spacing and larger hit area
@@ -129,16 +124,10 @@ pub fn render_sync_repo(
                     // Repository name with better spacing
                     ui.label(&repo.name);
                     
-                    // Branch input on the right with proper spacing
+                    // Current branch display (read-only) on the right
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.set_min_width(120.0); // Ensure enough space for branch input
-                        if ui.text_edit_singleline(&mut current_branch).changed() {
-                            branch_override_changes.push((
-                                repo.name.clone(),
-                                current_branch.clone(),
-                                default_branch.clone()
-                            ));
-                        }
+                        ui.set_min_width(120.0); // Ensure enough space for branch display
+                        ui.label(RichText::new(current_branch).color(theme.hint_text_color()));
                     });
                 });
                 
@@ -158,14 +147,6 @@ pub fn render_sync_repo(
             if state.selected_repo.as_ref() == Some(&repo_name) {
                 state.selected_repo = None;
             }
-        }
-    }
-    
-    for (repo_name, branch, default_branch) in branch_override_changes {
-        if branch != default_branch && !branch.trim().is_empty() {
-            state.branch_overrides.insert(repo_name, branch);
-        } else if branch.trim().is_empty() || branch == default_branch {
-            state.branch_overrides.remove(&repo_name);
         }
     }
     
@@ -275,6 +256,9 @@ pub fn render_sync_repo(
                                         s.output_lines.push("⚠️ Watchdog timeout - no progress updates received".to_string());
                                         s.final_elapsed_seconds = Some(ss.started_at.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0));
                                     });
+                                    
+                                    // Schedule cleanup of this timed out sync status
+                                    schedule_sync_status_cleanup(repo_name.clone());
 
                                 } else {
                                     status_text_str = "Running".to_string();
@@ -298,6 +282,9 @@ pub fn render_sync_repo(
                                         s.output_lines.push("⚠️ Watchdog timeout - no progress updates received".to_string());
                                         s.final_elapsed_seconds = Some(elapsed.as_secs_f64());
                                     });
+                                    
+                                    // Schedule cleanup of this timed out sync status
+                                    schedule_sync_status_cleanup(repo_name.clone());
                                 } else {
                                     status_text_str = "Running".to_string();
                                     status_color = theme.warning_color();
@@ -386,7 +373,11 @@ pub fn render_sync_repo(
     });
 }
 
-fn trigger_sync(repo_names: &[String], repo_manager: Arc<Mutex<RepositoryManager>>, force_sync: bool) {
+fn trigger_sync(
+    repo_names: &[String], 
+    repo_manager: Arc<Mutex<RepositoryManager>>, 
+    force_sync: bool,
+) {
     for repo_name in repo_names {
         // Insert an immediate placeholder so the progress bar appears instantly
         let now = std::time::Instant::now();
@@ -420,14 +411,19 @@ fn trigger_sync(repo_names: &[String], repo_manager: Arc<Mutex<RepositoryManager
                 Err(e) => {
                     log::error!("Sync task for repository '{rn}' failed: {e}");
                     let final_elapsed = started_at.elapsed().as_secs_f64();
+                    let error_message = format!("❌ Sync task failed: {e}");
+                    
                     // Ensure the status reflects the failure if the task itself errors out
                     SIMPLE_STATUS.entry(rn.clone()).and_modify(|s| {
                         s.is_running = false;
                         s.is_complete = true;
                         s.is_success = false;
-                        s.final_message = format!("❌ Sync task failed: {e}");
+                        s.final_message = error_message.clone();
                         s.final_elapsed_seconds = Some(final_elapsed);
                     });
+                    
+                    // Schedule cleanup of this sync status
+                    schedule_sync_status_cleanup(rn);
                 }
             }
         });
@@ -594,6 +590,8 @@ mod tests {
         assert_eq!(state.enhanced_repositories[0].name, "enhanced-repo-1");
         assert_eq!(state.enhanced_repositories[0].remote, Some("https://github.com/test/enhanced1.git".to_string()));
     }
+    
+    
 
     #[test]
     fn test_original_sync_panel_issue_regression_test() {
@@ -960,44 +958,6 @@ mod tests {
         assert_eq!(height, 300.0, "Should use maximum height for many repositories");
     }
 
-    #[test]
-    fn test_branch_override_functionality() {
-        use crate::gui::repository::types::RepoPanelState;
-        use std::collections::HashMap;
-        
-        // Test branch override logic
-        let mut state = RepoPanelState {
-            branch_overrides: HashMap::new(),
-            ..Default::default()
-        };
-        
-        let repo_name = "test-repo".to_string();
-        let default_branch = "main".to_string();
-        let override_branch = "feature-branch".to_string();
-        
-        // Test setting branch override
-        state.branch_overrides.insert(repo_name.clone(), override_branch.clone());
-        
-        // Test getting branch with override
-        let branch = state.branch_overrides.get(&repo_name)
-            .cloned()
-            .unwrap_or_else(|| default_branch.clone());
-        assert_eq!(branch, override_branch, "Should use override branch when set");
-        
-        // Test getting branch without override
-        let other_repo = "other-repo".to_string();
-        let branch = state.branch_overrides.get(&other_repo)
-            .cloned()
-            .unwrap_or_else(|| default_branch.clone());
-        assert_eq!(branch, default_branch, "Should use default branch when no override");
-        
-        // Test removing override (empty or same as default)
-        state.branch_overrides.remove(&repo_name);
-        let branch = state.branch_overrides.get(&repo_name)
-            .cloned()
-            .unwrap_or_else(|| default_branch.clone());
-        assert_eq!(branch, default_branch, "Should use default branch after removing override");
-    }
 
     #[test]
     fn test_sync_error_handling_and_display() {

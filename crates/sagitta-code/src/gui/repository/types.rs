@@ -329,6 +329,7 @@ pub struct SimpleSyncStatus {
     pub last_progress_time: Option<std::time::Instant>, // Last time progress was updated (for watchdog)
 }
 
+
 /// Project creation form state
 #[derive(Debug)]
 pub struct ProjectCreationForm {
@@ -389,7 +390,6 @@ pub struct RepoPanelState {
     pub project_form: ProjectCreationForm,
     pub selected_repo: Option<String>,
     pub selected_repos: Vec<String>,
-    pub branch_overrides: std::collections::HashMap<String, String>,
     pub query_options: QueryOptions,
     pub query_result: QueryResult,
     pub file_search_options: FileSearchOptions,

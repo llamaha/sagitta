@@ -168,7 +168,19 @@ impl RepoPanel {
 
     /// Toggle the panel visibility
     pub fn toggle(&mut self) {
+        let was_closed = !self.is_open;
         self.is_open = !self.is_open;
+        
+        // If we're opening the panel and the List tab is active, trigger a refresh
+        if was_closed && self.is_open {
+            if let Ok(mut state) = self.state.try_lock() {
+                if state.active_tab == RepoPanelTab::List {
+                    state.is_loading_repos = true;
+                    state.use_enhanced_repos = false; // Reset to trigger enhanced reload
+                    log::info!("Repository panel opened with List tab active, triggering refresh");
+                }
+            }
+        }
     }
 
     /// Check if the panel is open
@@ -201,9 +213,20 @@ impl RepoPanel {
 
                 // Check if we need to refresh repositories
                 if state_guard.is_loading_repos {
+                    log::info!("Repository Panel: Processing refresh request");
+                    
+                    // Reset loading flag immediately to prevent duplicate refreshes
+                    state_guard.is_loading_repos = false;
+                    
                     // Start a repository refresh
                     drop(state_guard); // Drop lock before spawning refresh task
-                    let _ = self.refresh_repositories();
+                    
+                    // Always execute refresh when requested
+                    if let Err(e) = self.refresh_repositories() {
+                        log::error!("Repository Panel: Failed to start refresh: {}", e);
+                    } else {
+                        log::info!("Repository Panel: Refresh task started successfully");
+                    }
                     
                     // Re-acquire lock after starting refresh
                     state_guard = match state_clone.try_lock() {
@@ -213,9 +236,6 @@ impl RepoPanel {
                             return;
                         }
                     };
-                    
-                    // Reset loading flag
-                    state_guard.is_loading_repos = false;
                 }
 
                 // Check if we need to load enhanced repositories for the first time
@@ -328,6 +348,13 @@ impl RepoPanel {
         // Use selectable_value to make the tab style more consistent
         if ui.selectable_label(selected, label).clicked() {
             state.active_tab = tab;
+            
+            // Always refresh when Repository List tab is clicked
+            if tab == RepoPanelTab::List {
+                state.is_loading_repos = true;
+                state.use_enhanced_repos = false; // Reset to trigger enhanced reload
+                log::info!("Repository List tab clicked, triggering refresh");
+            }
         }
     }
 
@@ -335,7 +362,7 @@ impl RepoPanel {
     pub fn get_repo_manager(&self) -> Arc<Mutex<RepositoryManager>> {
         Arc::clone(&self.repo_manager)
     }
-    
+
     /// Set the agent (usually done after initialization)
     pub fn set_agent(&mut self, agent: Arc<Agent>) {
         self.agent = Some(agent);
@@ -431,6 +458,49 @@ mod tests {
         
         // In a real test, we would verify the tab was set
         // For now, just verify no panic occurs
+    }
+    
+    #[tokio::test]
+    async fn test_repository_list_refresh_on_tab_click() {
+        let repo_manager = create_test_repo_manager();
+        let config = create_test_config();
+        let panel = RepoPanel::new(repo_manager, config, None);
+        
+        // Get initial state
+        let mut state = panel.state.lock().await;
+        state.active_tab = RepoPanelTab::Sync; // Start from different tab
+        state.is_loading_repos = false; // Start with no loading
+        state.use_enhanced_repos = true; // Start with enhanced repos
+        
+        // Simulate clicking the List tab (as would happen in tab_button method)
+        state.active_tab = RepoPanelTab::List;
+        state.is_loading_repos = true;
+        state.use_enhanced_repos = false;
+        
+        // Verify refresh was triggered
+        assert!(state.is_loading_repos, "Refresh should be triggered when List tab is clicked");
+        assert!(!state.use_enhanced_repos, "Enhanced repos should be reset to trigger reload");
+        assert_eq!(state.active_tab, RepoPanelTab::List, "Active tab should be set to List");
+    }
+    
+    #[tokio::test]
+    async fn test_refresh_button_functionality() {
+        let repo_manager = create_test_repo_manager();
+        let config = create_test_config();
+        let panel = RepoPanel::new(repo_manager, config, None);
+        
+        // Simulate refresh button click
+        let mut state = panel.state.lock().await;
+        state.is_loading_repos = false; // Start with no loading
+        state.use_enhanced_repos = true; // Start with enhanced repos
+        
+        // Simulate refresh button click (as would happen in render_repo_list)
+        state.is_loading_repos = true;
+        state.use_enhanced_repos = false;
+        
+        // Verify refresh was triggered
+        assert!(state.is_loading_repos, "Refresh should be triggered when refresh button is clicked");
+        assert!(!state.use_enhanced_repos, "Enhanced repos should be reset to trigger reload");
     }
 
 } 

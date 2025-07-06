@@ -227,7 +227,7 @@ mod tests {
         config.verbose = true;
         config.dangerously_skip_permissions = true;
         config.allowed_tools = vec!["Bash".to_string(), "Edit".to_string()];
-        config.fallback_model = Some("claude-haiku-3-20240307".to_string());
+        config.fallback_model = Some("haiku".to_string());
         
         let interface = ClaudeInterface::new(config);
         let cmd = interface.build_command(Some("Test")).unwrap();

@@ -702,6 +702,7 @@ impl RepositoryManager {
         // Log completion
         log::info!("GPU memory cleanup completed");
     }
+    
 
     pub async fn query(&self, repo_name: &str, query_text: &str, limit: usize, element_type: Option<&str>, language: Option<&str>, branch: Option<&str>) -> Result<QueryResponse> {
         let config_guard = self.config.lock().await;

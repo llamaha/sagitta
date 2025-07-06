@@ -548,7 +548,7 @@ mod tests {
         // Simulate receiving the result
         let received = receiver.try_recv();
         assert!(received.is_ok());
-        let received_result = received.unwrap();
+        let received_result: Result<String, anyhow::Error> = received.unwrap();
         assert!(received_result.is_ok());
         assert_eq!(received_result.unwrap(), "test-project");
     }
@@ -566,7 +566,7 @@ mod tests {
         // Simulate receiving the error
         let received = receiver.try_recv();
         assert!(received.is_ok());
-        let received_result = received.unwrap();
+        let received_result: Result<String, anyhow::Error> = received.unwrap();
         assert!(received_result.is_err());
         assert_eq!(received_result.unwrap_err().to_string(), error_msg);
     }
