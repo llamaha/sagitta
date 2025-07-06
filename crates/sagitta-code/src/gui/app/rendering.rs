@@ -351,6 +351,20 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
             
             // Add user message to chat using the streaming manager
             app.chat_manager.add_user_message(user_message.clone());
+            
+            // Notify auto title updater if we have an active conversation
+            if let (Some(conversation_id), Some(sender)) = (app.state.current_conversation_id, &app.auto_title_sender) {
+                // Get current message count (user messages + assistant messages)
+                let message_count = app.state.messages.len() + 1; // +1 for the message we just added
+                
+                crate::services::auto_title_updater::notify_conversation_updated(
+                    sender,
+                    conversation_id,
+                    message_count,
+                );
+                
+                log::debug!("Notified auto title updater for conversation {} with {} messages", conversation_id, message_count);
+            }
 
             // CRITICAL FIX: Force clear current_response_id when user submits new message
             // This ensures Sagitta Code ALWAYS creates a new message for each response

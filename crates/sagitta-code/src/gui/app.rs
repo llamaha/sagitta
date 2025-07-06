@@ -117,6 +117,8 @@ pub struct SagittaCodeApp {
     sync_orchestrator: Option<Arc<SyncOrchestrator>>,
     file_watcher: Option<Arc<FileWatcherService>>,
     auto_committer: Option<Arc<AutoCommitter>>,
+    auto_title_updater: Option<Arc<crate::services::AutoTitleUpdater>>,
+    auto_title_sender: Option<mpsc::UnboundedSender<crate::services::ConversationUpdateEvent>>,
 }
 
 impl SagittaCodeApp {
@@ -194,6 +196,8 @@ impl SagittaCodeApp {
             sync_orchestrator: None,
             file_watcher: None,
             auto_committer: None,
+            auto_title_updater: None,
+            auto_title_sender: None,
         }
     }
 
@@ -720,6 +724,21 @@ impl SagittaCodeApp {
             });
         } else {
             log::info!("File watcher and/or auto-commit disabled, skipping initialization");
+        }
+        
+        // Initialize auto title updater if we have a title updater and conversation service
+        if let (Some(title_updater), Some(conversation_service)) = (&self.title_updater, &self.conversation_service) {
+            let auto_title_config = crate::services::AutoTitleConfig::default();
+            let mut auto_title_updater = crate::services::AutoTitleUpdater::new(
+                auto_title_config,
+                title_updater.clone(),
+            );
+            
+            let update_tx = auto_title_updater.start();
+            self.auto_title_sender = Some(update_tx);
+            self.auto_title_updater = Some(Arc::new(auto_title_updater));
+            
+            log::info!("Auto title updater initialized and started");
         }
         
         Ok(())
