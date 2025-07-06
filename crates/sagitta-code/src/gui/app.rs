@@ -727,7 +727,7 @@ impl SagittaCodeApp {
         }
         
         // Initialize auto title updater if we have a title updater and conversation service
-        if let (Some(title_updater), Some(conversation_service)) = (&self.title_updater, &self.conversation_service) {
+        if let (Some(title_updater), Some(_conversation_service)) = (&self.title_updater, &self.conversation_service) {
             let auto_title_config = crate::services::AutoTitleConfig::default();
             let mut auto_title_updater = crate::services::AutoTitleUpdater::new(
                 auto_title_config,

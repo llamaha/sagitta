@@ -84,15 +84,6 @@ impl ConversationSidebar {
                             Some(&self.clusters),
                         ) {
                             Ok(organized_data) => {
-                                if self.show_branch_suggestions {
-                                    if let Some(conversation_id) = app_state.current_conversation_id {
-                                        if let Ok(Some(action)) = self.branch_suggestions_ui.render(ui, conversation_id, theme) {
-                                            if let Some(sidebar_action) = self.handle_branch_suggestion_action(action) {
-                                                self.pending_action = Some(sidebar_action);
-                                            }
-                                        }
-                                    }
-                                }
                                 
                                 log::trace!("Sidebar: Rendering {} conversation groups", organized_data.groups.len());
                                 for (index, group) in organized_data.groups.iter().enumerate() {
@@ -116,25 +107,6 @@ impl ConversationSidebar {
                             }
                         }
                         
-                        if self.show_checkpoint_suggestions {
-                            if let Some(conversation_id) = app_state.current_conversation_id {
-                                ui.add_space(if is_small_screen { 4.0 } else { 6.0 });
-                                ui.separator();
-                                ui.add_space(if is_small_screen { 1.0 } else { 2.0 });
-                                
-                                match self.checkpoint_suggestions_ui.render(ui, conversation_id, theme) {
-                                    Ok(Some(action)) => {
-                                        if let Some(sidebar_action) = self.handle_checkpoint_suggestion_action(action) {
-                                            self.pending_action = Some(sidebar_action);
-                                        }
-                                    },
-                                    Ok(None) => {},
-                                    Err(e) => {
-                                        log::error!("Failed to render checkpoint suggestions: {e}");
-                                    }
-                                }
-                            }
-                        }
                         
                         ui.add_space(8.0);
                     });
@@ -171,15 +143,6 @@ impl ConversationSidebar {
                     self.pending_action = Some(SidebarAction::CreateNewConversation);
                 }
                 
-                let branch_icon = if self.show_branch_suggestions { "🌳" } else { "🌿" };
-                if button_fn(ui, branch_icon).on_hover_text("Toggle branch suggestions").clicked() {
-                    self.toggle_branch_suggestions();
-                }
-                
-                let checkpoint_icon = if self.show_checkpoint_suggestions { "📍" } else { "📌" };
-                if button_fn(ui, checkpoint_icon).on_hover_text("Toggle checkpoint suggestions").clicked() {
-                    self.toggle_checkpoint_suggestions();
-                }
             });
         });
         
@@ -248,49 +211,8 @@ impl ConversationSidebar {
             }
         });
         
-        ui.horizontal(|ui| {
-            ui.label("Filters:");
-            ui.toggle_value(&mut self.filter_active, "Active");
-            ui.toggle_value(&mut self.filter_completed, "Completed");
-            ui.toggle_value(&mut self.filter_archived, "Archived");
-            
-            if ui.button(if self.show_filters { "Hide Filters" } else { "Show Filters" }).clicked() {
-                self.show_filters = !self.show_filters;
-            }
-        });
-        
-        self.filters.statuses.clear();
-        if self.filter_active {
-            self.filters.statuses.push(ConversationStatus::Active);
-        }
-        if self.filter_completed {
-            self.filters.statuses.push(ConversationStatus::Completed);
-        }
-        if self.filter_archived {
-            self.filters.statuses.push(ConversationStatus::Archived);
-        }
     }
 
-    /// Render the filters panel
-    fn render_filters(&mut self, ui: &mut Ui) {
-        if self.show_filters {
-            ui.group(|ui| {
-                ui.label(RichText::new("Advanced Filters").strong());
-                ui.separator();
-                
-                ui.checkbox(&mut self.filters.favorites_only, "Favorites only");
-                ui.checkbox(&mut self.filters.branches_only, "Has branches");
-                ui.checkbox(&mut self.filters.checkpoints_only, "Has checkpoints");
-                
-                if let Some(min_messages) = &mut self.filters.min_messages {
-                    ui.horizontal(|ui| {
-                        ui.label("Min messages:");
-                        ui.add(egui::DragValue::new(min_messages).speed(1));
-                    });
-                }
-            });
-        }
-    }
 
     /// Render a conversation group
     fn render_conversation_group(

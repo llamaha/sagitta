@@ -1246,38 +1246,14 @@ impl SagittaCodeApp {
         );
     }
 
-    /// Handle checkpoint suggestions
-    pub fn handle_checkpoint_suggestions(&mut self, conversation_id: uuid::Uuid, suggestions: Vec<crate::agent::conversation::checkpoints::CheckpointSuggestion>) {
-        log::info!("Received {} checkpoint suggestions for conversation {}", suggestions.len(), conversation_id);
-        
-        // Update the sidebar with checkpoint suggestions
-        self.conversation_sidebar.update_checkpoint_suggestions(conversation_id, suggestions.clone());
-        
-        // If this is the current conversation, enable checkpoint suggestions panel
-        if self.state.current_conversation_id == Some(conversation_id) {
-            self.conversation_sidebar.show_checkpoint_suggestions = true;
-            // Also set the UI as visible
-            self.conversation_sidebar.checkpoint_suggestions_ui.set_visible(true);
-        }
-        
-        // Add event to events panel for debugging
-        self.panels.events_panel.add_event(
-            SystemEventType::Info,
-            format!("Found {} checkpoint suggestions for conversation", suggestions.len())
-        );
+    /// Handle checkpoint suggestions (removed feature - now does nothing)
+    pub fn handle_checkpoint_suggestions(&mut self, _conversation_id: uuid::Uuid, _suggestions: Vec<crate::agent::conversation::checkpoints::CheckpointSuggestion>) {
+        log::info!("Checkpoint suggestions feature has been removed");
     }
 
-    /// Handle branch suggestions
-    pub fn handle_branch_suggestions(&mut self, conversation_id: uuid::Uuid, suggestions: Vec<crate::agent::conversation::branching::BranchSuggestion>) {
-        log::info!("Received {} branch suggestions for conversation {}", suggestions.len(), conversation_id);
-        
-        // Update the sidebar with branch suggestions
-        self.conversation_sidebar.update_branch_suggestions(conversation_id, suggestions);
-        
-        // If this is the current conversation, enable branch suggestions panel
-        if self.state.current_conversation_id == Some(conversation_id) {
-            self.conversation_sidebar.show_branch_suggestions = true;
-        }
+    /// Handle branch suggestions (removed feature - now does nothing)  
+    pub fn handle_branch_suggestions(&mut self, _conversation_id: uuid::Uuid, _suggestions: Vec<crate::agent::conversation::branching::BranchSuggestion>) {
+        log::info!("Branch suggestions feature has been removed");
     }
 
     /// Handle conversation messages loaded from service

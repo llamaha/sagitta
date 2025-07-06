@@ -1,17 +1,12 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use uuid::Uuid;
 use egui::Color32;
 use std::time::Instant;
 
-use crate::agent::conversation::types::{ConversationSummary, ProjectType};
+use crate::agent::conversation::types::ConversationSummary;
 use crate::agent::conversation::clustering::ConversationCluster;
-use crate::agent::conversation::branching::BranchSuggestion;
-use crate::agent::conversation::checkpoints::CheckpointSuggestion;
 use crate::agent::state::types::ConversationStatus;
-use super::super::branch_suggestions::{BranchSuggestionsUI, BranchSuggestionAction};
-use super::super::checkpoint_suggestions::{CheckpointSuggestionsUI, CheckpointSuggestionAction};
 
 // --- Sidebar Action for conversation management ---
 #[derive(Debug, Clone)]
@@ -22,17 +17,6 @@ pub enum SidebarAction {
     CreateNewConversation,
     RefreshConversations,
     SetWorkspace(Uuid),
-    // Branch-related actions
-    CreateBranch(Uuid, BranchSuggestion),
-    DismissBranchSuggestion(Uuid, Uuid), // conversation_id, message_id
-    RefreshBranchSuggestions(Uuid),
-    ShowBranchDetails(BranchSuggestion),
-    // Checkpoint-related actions for Phase 5
-    CreateCheckpoint(Uuid, Uuid, String), // conversation_id, message_id, title
-    RestoreCheckpoint(Uuid, Uuid), // conversation_id, checkpoint_id
-    JumpToCheckpoint(Uuid, Uuid), // conversation_id, checkpoint_id
-    DeleteCheckpoint(Uuid, Uuid), // conversation_id, checkpoint_id
-    ShowCheckpointDetails(Uuid, Uuid), // conversation_id, checkpoint_id
     // Title update action
     UpdateConversationTitle(Uuid), // conversation_id
 }
@@ -64,8 +48,6 @@ pub struct ConversationSidebar {
     /// Current organization mode
     pub organization_mode: OrganizationMode,
     
-    /// Filter settings
-    pub filters: SidebarFilters,
     
     /// Search query that is actively being used for filtering
     pub search_query: Option<String>,
@@ -94,31 +76,6 @@ pub struct ConversationSidebar {
     /// Currently editing conversation ID
     pub editing_conversation_id: Option<Uuid>,
     
-    /// Show filters panel
-    pub show_filters: bool,
-    
-    /// Filter flags for quick access
-    pub filter_active: bool,
-    pub filter_completed: bool,
-    pub filter_archived: bool,
-    
-    /// Branch suggestions UI
-    pub branch_suggestions_ui: BranchSuggestionsUI,
-    
-    /// Branch suggestions per conversation
-    pub conversation_branch_suggestions: HashMap<Uuid, Vec<BranchSuggestion>>,
-    
-    /// Show branch suggestions panel
-    pub show_branch_suggestions: bool,
-    
-    /// Checkpoint suggestions UI
-    pub checkpoint_suggestions_ui: CheckpointSuggestionsUI,
-    
-    /// Checkpoint suggestions per conversation
-    pub conversation_checkpoint_suggestions: HashMap<Uuid, Vec<CheckpointSuggestion>>,
-    
-    /// Show checkpoint suggestions panel
-    pub show_checkpoint_suggestions: bool,
     
     // Phase 10: Persistent state and performance features
     /// Last time state was saved
@@ -177,36 +134,6 @@ pub enum OrganizationMode {
     Custom(String),
 }
 
-/// Filter settings for the sidebar
-#[derive(Debug, Clone, Default)]
-pub struct SidebarFilters {
-    /// Filter by project type
-    pub project_types: Vec<ProjectType>,
-    
-    /// Filter by status
-    pub statuses: Vec<ConversationStatus>,
-    
-    /// Filter by tags
-    pub tags: Vec<String>,
-    
-    /// Filter by date range
-    pub date_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
-    
-    /// Filter by minimum message count
-    pub min_messages: Option<usize>,
-    
-    /// Filter by success rate
-    pub min_success_rate: Option<f32>,
-    
-    /// Show only favorites
-    pub favorites_only: bool,
-    
-    /// Show only with branches
-    pub branches_only: bool,
-    
-    /// Show only with checkpoints
-    pub checkpoints_only: bool,
-}
 
 /// Configuration for the sidebar behavior
 #[derive(Debug, Clone)]
@@ -474,7 +401,6 @@ impl ConversationSidebar {
     pub fn new(config: SidebarConfig) -> Self {
         Self {
             organization_mode: config.default_organization.clone(),
-            filters: SidebarFilters::default(),
             search_query: None,
             search_input: String::new(),
             expanded_groups: std::collections::HashSet::new(),
@@ -484,16 +410,6 @@ impl ConversationSidebar {
             edit_buffer: String::new(),
             pending_action: None,
             editing_conversation_id: None,
-            show_filters: false,
-            filter_active: false,
-            filter_completed: false,
-            filter_archived: false,
-            branch_suggestions_ui: BranchSuggestionsUI::new(),
-            conversation_branch_suggestions: HashMap::new(),
-            show_branch_suggestions: false,
-            checkpoint_suggestions_ui: CheckpointSuggestionsUI::with_default_config(),
-            conversation_checkpoint_suggestions: HashMap::new(),
-            show_checkpoint_suggestions: false,
             last_state_save: None,
             search_debounce_timer: None,
             last_search_query: None,
@@ -561,111 +477,7 @@ impl ConversationSidebar {
         self.invalidate_cache();
     }
 
-    /// Update branch suggestions for a conversation
-    pub fn update_branch_suggestions(&mut self, conversation_id: Uuid, suggestions: Vec<BranchSuggestion>) {
-        self.conversation_branch_suggestions.insert(conversation_id, suggestions.clone());
-        
-        // If this is the currently selected conversation, update the UI
-        if self.selected_conversation == Some(conversation_id) {
-            self.branch_suggestions_ui.update_suggestions(suggestions);
-        }
-    }
 
-    /// Get branch suggestions for a conversation
-    pub fn get_branch_suggestions(&self, conversation_id: Uuid) -> Option<&Vec<BranchSuggestion>> {
-        self.conversation_branch_suggestions.get(&conversation_id)
-    }
-
-    /// Clear branch suggestions for a conversation
-    pub fn clear_branch_suggestions(&mut self, conversation_id: Uuid) {
-        self.conversation_branch_suggestions.remove(&conversation_id);
-        
-        // If this is the currently selected conversation, clear the UI
-        if self.selected_conversation == Some(conversation_id) {
-            self.branch_suggestions_ui.update_suggestions(Vec::new());
-        }
-    }
-
-    /// Toggle branch suggestions panel
-    pub fn toggle_branch_suggestions(&mut self) {
-        self.show_branch_suggestions = !self.show_branch_suggestions;
-    }
-
-    /// Handle branch suggestion actions
-    pub fn handle_branch_suggestion_action(&mut self, action: BranchSuggestionAction) -> Option<SidebarAction> {
-        match action {
-            BranchSuggestionAction::CreateBranch { conversation_id, suggestion } => {
-                Some(SidebarAction::CreateBranch(conversation_id, suggestion))
-            },
-            BranchSuggestionAction::DismissSuggestion { conversation_id, message_id } => {
-                self.branch_suggestions_ui.dismiss_suggestion(message_id);
-                Some(SidebarAction::DismissBranchSuggestion(conversation_id, message_id))
-            },
-            BranchSuggestionAction::ShowDetails { suggestion } => {
-                Some(SidebarAction::ShowBranchDetails(suggestion))
-            },
-            BranchSuggestionAction::RefreshSuggestions { conversation_id } => {
-                Some(SidebarAction::RefreshBranchSuggestions(conversation_id))
-            },
-        }
-    }
-
-    /// Update checkpoint suggestions for a conversation
-    pub fn update_checkpoint_suggestions(&mut self, conversation_id: Uuid, suggestions: Vec<CheckpointSuggestion>) {
-        self.conversation_checkpoint_suggestions.insert(conversation_id, suggestions.clone());
-        
-        // If this is the currently selected conversation, update the UI
-        if self.selected_conversation == Some(conversation_id) {
-            self.checkpoint_suggestions_ui.update_suggestions(suggestions);
-        }
-    }
-
-    /// Get checkpoint suggestions for a conversation
-    pub fn get_checkpoint_suggestions(&self, conversation_id: Uuid) -> Option<&Vec<CheckpointSuggestion>> {
-        self.conversation_checkpoint_suggestions.get(&conversation_id)
-    }
-
-    /// Clear checkpoint suggestions for a conversation
-    pub fn clear_checkpoint_suggestions(&mut self, conversation_id: Uuid) {
-        self.conversation_checkpoint_suggestions.remove(&conversation_id);
-        
-        // If this is the currently selected conversation, clear the UI
-        if self.selected_conversation == Some(conversation_id) {
-            self.checkpoint_suggestions_ui.update_suggestions(Vec::new());
-        }
-    }
-
-    /// Toggle checkpoint suggestions panel
-    pub fn toggle_checkpoint_suggestions(&mut self) {
-        self.show_checkpoint_suggestions = !self.show_checkpoint_suggestions;
-    }
-
-    /// Handle checkpoint suggestion actions
-    pub fn handle_checkpoint_suggestion_action(&mut self, action: CheckpointSuggestionAction) -> Option<SidebarAction> {
-        match action {
-            CheckpointSuggestionAction::CreateCheckpoint { conversation_id, suggestion } => {
-                Some(SidebarAction::CreateCheckpoint(conversation_id, suggestion.message_id, suggestion.suggested_title))
-            },
-            CheckpointSuggestionAction::DismissSuggestion { conversation_id: _conversation_id, message_id } => {
-                self.checkpoint_suggestions_ui.dismiss_suggestion(message_id);
-                None
-            },
-            CheckpointSuggestionAction::ShowDetails { suggestion } => {
-                // Since CheckpointSuggestion doesn't have conversation_id, we'll need to find it
-                // For now, use a placeholder - this would need to be passed differently
-                Some(SidebarAction::ShowCheckpointDetails(Uuid::new_v4(), suggestion.message_id))
-            },
-            CheckpointSuggestionAction::RefreshSuggestions { conversation_id: _ } => {
-                // Trigger refresh - this would be handled by the app
-                None
-            },
-            CheckpointSuggestionAction::JumpToMessage { conversation_id: _conversation_id, message_id: _message_id } => {
-                // Handle jumping to a specific message - this could be a new sidebar action or handled directly
-                // For now, we'll return None since this doesn't require a sidebar action
-                None
-            },
-        }
-    }
 
     /// Invalidate cached items
     pub fn invalidate_cache(&mut self) {
