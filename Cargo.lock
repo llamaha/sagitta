@@ -5360,6 +5360,7 @@ dependencies = [
  "chrono",
  "clap",
  "dashmap",
+ "dirs",
  "env_logger 0.10.2",
  "futures-util",
  "git-manager",

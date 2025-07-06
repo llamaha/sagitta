@@ -46,6 +46,7 @@ tower = { version = "0.4", features = ["full"] }
 tower-http = { version = "0.5.2", features = ["trace"] }
 walkdir = "2.4"
 similar = "2.4"
+dirs = "5.0"
 
 # Add other necessary dependencies here
 

@@ -1157,16 +1157,40 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                         
                         // Change working directory in background
                         tokio::spawn(async move {
-                            let _repo_manager_lock = repo_manager.lock().await;
-                            // Convert repo name to path (stub doesn't use it anyway)
-                            let repo_path = std::path::Path::new(&repo_name_clone);
-                            match working_dir_manager_clone.set_repository_context(Some(repo_path)) {
-                                Ok(()) => {
-                                    log::info!("Changed working directory to repository '{repo_name_clone}'");
+                            let repo_manager_lock = repo_manager.lock().await;
+                            // Get the actual repository path from the repository configuration
+                            if let Ok(repositories) = repo_manager_lock.list_repositories().await {
+                                if let Some(repo_config) = repositories.iter().find(|r| r.name == repo_name_clone) {
+                                    let repo_path = std::path::Path::new(&repo_config.local_path);
+                                    match working_dir_manager_clone.set_repository_context(Some(repo_path)) {
+                                        Ok(()) => {
+                                            log::info!("Changed working directory to repository '{repo_name_clone}' at path '{}'", repo_config.local_path);
+                                            
+                                            // Write the current repository path to state file for MCP server
+                                            let mut state_path = dirs::config_dir().unwrap_or_default();
+                                            state_path.push("sagitta-code");
+                                            
+                                            // Ensure directory exists
+                                            if let Err(e) = tokio::fs::create_dir_all(&state_path).await {
+                                                log::warn!("Failed to create state directory: {e}");
+                                            } else {
+                                                state_path.push("current_repository.txt");
+                                                if let Err(e) = tokio::fs::write(&state_path, &repo_config.local_path).await {
+                                                    log::warn!("Failed to write repository state file: {e}");
+                                                } else {
+                                                    log::debug!("Wrote current repository path to state file: {}", state_path.display());
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            log::error!("Failed to change working directory to repository '{repo_name_clone}': {e}");
+                                        }
+                                    }
+                                } else {
+                                    log::error!("Repository '{repo_name_clone}' not found in repository list");
                                 }
-                                Err(e) => {
-                                    log::error!("Failed to change working directory to repository '{repo_name_clone}': {e}");
-                                }
+                            } else {
+                                log::error!("Failed to get repository list when changing working directory");
                             }
                         });
                     } else {
@@ -1178,6 +1202,19 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                             match working_dir_manager_clone.change_directory(&base_dir) {
                                 Ok(()) => {
                                     log::info!("Reset working directory to base");
+                                    
+                                    // Clear the repository state file
+                                    let mut state_path = dirs::config_dir().unwrap_or_default();
+                                    state_path.push("sagitta-code");
+                                    state_path.push("current_repository.txt");
+                                    
+                                    if let Err(e) = tokio::fs::remove_file(&state_path).await {
+                                        if e.kind() != std::io::ErrorKind::NotFound {
+                                            log::warn!("Failed to remove repository state file: {e}");
+                                        }
+                                    } else {
+                                        log::debug!("Cleared repository state file");
+                                    }
                                 }
                                 Err(e) => {
                                     log::error!("Failed to reset working directory to base: {e}");
