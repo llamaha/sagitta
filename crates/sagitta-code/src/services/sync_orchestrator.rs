@@ -300,25 +300,40 @@ impl SyncOrchestrator {
             status.sync_error_type = None;
         }
 
+        // Check if this is a local-only repository before syncing
+        let is_local_only = !Self::check_repository_has_remote(&repo_path).await;
+        
         // Perform the sync using RepositoryManager
         let sync_result = match Self::perform_repository_sync_static(&repo_path, repository_manager).await {
-            Ok(files_processed) => {
+            Ok(attempt_result) => {
                 let duration = start_time.elapsed();
+                
+                // Determine final sync state based on repository type
+                let final_sync_state = if is_local_only {
+                    SyncState::LocalOnly
+                } else {
+                    SyncState::FullySynced
+                };
+                
                 info!(
-                    "Successfully synced repository {} in {:?} ({} files processed)",
+                    "Successfully synced repository {} in {:?} ({} files processed, state: {:?})",
                     repo_path.display(),
                     duration,
-                    files_processed
+                    attempt_result.files_processed,
+                    final_sync_state
                 );
 
                 // Update sync status
                 {
                     let mut statuses = sync_statuses.write().await;
                     if let Some(status) = statuses.get_mut(&repo_path) {
+                        status.sync_state = final_sync_state;
                         status.last_sync = Some(Instant::now());
                         status.is_syncing = false;
                         status.is_out_of_sync = false;
                         status.last_sync_error = None;
+                        status.sync_error_type = None;
+                        status.is_local_only = is_local_only;
                         // TODO: Get actual commit hash from git
                         status.last_synced_commit = None;
                     }
@@ -329,20 +344,54 @@ impl SyncOrchestrator {
                     success: true,
                     error_message: None,
                     duration,
-                    files_processed: Some(files_processed),
+                    files_processed: Some(attempt_result.files_processed),
                     timestamp: Instant::now(),
                 }
             }
             Err(e) => {
                 let duration = start_time.elapsed();
-                error!("Failed to sync repository {}: {}", repo_path.display(), e);
+                let error_str = e.to_string();
+                
+                // Determine error type from error message
+                let error_type = if error_str.contains("authentication required") || error_str.contains("Auth") {
+                    SyncErrorType::AuthenticationFailed
+                } else if error_str.contains("Could not find remote") {
+                    SyncErrorType::NoRemote
+                } else if error_str.contains("network") || error_str.contains("connection") {
+                    SyncErrorType::NetworkError
+                } else {
+                    SyncErrorType::Other(error_str.clone())
+                };
+                
+                // Determine sync state based on error type
+                let sync_state = match &error_type {
+                    SyncErrorType::NoRemote => {
+                        // This should have been caught earlier, but handle it anyway
+                        if is_local_only {
+                            SyncState::LocalOnly
+                        } else {
+                            SyncState::Failed
+                        }
+                    }
+                    SyncErrorType::AuthenticationFailed | SyncErrorType::NetworkError => {
+                        // For auth/network errors, we might have successfully indexed locally
+                        // Check if we at least have local data
+                        SyncState::LocalIndexedRemoteFailed
+                    }
+                    _ => SyncState::Failed,
+                };
+                
+                error!("Failed to sync repository {}: {} (type: {:?})", repo_path.display(), e, error_type);
 
                 // Update sync status
                 {
                     let mut statuses = sync_statuses.write().await;
                     if let Some(status) = statuses.get_mut(&repo_path) {
+                        status.sync_state = sync_state;
                         status.is_syncing = false;
                         status.last_sync_error = Some(e.to_string());
+                        status.sync_error_type = Some(error_type);
+                        status.is_local_only = is_local_only;
                     }
                 }
 
@@ -470,11 +519,14 @@ impl SyncOrchestrator {
                 let mut statuses = sync_statuses.write().await;
                 let status = statuses.entry(change_event.repo_path.clone()).or_insert_with(|| {
                     RepositorySyncStatus {
+                        sync_state: SyncState::NotSynced,
                         last_sync: None,
                         last_synced_commit: None,
                         is_syncing: false,
                         is_out_of_sync: false,
                         last_sync_error: None,
+                        sync_error_type: None,
+                        is_local_only: false,
                     }
                 });
                 status.is_out_of_sync = true;
