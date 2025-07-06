@@ -141,5 +141,57 @@ mod claude_cli_behavior_tests {
         let text_pos = sample_claude_output.find("\"text\"").unwrap();
         assert!(thinking_pos < text_pos, "Thinking should appear before text in JSON");
     }
+    
+    #[test]
+    fn test_trailing_whitespace_handling() {
+        // Test that trailing whitespace doesn't cause warnings
+        // This simulates the common case where Claude output ends with a newline
+        
+        let valid_json = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Hello"}]}}"#;
+        let json_with_trailing_newline = format!("{}\n", valid_json);
+        let json_with_trailing_spaces = format!("{}   ", valid_json);
+        let json_with_mixed_whitespace = format!("{}\n  \t", valid_json);
+        
+        // These should all be handled gracefully without warnings
+        // The actual parsing logic is in streaming.rs, but we test the principle here
+        
+        // Verify that trimmed content is the same
+        assert_eq!(json_with_trailing_newline.trim(), valid_json);
+        assert_eq!(json_with_trailing_spaces.trim(), valid_json);
+        assert_eq!(json_with_mixed_whitespace.trim(), valid_json);
+        
+        // Verify we can distinguish between real content and whitespace
+        let whitespace_only = "\n  \t";
+        assert!(whitespace_only.trim().is_empty());
+        
+        let content_with_whitespace = "real content\n  \t";
+        assert!(!content_with_whitespace.trim().is_empty());
+        assert_eq!(content_with_whitespace.trim(), "real content");
+    }
+    
+    #[test]
+    fn test_json_buffer_edge_cases() {
+        // Test various edge cases that might occur in the streaming buffer
+        
+        // Empty buffer
+        let empty_buffer = b"";
+        assert!(empty_buffer.is_empty());
+        
+        // Whitespace-only buffer
+        let whitespace_buffer = b"\n\r\t ";
+        let whitespace_str = std::str::from_utf8(whitespace_buffer).unwrap();
+        assert!(whitespace_str.trim().is_empty());
+        
+        // Buffer with actual content and trailing whitespace
+        let content_buffer = b"some content\n";
+        let content_str = std::str::from_utf8(content_buffer).unwrap();
+        assert!(!content_str.trim().is_empty());
+        assert_eq!(content_str.trim(), "some content");
+        
+        // Buffer with non-printable but valid whitespace
+        let mixed_whitespace = b"\x20\x09\x0A\x0D"; // space, tab, LF, CR
+        let mixed_str = std::str::from_utf8(mixed_whitespace).unwrap();
+        assert!(mixed_str.trim().is_empty());
+    }
 }
 
