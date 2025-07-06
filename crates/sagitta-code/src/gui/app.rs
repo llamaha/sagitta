@@ -627,7 +627,7 @@ impl SagittaCodeApp {
         self.git_controls.set_sync_orchestrator(sync_orchestrator.clone());
         
         // Start git controls command handler
-        let mut command_rx = self.git_controls.start_command_handler();
+        let command_rx = self.git_controls.start_command_handler();
         let mut git_controls_clone = GitControls::new(repo_manager.clone());
         git_controls_clone.set_sync_orchestrator(sync_orchestrator.clone());
         
@@ -687,25 +687,33 @@ impl SagittaCodeApp {
             
             log::info!("Auto-sync services initialized and started");
             
-            // Add existing repositories to file watcher and sync them
-            let repo_manager_guard = repo_manager.lock().await;
-            if let Ok(repositories) = repo_manager_guard.list_repositories().await {
-                log::info!("Adding {} existing repositories to file watcher", repositories.len());
+            // Add existing repositories to file watcher and sync them in the background
+            let repo_manager_clone = repo_manager.clone();
+            let sync_orchestrator_clone = sync_orchestrator.clone();
+            tokio::spawn(async move {
+                log::info!("Starting background repository initialization");
                 
-                for repo in repositories {
-                    let repo_path = std::path::PathBuf::from(&repo.local_path);
-                    if let Err(e) = sync_orchestrator.add_repository(&repo_path).await {
-                        log::error!("Failed to add existing repository {} to file watcher: {}", repo.name, e);
-                    } else {
-                        log::info!("Added existing repository {} to file watcher and sync queue", repo.name);
+                let repo_manager_guard = repo_manager_clone.lock().await;
+                if let Ok(repositories) = repo_manager_guard.list_repositories().await {
+                    log::info!("Adding {} existing repositories to file watcher", repositories.len());
+                    
+                    for repo in repositories {
+                        let repo_path = std::path::PathBuf::from(&repo.local_path);
+                        if let Err(e) = sync_orchestrator_clone.add_repository(&repo_path).await {
+                            log::error!("Failed to add existing repository {} to file watcher: {}", repo.name, e);
+                        } else {
+                            log::info!("Added existing repository {} to file watcher and sync queue", repo.name);
+                        }
+                    }
+                    
+                    // Also ensure all out-of-sync repositories get synced
+                    if let Err(e) = sync_orchestrator_clone.sync_out_of_sync_repositories().await {
+                        log::error!("Failed to queue out-of-sync repositories: {}", e);
                     }
                 }
                 
-                // Also ensure all out-of-sync repositories get synced
-                if let Err(e) = sync_orchestrator.sync_out_of_sync_repositories().await {
-                    log::error!("Failed to queue out-of-sync repositories: {}", e);
-                }
-            }
+                log::info!("Background repository initialization complete");
+            });
         } else {
             log::info!("File watcher and/or auto-commit disabled, skipping initialization");
         }

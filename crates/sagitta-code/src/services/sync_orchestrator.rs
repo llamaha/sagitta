@@ -80,6 +80,12 @@ pub enum SyncErrorType {
     Other(String),
 }
 
+/// Result of repository sync with detailed error information
+struct SyncAttemptResult {
+    files_processed: usize,
+    error_type: Option<SyncErrorType>,
+}
+
 /// Orchestrates file watching, auto-commits, and repository syncing
 pub struct SyncOrchestrator {
     config: AutoSyncConfig,
@@ -511,12 +517,6 @@ impl SyncOrchestrator {
             files_processed: None,
             timestamp: Instant::now(),
         })
-    }
-
-    /// Result of repository sync with detailed error information
-    struct SyncAttemptResult {
-        files_processed: usize,
-        error_type: Option<SyncErrorType>,
     }
 
     /// Perform repository sync using RepositoryManager with enhanced error detection

@@ -335,7 +335,7 @@ fn render_manual_ref_input(
     state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>,
     repo_manager: Arc<Mutex<RepositoryManager>>,
     repo_name: &str,
-    theme: crate::gui::theme::AppTheme,
+    _theme: crate::gui::theme::AppTheme,
 ) {
     ui.label(RichText::new("Manual Git Reference:").strong());
     ui.label("Enter any valid Git reference (commit hash, remote branch, etc.):");

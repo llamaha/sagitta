@@ -427,7 +427,7 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
 
 /// Handle sync notification
 fn handle_sync_notification(app: &mut SagittaCodeApp, repository: String, message: String, notification_type: SyncNotificationType) {
-    use egui_notify::{Anchor, ToastLevel};
+    use egui_notify::ToastLevel;
     
     let level = match notification_type {
         SyncNotificationType::Success => ToastLevel::Success,
@@ -439,12 +439,11 @@ fn handle_sync_notification(app: &mut SagittaCodeApp, repository: String, messag
     // Format the notification with repository name
     let formatted_message = format!("{}: {}", repository, message);
     
-    // Show the toast notification
+    // Create toast with correct API
     app.state.toasts
-        .add(egui_notify::Toast::new(formatted_message)
-            .set_level(level)
-            .set_duration(Some(std::time::Duration::from_secs(5)))
-            .set_closable(true));
+        .basic(&formatted_message)
+        .level(level)
+        .duration(Some(std::time::Duration::from_secs(5)));
 }
 
 /// Create a chat message from an agent message

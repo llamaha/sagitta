@@ -9,6 +9,7 @@ use tokio::sync::{Mutex, mpsc};
 use crate::gui::repository::manager::RepositoryManager;
 use crate::gui::theme::AppTheme;
 use crate::services::{SyncOrchestrator, RepositorySyncStatus};
+use crate::services::sync_orchestrator::{SyncState, SyncErrorType};
 
 /// Represents the type of git reference
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -170,7 +171,7 @@ impl GitControls {
         self.state.last_error = None;
 
         let result = {
-            let mut repo_manager = self.repository_manager.lock().await;
+            let repo_manager = self.repository_manager.lock().await;
             repo_manager.switch_to_ref(&repo_name, &git_ref.name, true).await
         };
 
@@ -203,7 +204,7 @@ impl GitControls {
     }
 
     /// Create a new branch
-    pub async fn create_branch(&mut self, branch_name: &str, start_point: Option<&str>) -> Result<()> {
+    pub async fn create_branch(&mut self, branch_name: &str, _start_point: Option<&str>) -> Result<()> {
         let repo_name = match &self.state.current_repository {
             Some(name) => name.clone(),
             None => return Err(anyhow::anyhow!("No repository selected")),
@@ -247,7 +248,7 @@ impl GitControls {
             let all_statuses = sync_orchestrator.get_all_sync_statuses().await;
             
             // Get repository manager to map paths to names
-            let repo_manager = self.repository_manager.lock().await;
+            let _repo_manager = self.repository_manager.lock().await;
             let mut name_to_status = HashMap::new();
             
             // Try to map each path to a repository name
@@ -329,8 +330,6 @@ impl GitControls {
 
     /// Render sync status indicator
     fn render_sync_status_indicator(&self, ui: &mut Ui, sync_status: &RepositorySyncStatus, theme: AppTheme) {
-        use crate::services::SyncState;
-        
         let (icon, color, tooltip) = match sync_status.sync_state {
             SyncState::FullySynced => {
                 ("✅", theme.success_color(), "Fully synced with remote repository")
@@ -340,10 +339,10 @@ impl GitControls {
             }
             SyncState::LocalIndexedRemoteFailed => {
                 let error_detail = match &sync_status.sync_error_type {
-                    Some(crate::services::SyncErrorType::AuthenticationFailed) => {
+                    Some(SyncErrorType::AuthenticationFailed) => {
                         "Authentication failed - check your SSH keys or credentials"
                     }
-                    Some(crate::services::SyncErrorType::NetworkError) => {
+                    Some(SyncErrorType::NetworkError) => {
                         "Network error - check your internet connection"
                     }
                     _ => "Remote sync failed, but local indexing succeeded"
@@ -369,7 +368,7 @@ impl GitControls {
         let mut response = ui.colored_label(color, icon);
         
         // Show detailed tooltip
-        response = response.on_hover_ui(|ui| {
+        let _ = response.on_hover_ui(|ui| {
             ui.label(tooltip);
             
             if let Some(error) = &sync_status.last_sync_error {
