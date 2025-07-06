@@ -84,6 +84,7 @@ impl GitHistoryModal {
     fn render_content(&mut self, ui: &mut Ui, theme: AppTheme) {
         // Header with controls
         ui.horizontal(|ui| {
+            ui.visuals_mut().override_text_color = Some(theme.text_color());
             ui.heading("Repository History");
             
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -138,11 +139,17 @@ impl GitHistoryModal {
             return;
         }
 
+        // Apply theme background color
+        ui.visuals_mut().widgets.noninteractive.bg_fill = theme.panel_background();
+        ui.visuals_mut().widgets.inactive.bg_fill = theme.input_background();
+        ui.visuals_mut().widgets.active.bg_fill = theme.input_background();
+        
         // Split view: graph on left, details on right
         ui.columns(2, |columns| {
             // Left column: Commit graph
             columns[0].group(|ui| {
-                ui.label(egui::RichText::new("Commit Graph").strong());
+                ui.visuals_mut().widgets.noninteractive.bg_fill = theme.input_background();
+                ui.label(egui::RichText::new("Commit Graph").strong().color(theme.text_color()));
                 ui.separator();
                 
                 egui::ScrollArea::both()
@@ -154,8 +161,9 @@ impl GitHistoryModal {
 
             // Right column: Commit details
             columns[1].group(|ui| {
+                ui.visuals_mut().widgets.noninteractive.bg_fill = theme.input_background();
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Commit Details").strong());
+                    ui.label(egui::RichText::new("Commit Details").strong().color(theme.text_color()));
                     
                     if self.state.selected_commit.is_some() {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -184,11 +192,15 @@ impl GitHistoryModal {
     fn render_commit_details(&mut self, ui: &mut Ui, commit: &CommitInfo, theme: AppTheme) {
         egui::ScrollArea::vertical()
             .auto_shrink([false; 2])
+            .drag_to_scroll(false)
             .show(ui, |ui| {
+                // Apply theme colors
+                ui.visuals_mut().override_text_color = Some(theme.text_color());
+                
                 // Commit ID
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Commit:").strong());
-                    ui.monospace(&commit.short_id);
+                    ui.label(egui::RichText::new("Commit:").strong().color(theme.text_color()));
+                    ui.monospace(egui::RichText::new(&commit.short_id).color(theme.accent_color()));
                     if ui.button("📋").on_hover_text("Copy full commit ID").clicked() {
                         ui.ctx().copy_text(commit.id.clone());
                     }
@@ -196,20 +208,20 @@ impl GitHistoryModal {
 
                 // Author
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Author:").strong());
-                    ui.label(format!("{} <{}>", commit.author, commit.email));
+                    ui.label(egui::RichText::new("Author:").strong().color(theme.text_color()));
+                    ui.label(egui::RichText::new(format!("{} <{}>", commit.author, commit.email)).color(theme.text_color()));
                 });
 
                 // Date
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Date:").strong());
-                    ui.label(commit.timestamp.format("%Y-%m-%d %H:%M:%S UTC").to_string());
+                    ui.label(egui::RichText::new("Date:").strong().color(theme.text_color()));
+                    ui.label(egui::RichText::new(commit.timestamp.format("%Y-%m-%d %H:%M:%S UTC").to_string()).color(theme.text_color()));
                 });
 
                 // Branches
                 if !commit.branch_refs.is_empty() {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Branches:").strong());
+                        ui.label(egui::RichText::new("Branches:").strong().color(theme.text_color()));
                         for branch in &commit.branch_refs {
                             ui.label(egui::RichText::new(branch).color(theme.accent_color()));
                         }
@@ -219,9 +231,9 @@ impl GitHistoryModal {
                 ui.separator();
 
                 // Message
-                ui.label(egui::RichText::new("Message:").strong());
+                ui.label(egui::RichText::new("Message:").strong().color(theme.text_color()));
                 ui.add_space(4.0);
-                ui.label(&commit.message);
+                ui.label(egui::RichText::new(&commit.message).color(theme.text_color()));
 
                 ui.add_space(16.0);
 
@@ -243,6 +255,7 @@ impl GitHistoryModal {
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
+                ui.visuals_mut().override_text_color = Some(theme.text_color());
                 ui.label("⚠️ Warning: This will reset your repository to the selected commit.");
                 ui.label("All changes after this commit will be lost!");
                 ui.add_space(8.0);

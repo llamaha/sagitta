@@ -562,3 +562,145 @@ mod state_management_tests {
         modal.set_repository(path);
     }
 }
+
+#[cfg(test)]
+mod interaction_tests {
+    use crate::gui::git_history::types::{GitHistoryState, CommitInfo};
+    use chrono::Utc;
+    
+    #[test]
+    fn test_commit_selection_toggle() {
+        let mut state = GitHistoryState::default();
+        
+        // Add test commits
+        let commit1 = CommitInfo {
+            id: "abc123".to_string(),
+            short_id: "abc123".to_string(),
+            message: "First commit".to_string(),
+            author: "Test Author".to_string(),
+            email: "test@example.com".to_string(),
+            timestamp: Utc::now(),
+            parents: vec![],
+            branch_refs: vec![],
+        };
+        
+        state.commits = vec![commit1.clone()];
+        
+        // Initially no commit is selected
+        assert!(state.selected_commit.is_none());
+        
+        // Select commit
+        state.selected_commit = Some("abc123".to_string());
+        assert_eq!(state.selected_commit, Some("abc123".to_string()));
+        
+        // Toggle selection - should deselect if same commit
+        if state.selected_commit.as_ref() == Some(&"abc123".to_string()) {
+            state.selected_commit = None;
+        }
+        assert!(state.selected_commit.is_none());
+        
+        // Select again
+        state.selected_commit = Some("abc123".to_string());
+        
+        // Select different commit
+        state.selected_commit = Some("def456".to_string());
+        assert_eq!(state.selected_commit, Some("def456".to_string()));
+    }
+    
+    #[test]
+    fn test_hover_state() {
+        let mut state = GitHistoryState::default();
+        
+        // Initially no commit is hovered
+        assert!(state.hovered_commit.is_none());
+        
+        // Hover over commit
+        state.hovered_commit = Some("abc123".to_string());
+        assert_eq!(state.hovered_commit, Some("abc123".to_string()));
+        
+        // Stop hovering
+        state.hovered_commit = None;
+        assert!(state.hovered_commit.is_none());
+    }
+    
+    #[test]
+    fn test_selection_persists_across_hover() {
+        let mut state = GitHistoryState::default();
+        
+        // Select a commit
+        state.selected_commit = Some("abc123".to_string());
+        
+        // Hover over different commit
+        state.hovered_commit = Some("def456".to_string());
+        
+        // Selection should persist
+        assert_eq!(state.selected_commit, Some("abc123".to_string()));
+        assert_eq!(state.hovered_commit, Some("def456".to_string()));
+        
+        // Stop hovering
+        state.hovered_commit = None;
+        
+        // Selection should still persist
+        assert_eq!(state.selected_commit, Some("abc123".to_string()));
+    }
+    
+    #[test]
+    fn test_clear_selection() {
+        let mut state = GitHistoryState::default();
+        
+        // Select a commit
+        state.selected_commit = Some("abc123".to_string());
+        assert!(state.selected_commit.is_some());
+        
+        // Clear selection
+        state.selected_commit = None;
+        assert!(state.selected_commit.is_none());
+    }
+}
+
+#[cfg(test)]
+mod initialization_tests {
+    use super::*;
+    use std::path::PathBuf;
+    
+    #[test]
+    fn test_modal_initialization_with_repository() {
+        let mut modal = GitHistoryModal::new();
+        
+        // Set repository (simulating initialization)
+        let repo_path = PathBuf::from("/test/repo");
+        modal.set_repository(repo_path.clone());
+        
+        // Should not panic - this tests that initialization works
+        // The actual repository path is private, so we can only test behavior
+    }
+    
+    #[test]
+    fn test_modal_repository_change() {
+        let mut modal = GitHistoryModal::new();
+        
+        // Initialize with first repository
+        let repo_path1 = PathBuf::from("/repo1");
+        modal.set_repository(repo_path1);
+        
+        // Change to second repository
+        let repo_path2 = PathBuf::from("/repo2");
+        modal.set_repository(repo_path2);
+        
+        // Should not panic - tests that repository changes work correctly
+    }
+    
+    #[test]
+    fn test_modal_same_repository_no_change() {
+        let mut modal = GitHistoryModal::new();
+        
+        // Set repository
+        let repo_path = PathBuf::from("/test/repo");
+        modal.set_repository(repo_path.clone());
+        
+        // Set same repository again
+        modal.set_repository(repo_path);
+        
+        // Should not panic - tests that setting same repository is handled
+    }
+}

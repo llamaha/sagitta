@@ -72,9 +72,13 @@ pub fn render_commit_graph(ui: &mut Ui, state: &mut GitHistoryState, theme: AppT
             state.hovered_commit = None;
         }
         
-        // Check for click
+        // Check for click - toggle selection if clicking on already selected commit
         if is_hovered && response.clicked() {
-            state.selected_commit = Some(commit.id.clone());
+            if state.selected_commit.as_ref() == Some(&commit.id) {
+                state.selected_commit = None;
+            } else {
+                state.selected_commit = Some(commit.id.clone());
+            }
         }
         
         // Draw node

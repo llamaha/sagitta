@@ -4,6 +4,7 @@ use anyhow::{Result, Context};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use super::SagittaCodeApp;
+use super::events::AppEvent;
 use super::super::repository::manager::RepositoryManager;
 use super::super::repository::RepoPanel;
 use super::super::theme::AppTheme;
@@ -279,6 +280,26 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     if let Some(saved_repo_context) = saved_repo_context {
         app.state.set_repository_context(Some(saved_repo_context.clone()));
         log::info!("Restored repository context from config: {saved_repo_context}");
+        
+        // Initialize git history modal with the restored repository
+        let repo_manager = app.repo_panel.get_repo_manager();
+        let repo_name_clone = saved_repo_context.clone();
+        let app_event_sender = app.app_event_sender.clone();
+        
+        tokio::spawn(async move {
+            let repo_manager_guard = repo_manager.lock().await;
+            if let Ok(repositories) = repo_manager_guard.list_repositories().await {
+                if let Some(repo_config) = repositories.iter().find(|r| r.name == repo_name_clone) {
+                    let local_path = repo_config.local_path.clone();
+                    // Send event to initialize git history modal
+                    if let Err(e) = app_event_sender.send(AppEvent::UpdateGitHistoryPath(local_path)) {
+                        log::error!("Failed to send UpdateGitHistoryPath event during initialization: {e}");
+                    } else {
+                        log::debug!("Initialized git history modal with repository: {repo_name_clone}");
+                    }
+                }
+            }
+        });
         
         // Working directory context handling removed
     }
