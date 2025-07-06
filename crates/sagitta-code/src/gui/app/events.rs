@@ -355,7 +355,20 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                     app.state.current_response_id = None;
                 }
                 
-                // Don't update title after every response - wait for conversation completion
+                // Notify auto title updater after assistant response completes
+                if let (Some(conversation_id), Some(sender)) = (app.state.current_conversation_id, &app.auto_title_sender) {
+                    // Get current message count after assistant response
+                    let message_count = app.chat_manager.get_all_messages().len();
+                    
+                    crate::services::auto_title_updater::notify_conversation_updated(
+                        sender,
+                        conversation_id,
+                        message_count,
+                    );
+                    
+                    log::debug!("Notified auto title updater after response complete for conversation {} with {} messages", 
+                        conversation_id, message_count);
+                }
             }
             AppEvent::RefreshConversationList => {
                 log::info!("SagittaCodeApp: Received RefreshConversationList event. Forcing refresh.");
