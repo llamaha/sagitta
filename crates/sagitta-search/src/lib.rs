@@ -1190,25 +1190,28 @@ async fn get_sync_status(repo_config: &RepositoryConfig, git_status: Option<&Git
     let mut branches_needing_sync = Vec::new();
     
     // Determine overall sync state
-    let state = if repo_config.last_synced_commits.is_empty() {
-        SyncState::NeverSynced
-    } else if let Some(git_status) = git_status {
-        // Check if current commit matches last synced commit for active branch
-        let active_branch = repo_config.active_branch.as_ref()
-            .unwrap_or(&repo_config.default_branch);
-        
-        if let Some(last_synced) = repo_config.last_synced_commits.get(active_branch) {
-            if last_synced == &git_status.current_commit {
-                SyncState::UpToDate
+    let state = if let Some(git_status) = git_status {
+        if repo_config.last_synced_commits.is_empty() {
+            SyncState::NeverSynced
+        } else {
+            // Check if current commit matches last synced commit for active branch
+            let active_branch = repo_config.active_branch.as_ref()
+                .unwrap_or(&repo_config.default_branch);
+            
+            if let Some(last_synced) = repo_config.last_synced_commits.get(active_branch) {
+                if last_synced == &git_status.current_commit {
+                    SyncState::UpToDate
+                } else {
+                    branches_needing_sync.push(active_branch.clone());
+                    SyncState::NeedsSync
+                }
             } else {
                 branches_needing_sync.push(active_branch.clone());
                 SyncState::NeedsSync
             }
-        } else {
-            branches_needing_sync.push(active_branch.clone());
-            SyncState::NeedsSync
         }
     } else {
+        // Can't determine git status (e.g., no commits, corrupted repo)
         SyncState::Unknown
     };
     
