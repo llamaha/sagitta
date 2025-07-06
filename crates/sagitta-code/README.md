@@ -42,10 +42,12 @@ Installation is currently a manual process, with future improvements to the inst
 1. **Clone and build**:
    ```bash
    git clone https://gitlab.com/amulvany/sagitta.git
-   cd sagitta-search/crates/sagitta-code
-   # Build with Cuda
-   cargo build --release --all --features cuda
+   cd sagitta
+   # Build with GPU acceleration (see main README for all execution provider options)
+   cargo build --release --features cuda
    ```
+   
+   **For other execution providers** (CoreML, ROCm, DirectML), see the [Execution Provider Support](../../README.md#5b-execution-provider-support) section in the main README.
 
 2. **Start Qdrant**:
    ```bash

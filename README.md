@@ -77,7 +77,17 @@ The recommended way to build is to compile the entire workspace, which includes 
 
 **For GPU acceleration (recommended for production):**
 ```bash
+# NVIDIA CUDA (cross-platform)
 cargo build --release --workspace --features cuda
+
+# Apple CoreML (macOS only)
+cargo build --release --workspace --features coreml
+
+# AMD ROCm (Linux only)
+cargo build --release --workspace --features rocm
+
+# DirectML (Windows only)
+cargo build --release --workspace --features directml
 ```
 
 **For CPU-only builds (development/testing):**
@@ -211,17 +221,58 @@ For CPU-only usage, especially on systems without dedicated GPUs:
 
 ### 5b. Execution Provider Support
 
-`sagitta-embed` currently supports the following execution providers:
+`sagitta-embed` supports multiple execution providers for optimal performance across different hardware platforms:
 
-- **CPU** - Standard CPU execution (always available)
-- **CUDA** - GPU acceleration for NVIDIA graphics cards (when built with `--features cuda`)
+#### Available Execution Providers
 
-The embedding engine automatically selects the best available provider based on build features and hardware availability. CUDA will be used automatically if:
-1. The application was built with `--features cuda`
-2. Compatible NVIDIA hardware and drivers are available
-3. ONNX Runtime CUDA libraries are properly installed
+- **CPU** - Standard CPU execution (always available as fallback)
+- **CUDA** - GPU acceleration for NVIDIA graphics cards
+- **CoreML** - Apple Neural Engine acceleration (macOS only)
+- **ROCm** - GPU acceleration for AMD graphics cards (Linux only)  
+- **DirectML** - GPU acceleration on Windows via DirectML
 
-**Future Provider Support**: Additional execution providers (DirectML, CoreML, TensorRT, etc.) are planned but not yet implemented. The current focus is on reliable CPU and CUDA support.
+#### Build Commands for Different Execution Providers
+
+```bash
+# CPU only (default)
+cargo build --all --release
+
+# NVIDIA CUDA GPU acceleration
+cargo build --all --release --features cuda
+
+# Apple CoreML acceleration (macOS only)
+cargo build --all --release --features coreml
+
+# AMD ROCm GPU acceleration (Linux only)
+cargo build --all --release --features rocm
+
+# DirectML GPU acceleration (Windows only)
+cargo build --all --release --features directml
+```
+
+#### Automatic Provider Selection
+
+The embedding engine automatically selects the best available provider based on:
+1. **Build features** - Only providers enabled at compile time are available
+2. **Platform compatibility** - Provider must support the current OS
+3. **Hardware availability** - Required hardware and drivers must be present
+4. **Runtime detection** - ONNX Runtime checks for actual provider availability
+
+**Selection Priority (Auto mode):**
+1. CUDA (if available)
+2. CoreML (if on macOS)
+3. ROCm (if on Linux with AMD GPU)
+4. DirectML (if on Windows)
+5. CPU (always available as fallback)
+
+#### Platform-Specific Notes
+
+- **CoreML**: Only works on macOS with compatible Apple Silicon or Intel Macs with ANE
+- **ROCm**: Primarily supported on Linux with AMD RDNA/CDNA GPUs  
+- **DirectML**: Windows-only, works with most modern GPUs (NVIDIA, AMD, Intel)
+- **CUDA**: Cross-platform but requires NVIDIA GPUs and CUDA toolkit installation
+
+The build system uses feature flags to enable execution providers at compile time. This approach ensures compatibility across platforms while enabling optimal performance when the right hardware is available.
 
 ### 6. Using Different Embedding Models
 

@@ -4,6 +4,20 @@ This crate implements a server adhering to the Model Context Protocol (MCP), pro
 
 Refer to the main [root README.md](../../README.md) for prerequisites and setup.
 
+## Building with GPU Acceleration
+
+For optimal performance, build `sagitta-mcp` with GPU acceleration:
+
+```bash
+# NVIDIA CUDA
+cargo build --release --package sagitta-mcp --features cuda
+
+# CPU-only (fallback)
+cargo build --release --package sagitta-mcp
+```
+
+**For other execution providers** (CoreML, ROCm, DirectML), see the [Execution Provider Support](../../README.md#5b-execution-provider-support) section in the main README.
+
 ## Configuration
 
 The server loads its configuration (Qdrant URL, repository paths, model settings) from the central configuration file, typically located at `~/.config/sagitta/config.toml`. Ensure this file is correctly configured before running the MCP server.

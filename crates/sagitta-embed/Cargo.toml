@@ -12,6 +12,9 @@ categories = ["science", "text-processing"]
 default = ["onnx"]
 onnx = ["ort"]
 cuda = ["ort/cuda"]
+coreml = ["ort/coreml"]
+rocm = ["ort/rocm"]
+directml = ["ort/directml"]
 
 [dependencies]
 # Core dependencies
