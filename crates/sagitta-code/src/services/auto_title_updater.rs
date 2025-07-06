@@ -7,6 +7,7 @@ use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
 
 use crate::agent::conversation::types::Conversation;
+use crate::gui::app::conversation_title_updater::ConversationTitleUpdater;
 
 /// Event triggered when a conversation should be checked for title update
 #[derive(Debug, Clone)]

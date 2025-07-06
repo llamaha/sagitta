@@ -41,7 +41,7 @@ pub mod tool_formatting;
 pub mod state;
 pub mod rendering;
 mod initialization;
-mod conversation_title_updater;
+pub mod conversation_title_updater;
 
 #[cfg(test)]
 mod tests;
