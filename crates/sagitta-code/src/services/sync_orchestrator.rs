@@ -284,15 +284,20 @@ impl SyncOrchestrator {
             let mut statuses = sync_statuses.write().await;
             let status = statuses.entry(repo_path.clone()).or_insert_with(|| {
                 RepositorySyncStatus {
+                    sync_state: SyncState::NotSynced,
                     last_sync: None,
                     last_synced_commit: None,
                     is_syncing: false,
                     is_out_of_sync: false,
                     last_sync_error: None,
+                    sync_error_type: None,
+                    is_local_only: false,
                 }
             });
             status.is_syncing = true;
+            status.sync_state = SyncState::Syncing;
             status.last_sync_error = None;
+            status.sync_error_type = None;
         }
 
         // Perform the sync using RepositoryManager
@@ -372,8 +377,14 @@ impl SyncOrchestrator {
         })
     }
 
-    /// Perform repository sync using RepositoryManager (static version)
-    async fn perform_repository_sync_static(repo_path: &Path, repository_manager: &Arc<Mutex<RepositoryManager>>) -> Result<usize> {
+    /// Result of repository sync with detailed error information
+    struct SyncAttemptResult {
+        files_processed: usize,
+        error_type: Option<SyncErrorType>,
+    }
+
+    /// Perform repository sync using RepositoryManager with enhanced error detection
+    async fn perform_repository_sync_static(repo_path: &Path, repository_manager: &Arc<Mutex<RepositoryManager>>) -> Result<SyncAttemptResult> {
         let mut repo_manager = repository_manager.lock().await;
 
         // Get repository name from path
@@ -382,16 +393,59 @@ impl SyncOrchestrator {
             .and_then(|name| name.to_str())
             .ok_or_else(|| anyhow::anyhow!("Invalid repository path"))?;
 
-        // Perform the sync using RepositoryManager
-        repo_manager
-            .sync_repository_with_options(repo_name, false) // false = not force sync
-            .await
-            .context("Failed to sync repository")?;
-
-        // Since RepositoryManager doesn't expose file count, return a default value
-        // In a more sophisticated implementation, we could hook into the progress reporter
-        // to get this information
-        Ok(0)
+        // Check if repository has a remote
+        let has_remote = Self::check_repository_has_remote(repo_path).await;
+        
+        if !has_remote {
+            // This is a local-only repository, perform local indexing only
+            info!("Repository {} is local-only (no remote), performing local indexing", repo_name);
+            
+            // Still attempt sync which will do local indexing
+            match repo_manager.sync_repository_with_options(repo_name, false).await {
+                Ok(_) => Ok(SyncAttemptResult {
+                    files_processed: 0,
+                    error_type: None,
+                }),
+                Err(e) => {
+                    // Even local indexing failed
+                    Err(e).context("Failed to index local repository")
+                }
+            }
+        } else {
+            // Repository has remote, attempt full sync
+            match repo_manager.sync_repository_with_options(repo_name, false).await {
+                Ok(_) => Ok(SyncAttemptResult {
+                    files_processed: 0,
+                    error_type: None,
+                }),
+                Err(e) => {
+                    let error_str = e.to_string();
+                    let error_type = if error_str.contains("authentication required") || error_str.contains("Auth") {
+                        Some(SyncErrorType::AuthenticationFailed)
+                    } else if error_str.contains("Could not find remote") {
+                        Some(SyncErrorType::NoRemote)
+                    } else if error_str.contains("network") || error_str.contains("connection") {
+                        Some(SyncErrorType::NetworkError)
+                    } else {
+                        Some(SyncErrorType::Other(error_str.clone()))
+                    };
+                    
+                    // Return error with type information
+                    Err(e).context(format!("Sync failed with type: {:?}", error_type))
+                }
+            }
+        }
+    }
+    
+    /// Check if a repository has a remote configured
+    async fn check_repository_has_remote(repo_path: &Path) -> bool {
+        match git2::Repository::open(repo_path) {
+            Ok(repo) => {
+                // Check if there's a remote named "origin"
+                repo.find_remote("origin").is_ok()
+            }
+            Err(_) => false,
+        }
     }
 
     /// Handle file changes from the file watcher
