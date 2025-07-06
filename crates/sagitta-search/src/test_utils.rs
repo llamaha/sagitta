@@ -249,8 +249,28 @@ mod enhanced_repository_tests {
         fs::write(repo_path.join("readme.md"), "# Test Repo\n").unwrap();
         fs::write(repo_path.join("config.json"), "{}").unwrap();
         
-        // Initialize as git repo
-        let _ = git2::Repository::init(&repo_path);
+        // Initialize as git repo and create initial commit
+        let repo = git2::Repository::init(&repo_path).unwrap();
+        
+        // Create an initial commit to avoid unborn branch
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_id = {
+            let mut index = repo.index().unwrap();
+            index.add_path(std::path::Path::new("test.rs")).unwrap();
+            index.add_path(std::path::Path::new("readme.md")).unwrap();
+            index.add_path(std::path::Path::new("config.json")).unwrap();
+            index.write().unwrap();
+            index.write_tree().unwrap()
+        };
+        let tree = repo.find_tree(tree_id).unwrap();
+        let commit_oid = repo.commit(
+            Some("HEAD"),
+            &sig,
+            &sig,
+            "Initial commit",
+            &tree,
+            &[],
+        ).unwrap();
         
         RepositoryConfig {
             name: name.to_string(),
