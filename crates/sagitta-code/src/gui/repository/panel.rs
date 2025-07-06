@@ -48,6 +48,7 @@ impl RepoPanel {
     pub fn refresh_repositories(&self) -> Result<()> {
         let state_clone = Arc::clone(&self.state);
         let repo_manager_clone = Arc::clone(&self.repo_manager);
+        let sync_orchestrator_clone = self.sync_orchestrator.clone();
 
         tokio::spawn(async move {
             log::debug!("RepoPanel: Starting background enhanced repository refresh...");
@@ -75,6 +76,40 @@ impl RepoPanel {
                     state_guard.use_enhanced_repos = true;
                     state_guard.is_loading_repos = false; // Reset loading flag
                     log::info!("RepoPanel: Successfully refreshed {} enhanced repositories.", state_guard.enhanced_repositories.len());
+                    
+                    // Update sync status from sync orchestrator if available
+                    if let Some(sync_orchestrator) = &sync_orchestrator_clone {
+                        let sync_statuses = sync_orchestrator.get_all_sync_statuses().await;
+                        
+                        // Update each repository's sync status
+                        for enhanced_repo in &mut state_guard.enhanced_repositories {
+                            // Try to find sync status by matching local path
+                            let repo_path = std::path::PathBuf::from(&enhanced_repo.local_path);
+                            
+                            if let Some(sync_status) = sync_statuses.get(&repo_path) {
+                                // Map SyncOrchestrator's SyncState to the GUI's SyncState
+                                use crate::services::sync_orchestrator::SyncState as OrchestratorSyncState;
+                                use super::types::SyncState as GuiSyncState;
+                                
+                                enhanced_repo.sync_status.state = match sync_status.sync_state {
+                                    OrchestratorSyncState::FullySynced => GuiSyncState::UpToDate,
+                                    OrchestratorSyncState::LocalOnly => GuiSyncState::LocalOnly,
+                                    OrchestratorSyncState::LocalIndexedRemoteFailed => GuiSyncState::LocalIndexedRemoteFailed,
+                                    OrchestratorSyncState::Syncing => GuiSyncState::Syncing,
+                                    OrchestratorSyncState::Failed => GuiSyncState::Failed,
+                                    OrchestratorSyncState::NotSynced => {
+                                        if sync_status.is_out_of_sync {
+                                            GuiSyncState::NeedsSync
+                                        } else {
+                                            GuiSyncState::NeverSynced
+                                        }
+                                    }
+                                };
+                                
+                                log::debug!("Updated sync status for {}: {:?}", enhanced_repo.name, enhanced_repo.sync_status.state);
+                            }
+                        }
+                    }
                     
                     match orphaned_result {
                         Ok(orphaned_list) => {
