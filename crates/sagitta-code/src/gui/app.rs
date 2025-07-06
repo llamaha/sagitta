@@ -617,10 +617,12 @@ impl SagittaCodeApp {
         let repo_manager = self.repo_panel.get_repo_manager();
         
         // Create sync orchestrator
-        let sync_orchestrator = Arc::new(SyncOrchestrator::new(
+        let mut sync_orchestrator = SyncOrchestrator::new(
             config_guard.auto_sync.clone(),
             repo_manager.clone(),
-        ));
+        );
+        sync_orchestrator.set_app_event_sender(self.app_event_sender.clone());
+        let sync_orchestrator = Arc::new(sync_orchestrator);
         self.sync_orchestrator = Some(sync_orchestrator.clone());
         self.git_controls.set_sync_orchestrator(sync_orchestrator.clone());
         

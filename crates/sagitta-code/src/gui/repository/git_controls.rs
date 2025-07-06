@@ -244,10 +244,23 @@ impl GitControls {
     /// Update sync statuses
     pub async fn update_sync_statuses(&mut self) {
         if let Some(sync_orchestrator) = &self.sync_orchestrator {
-            let statuses = sync_orchestrator.get_all_sync_statuses().await;
-            self.state.sync_statuses = statuses.into_iter()
-                .map(|(path, status)| (path.to_string_lossy().to_string(), status))
-                .collect();
+            let all_statuses = sync_orchestrator.get_all_sync_statuses().await;
+            
+            // Get repository manager to map paths to names
+            let repo_manager = self.repository_manager.lock().await;
+            let mut name_to_status = HashMap::new();
+            
+            // Try to map each path to a repository name
+            for (path, status) in all_statuses {
+                // Try to extract repository name from path
+                if let Some(repo_name) = path.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|s| s.to_string()) {
+                    name_to_status.insert(repo_name, status);
+                }
+            }
+            
+            self.state.sync_statuses = name_to_status;
         }
     }
 
@@ -348,7 +361,7 @@ impl GitControls {
                 if sync_status.is_out_of_sync {
                     ("🔄", theme.warning_color(), "Repository has changes that need syncing")
                 } else {
-                    ("❓", theme.muted_color(), "Repository not yet synced")
+                    ("❓", theme.muted_text_color(), "Repository not yet synced")
                 }
             }
         };

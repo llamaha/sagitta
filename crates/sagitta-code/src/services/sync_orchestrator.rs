@@ -10,6 +10,7 @@ use crate::config::types::AutoSyncConfig;
 use crate::services::auto_commit::CommitResult;
 use crate::services::file_watcher::{FileWatcherService, FileChangeEvent};
 use crate::gui::repository::manager::RepositoryManager;
+use crate::gui::app::events::{AppEvent, SyncNotificationType};
 
 /// Represents the result of a sync operation
 #[derive(Debug, Clone)]
@@ -95,6 +96,8 @@ pub struct SyncOrchestrator {
     sync_queue: Arc<Mutex<Vec<PathBuf>>>,
     /// Flag to track if sync processor is running
     sync_processor_running: Arc<RwLock<bool>>,
+    /// App event sender for notifications
+    app_event_sender: Option<mpsc::UnboundedSender<AppEvent>>,
 }
 
 impl SyncOrchestrator {
@@ -111,6 +114,7 @@ impl SyncOrchestrator {
             file_watcher: Arc::new(RwLock::new(None)),
             sync_queue: Arc::new(Mutex::new(Vec::new())),
             sync_processor_running: Arc::new(RwLock::new(false)),
+            app_event_sender: None,
         }
     }
 
@@ -118,6 +122,11 @@ impl SyncOrchestrator {
     pub async fn set_file_watcher(&self, file_watcher: Arc<FileWatcherService>) {
         let mut fw = self.file_watcher.write().await;
         *fw = Some(file_watcher);
+    }
+    
+    /// Set the app event sender for notifications
+    pub fn set_app_event_sender(&mut self, sender: mpsc::UnboundedSender<AppEvent>) {
+        self.app_event_sender = Some(sender);
     }
 
     /// Start the sync orchestrator
@@ -227,6 +236,7 @@ impl SyncOrchestrator {
         let sync_result_tx = self.sync_result_tx.clone();
         let repository_manager = self.repository_manager.clone();
         let sync_statuses = self.sync_statuses.clone();
+        let app_event_sender = self.app_event_sender.clone();
         
         tokio::spawn(async move {
             info!("Sync processor started");
@@ -248,6 +258,83 @@ impl SyncOrchestrator {
                             &repository_manager,
                             &sync_statuses,
                         ).await;
+                        
+                        // Send notification based on result
+                        if let Some(sender) = &app_event_sender {
+                            let repo_name = repo_path.file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("Unknown");
+                            
+                            // Get the sync status to check the state
+                            let sync_state = {
+                                let statuses = sync_statuses.read().await;
+                                statuses.get(&repo_path).map(|s| s.sync_state.clone())
+                            };
+                            
+                            let notification = match sync_state {
+                                Some(SyncState::FullySynced) => {
+                                    AppEvent::ShowSyncNotification {
+                                        repository: repo_name.to_string(),
+                                        message: "Repository synced successfully".to_string(),
+                                        notification_type: SyncNotificationType::Success,
+                                    }
+                                }
+                                Some(SyncState::LocalOnly) => {
+                                    AppEvent::ShowSyncNotification {
+                                        repository: repo_name.to_string(),
+                                        message: "Local repository indexed successfully".to_string(),
+                                        notification_type: SyncNotificationType::Info,
+                                    }
+                                }
+                                Some(SyncState::LocalIndexedRemoteFailed) => {
+                                    let statuses = sync_statuses.read().await;
+                                    let error_type = statuses.get(&repo_path).and_then(|s| s.sync_error_type.as_ref());
+                                    
+                                    let message = match error_type {
+                                        Some(SyncErrorType::AuthenticationFailed) => {
+                                            "Authentication failed - check SSH keys. Local indexing succeeded."
+                                        }
+                                        Some(SyncErrorType::NetworkError) => {
+                                            "Network error - check connection. Local indexing succeeded."
+                                        }
+                                        _ => "Remote sync failed, but local indexing succeeded."
+                                    };
+                                    
+                                    AppEvent::ShowSyncNotification {
+                                        repository: repo_name.to_string(),
+                                        message: message.to_string(),
+                                        notification_type: SyncNotificationType::Warning,
+                                    }
+                                }
+                                Some(SyncState::Failed) | None => {
+                                    let message = result.error_message.as_deref()
+                                        .unwrap_or("Sync failed");
+                                    AppEvent::ShowSyncNotification {
+                                        repository: repo_name.to_string(),
+                                        message: message.to_string(),
+                                        notification_type: SyncNotificationType::Error,
+                                    }
+                                }
+                                _ => {
+                                    // For other states, use generic message
+                                    if result.success {
+                                        AppEvent::ShowSyncNotification {
+                                            repository: repo_name.to_string(),
+                                            message: "Repository sync completed".to_string(),
+                                            notification_type: SyncNotificationType::Success,
+                                        }
+                                    } else {
+                                        AppEvent::ShowSyncNotification {
+                                            repository: repo_name.to_string(),
+                                            message: result.error_message.as_deref().unwrap_or("Sync failed").to_string(),
+                                            notification_type: SyncNotificationType::Error,
+                                        }
+                                    }
+                                }
+                            };
+                            
+                            let _ = sender.send(notification);
+                        }
                         
                         // Send result
                         if let Err(e) = sync_result_tx.send(result) {

@@ -11,6 +11,15 @@ use super::panels::{SystemEventType};
 use super::SagittaCodeApp;
 use serde_json::Value;
 
+/// Types of sync notifications
+#[derive(Debug, Clone)]
+pub enum SyncNotificationType {
+    Success,
+    Warning,
+    Error,
+    Info,
+}
+
 /// Application-specific UI events
 #[derive(Debug, Clone)]
 pub enum AppEvent {
@@ -41,6 +50,12 @@ pub enum AppEvent {
     SaveClaudeMdTemplate,
     ApplyClaudeMdToAllRepos,
     CreateNewConversation,
+    // Sync status notifications
+    ShowSyncNotification {
+        repository: String,
+        message: String,
+        notification_type: SyncNotificationType,
+    },
     // Add other app-level UI events here if needed
 }
 
@@ -402,8 +417,34 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                 log::info!("Received RepositorySwitched event for repository: {repo_name}");
                 handle_repository_switched(app, repo_name);
             },
+            AppEvent::ShowSyncNotification { repository, message, notification_type } => {
+                log::info!("Received ShowSyncNotification event for repository: {repository}");
+                handle_sync_notification(app, repository, message, notification_type);
+            },
         }
     }
+}
+
+/// Handle sync notification
+fn handle_sync_notification(app: &mut SagittaCodeApp, repository: String, message: String, notification_type: SyncNotificationType) {
+    use egui_notify::{Anchor, ToastLevel};
+    
+    let level = match notification_type {
+        SyncNotificationType::Success => ToastLevel::Success,
+        SyncNotificationType::Warning => ToastLevel::Warning,
+        SyncNotificationType::Error => ToastLevel::Error,
+        SyncNotificationType::Info => ToastLevel::Info,
+    };
+    
+    // Format the notification with repository name
+    let formatted_message = format!("{}: {}", repository, message);
+    
+    // Show the toast notification
+    app.state.toasts
+        .add(egui_notify::Toast::new(formatted_message)
+            .set_level(level)
+            .set_duration(Some(std::time::Duration::from_secs(5)))
+            .set_closable(true));
 }
 
 /// Create a chat message from an agent message

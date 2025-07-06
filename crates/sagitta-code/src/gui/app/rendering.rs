@@ -84,6 +84,9 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
     
     // Render CLAUDE.md modal
     render_claude_md_modal(app, ctx);
+    
+    // Render toast notifications
+    app.state.toasts.show(ctx);
 }
 
 /// Render tools list modal
