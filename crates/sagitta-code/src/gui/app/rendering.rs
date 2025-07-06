@@ -62,7 +62,7 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
             // Handle tool cancellation
             if let Ok(run_id) = uuid::Uuid::parse_str(&tool_args) {
                 if let Err(e) = app.app_event_sender.send(AppEvent::CancelTool(run_id)) {
-                    log::error!("Failed to send CancelTool event: {}", e);
+                    log::error!("Failed to send CancelTool event: {e}");
                 }
             }
             // clicked_tool_info already cleared by take()
@@ -158,7 +158,7 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
     if ctx.input(|i| i.key_pressed(Key::N) && i.modifiers.ctrl) {
         // Ctrl+N: Create new conversation
         if let Err(e) = app.app_event_sender.send(AppEvent::CreateNewConversation) {
-            log::error!("Failed to send CreateNewConversation event: {}", e);
+            log::error!("Failed to send CreateNewConversation event: {e}");
         }
     }
     if ctx.input(|i| i.key_pressed(Key::R) && i.modifiers.ctrl) {
@@ -305,7 +305,7 @@ fn handle_loop_control(app: &mut SagittaCodeApp) {
     
     // Handle loop message injection
     if let Some(inject_msg) = app.state.loop_inject_message.take() {
-        log::info!("Injecting message into loop: '{}'", inject_msg);
+        log::info!("Injecting message into loop: '{inject_msg}'");
         
         // Add the injected message to chat
         app.chat_manager.add_user_message(inject_msg.clone());
@@ -313,7 +313,7 @@ fn handle_loop_control(app: &mut SagittaCodeApp) {
         // Add event to show the injection
         app.panels.events_panel.add_event(
             super::SystemEventType::Info,
-            format!("Injected message into loop: '{}'", inject_msg)
+            format!("Injected message into loop: '{inject_msg}'")
         );
     }
 }
@@ -327,13 +327,13 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
             // Check if we're breaking out of a loop
             let breaking_loop = app.state.is_in_loop;
             if breaking_loop {
-                log::info!("Breaking out of loop due to new user message: '{}'", user_message);
+                log::info!("Breaking out of loop due to new user message: '{user_message}'");
                 app.state.is_in_loop = false;
                 app.state.loop_break_requested = false;
                 
                 app.panels.events_panel.add_event(
                     super::SystemEventType::Info,
-                    format!("Loop broken by new message: '{}'", user_message)
+                    format!("Loop broken by new message: '{user_message}'")
                 );
             }
             
@@ -350,12 +350,12 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
             // CRITICAL FIX: Force clear current_response_id when user submits new message
             // This ensures Sagitta Code ALWAYS creates a new message for each response
             if let Some(old_response_id) = app.state.current_response_id.take() {
-                log::warn!("SagittaCodeApp: Forcing clear of stale response_id {} for new user message", old_response_id);
+                log::warn!("SagittaCodeApp: Forcing clear of stale response_id {old_response_id} for new user message");
                 // Finish any incomplete streaming response
                 app.chat_manager.finish_streaming(&old_response_id);
             }
             app.state.current_response_id = None;
-            log::info!("SagittaCodeApp: Cleared current_response_id for new user message: '{}'", user_message);
+            log::info!("SagittaCodeApp: Cleared current_response_id for new user message: '{user_message}'");
 
             // Process the message with the agent using STREAMING
             if let Some(agent) = &app.agent {
@@ -367,7 +367,7 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
                 
                 // Add repository context as a system message if available
                 if let Some(repo_context) = &app.state.current_repository_context {
-                    context_aware_message.push_str(&format!("[System: Current repository context is '{}'. When the user refers to 'this repository' or asks for operations without specifying a repository, use '{}']\n\n", repo_context, repo_context));
+                    context_aware_message.push_str(&format!("[System: Current repository context is '{repo_context}'. When the user refers to 'this repository' or asks for operations without specifying a repository, use '{repo_context}']\n\n"));
                 }
                 
                 
@@ -384,7 +384,7 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
                 
                 // Process in background task with STREAMING
                 tokio::spawn(async move {
-                    log::info!("Starting streaming task for user message: '{}'", user_msg_clone);
+                    log::info!("Starting streaming task for user message: '{user_msg_clone}'");
                     
                     // Use the same streaming method as the CLI (without thinking config)
                     match agent_clone.process_message_stream(user_msg_clone).await {
@@ -423,13 +423,13 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
                                             Ok(chunk) => chunk.is_final,
                                             Err(_) => true,
                                         } {
-                                            log::debug!("Received chunk #{}: {:?}", chunk_count, chunk_result);
+                                            log::debug!("Received chunk #{chunk_count}: {chunk_result:?}");
                                         }
                                         
                                         match chunk_result {
                                             Ok(chunk) => {
                                                 if chunk.is_final || chunk_count % 10 == 0 {
-                                                    log::trace!("Successfully processed chunk #{}", chunk_count);
+                                                    log::trace!("Successfully processed chunk #{chunk_count}");
                                                 }
                                                 // The chunk processing is handled via events
                                                 // so we don't need to do anything here
@@ -441,7 +441,7 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
                                                 }
                                             },
                                             Err(e) => {
-                                                log::error!("Error in streaming response chunk #{}: {}", chunk_count, e);
+                                                log::error!("Error in streaming response chunk #{chunk_count}: {e}");
                                                 
                                                 // Check if this is a recoverable streaming error
                                                 let error_msg = e.to_string();
@@ -465,7 +465,7 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
                                         }
                                     },
                                     Ok(None) => {
-                                        log::info!("Stream ended naturally after {} chunks", chunk_count);
+                                        log::info!("Stream ended naturally after {chunk_count} chunks");
                                         break;
                                     },
                                     Err(_timeout) => {
@@ -475,7 +475,7 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
                                         
                                         // Allow multiple timeouts before giving up, especially during tool execution
                                         if consecutive_timeouts >= 3 {
-                                            log::error!("Too many consecutive timeouts ({}), stopping stream", consecutive_timeouts);
+                                            log::error!("Too many consecutive timeouts ({consecutive_timeouts}), stopping stream");
                                             break;
                                         } else {
                                             log::info!("Continuing to wait for more chunks...");
@@ -485,15 +485,15 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
                                 }
                             }
                             
-                            log::info!("Stream consumption completed with {} total chunks", chunk_count);
+                            log::info!("Stream consumption completed with {chunk_count} total chunks");
                         },
                         Err(e) => {
-                            log::error!("Failed to start streaming response: {}", e);
+                            log::error!("Failed to start streaming response: {e}");
                         }
                     }
                     // Added: Send event to signal response processing is complete
                     if let Err(e) = app_event_sender_clone.send(AppEvent::ResponseProcessingComplete) {
-                        log::error!("Failed to send ResponseProcessingComplete event: {}", e);
+                        log::error!("Failed to send ResponseProcessingComplete event: {e}");
                     }
                 });
             } else {
@@ -554,12 +554,12 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                                         // Send the analytics report via the conversation event system
                                         if let Some(sender) = event_sender {
                                             if let Err(e) = sender.send(super::events::ConversationEvent::AnalyticsReportReady(report)) {
-                                                log::error!("Failed to send analytics report event: {}", e);
+                                                log::error!("Failed to send analytics report event: {e}");
                                             }
                                         }
                                     },
                                     Err(e) => {
-                                        log::error!("Failed to generate analytics report: {}", e);
+                                        log::error!("Failed to generate analytics report: {e}");
                                     }
                                 }
                             });
@@ -586,12 +586,12 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                     },
                     super::panels::AnalyticsAction::FilterByProject(project_type) => {
                         // Update analytics panel project filter
-                        app.panels.analytics_panel.project_filter = super::panels::ProjectFilter::Specific(project_type.clone());
+                        app.panels.analytics_panel.project_filter = super::panels::ProjectFilter::Specific(project_type);
                         
                         // Add event to events panel
                         app.panels.events_panel.add_event(
                             super::panels::SystemEventType::Info,
-                            format!("Filtered analytics by project: {:?}", project_type)
+                            format!("Filtered analytics by project: {project_type:?}")
                         );
                     },
                     super::panels::AnalyticsAction::FilterByDateRange(date_range) => {
@@ -601,7 +601,7 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                         // Add event to events panel
                         app.panels.events_panel.add_event(
                             super::panels::SystemEventType::Info,
-                            format!("Filtered analytics by date range: {:?}", date_range)
+                            format!("Filtered analytics by date range: {date_range:?}")
                         );
                     },
                 }
@@ -651,8 +651,8 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                     }
                     
                     // Respect test isolation by using save_config which handles test paths
-                    if let Err(err) = crate::config::save_config(&*config_guard) {
-                        log::error!("Failed to save custom theme config: {}", err);
+                    if let Err(err) = crate::config::save_config(&config_guard) {
+                        log::error!("Failed to save custom theme config: {err}");
                     }
                 });
             }
@@ -683,17 +683,17 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                     config_guard.claude_code.model = model_id.clone();
                     
                     // Respect test isolation by using save_config which handles test paths
-                    if let Err(err) = crate::config::save_config(&*config_guard) {
-                        log::error!("Failed to save model selection: {}", err);
+                    if let Err(err) = crate::config::save_config(&config_guard) {
+                        log::error!("Failed to save model selection: {err}");
                     } else {
-                        log::info!("Model selection saved: {}", model_id);
+                        log::info!("Model selection saved: {model_id}");
                     }
                 });
                 
                 // Add event to events panel
                 app.panels.events_panel.add_event(
                     super::panels::SystemEventType::Info,
-                    format!("Selected model: {}", selected_model)
+                    format!("Selected model: {selected_model}")
                 );
                 
                 // Close the model selection panel
@@ -919,7 +919,7 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button(egui::RichText::new("New").color(theme.button_text_color())).clicked() {
                             if let Err(e) = app.app_event_sender.send(AppEvent::CreateNewConversation) {
-                                log::error!("Failed to send CreateNewConversation event: {}", e);
+                                log::error!("Failed to send CreateNewConversation event: {e}");
                             }
                         }
                     });
@@ -1010,7 +1010,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
         .resizable(false)
         .min_height(100.0) // Min height for the input area
         .max_height(200.0) // Max height to prevent it from taking too much space
-        .frame(Frame::none().fill(theme_to_background_color(app.state.current_theme)).inner_margin(Vec2::new(16.0, 12.0)))
+        .frame(Frame::NONE.fill(theme_to_background_color(app.state.current_theme)).inner_margin(Vec2::new(16.0, 12.0)))
         .show(ctx, |ui| {
             let mut repository_refresh_requested = false;
             
@@ -1044,7 +1044,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
             // Handle repository refresh request
             if repository_refresh_requested {
                 if let Err(e) = app.app_event_sender.send(super::events::AppEvent::RefreshRepositoryList) {
-                    log::error!("Failed to send RefreshRepositoryList event: {}", e);
+                    log::error!("Failed to send RefreshRepositoryList event: {e}");
                 }
             }
             
@@ -1118,7 +1118,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                             if let Ok(repositories) = repo_manager_guard.list_repositories().await {
                                 if let Some(repo_config) = repositories.iter().find(|r| r.name == repo_name_clone) {
                                     if let Err(e) = repo_manager_guard.ensure_claude_md(repo_config).await {
-                                        log::warn!("Failed to ensure CLAUDE.md for repository '{}': {}", repo_name_clone, e);
+                                        log::warn!("Failed to ensure CLAUDE.md for repository '{repo_name_clone}': {e}");
                                     }
                                 }
                             }
@@ -1140,7 +1140,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                                 let local_path = repo_config.local_path.clone();
                                 // Send event to update git history modal
                                 if let Err(e) = app_event_sender.send(AppEvent::UpdateGitHistoryPath(local_path)) {
-                                    log::error!("Failed to send UpdateGitHistoryPath event: {}", e);
+                                    log::error!("Failed to send UpdateGitHistoryPath event: {e}");
                                 }
                             }
                         }
@@ -1162,10 +1162,10 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                             let repo_path = std::path::Path::new(&repo_name_clone);
                             match working_dir_manager_clone.set_repository_context(Some(repo_path)) {
                                 Ok(()) => {
-                                    log::info!("Changed working directory to repository '{}'", repo_name_clone);
+                                    log::info!("Changed working directory to repository '{repo_name_clone}'");
                                 }
                                 Err(e) => {
-                                    log::error!("Failed to change working directory to repository '{}': {}", repo_name_clone, e);
+                                    log::error!("Failed to change working directory to repository '{repo_name_clone}': {e}");
                                 }
                             }
                         });
@@ -1180,7 +1180,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                                     log::info!("Reset working directory to base");
                                 }
                                 Err(e) => {
-                                    log::error!("Failed to reset working directory to base: {}", e);
+                                    log::error!("Failed to reset working directory to base: {e}");
                                 }
                             }
                         });
@@ -1196,19 +1196,19 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                             config_guard.ui.current_repository_context = repo_context_for_save;
                             
                             // Save the config
-                            if let Err(e) = crate::config::save_config(&*config_guard) {
-                                log::error!("Failed to save repository context to config: {}", e);
+                            if let Err(e) = crate::config::save_config(&config_guard) {
+                                log::error!("Failed to save repository context to config: {e}");
                             } else {
                                 log::info!("Repository context saved to config");
                             }
                         }
                         Err(e) => {
-                            log::error!("Failed to lock config for saving repository context: {}", e);
+                            log::error!("Failed to lock config for saving repository context: {e}");
                         }
                     }
                 });
                 
-                log::info!("Repository context changed to: {:?}", new_repo);
+                log::info!("Repository context changed to: {new_repo:?}");
                 }
             }
             
@@ -1222,7 +1222,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
 
     // --- Chat View Panel (Central) ---
     egui::CentralPanel::default()
-        .frame(Frame::none().fill(theme_to_background_color(app.state.current_theme)))
+        .frame(Frame::NONE.fill(theme_to_background_color(app.state.current_theme)))
         .show(ctx, |ui| {
             // Force UI to use the full available width and reset text wrap settings
             ui.set_min_width(ui.available_width());
@@ -1246,7 +1246,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
 
 /// Render tool info modal
 fn render_tool_info_modal(app: &mut SagittaCodeApp, ctx: &Context, tool_name: &str, tool_args: &str) {
-    log::debug!("render_tool_info_modal called with tool_name: {}", tool_name);
+    log::debug!("render_tool_info_modal called with tool_name: {tool_name}");
     
     // Check if this is a tool result (indicated by " Result" suffix or " - Terminal Output" suffix)
     if tool_name.ends_with(" Result") || tool_name.contains(" - ") {
@@ -1261,18 +1261,18 @@ fn render_tool_info_modal(app: &mut SagittaCodeApp, ctx: &Context, tool_name: &s
             (tool_args.contains("stdout") && tool_args.contains("stderr") && tool_args.contains("exit_code"));
             
         if is_terminal_output {
-            log::debug!("Terminal output detected for: {} (terminal functionality removed)", tool_name);
+            log::debug!("Terminal output detected for: {tool_name} (terminal functionality removed)");
             // Terminal functionality removed - fall through to preview
         } else {
             // This is a non-shell tool result - show in preview
-            log::debug!("Showing preview for non-shell tool result: {}", tool_name);
+            log::debug!("Showing preview for non-shell tool result: {tool_name}");
             
             // For "Tool Result", tool_args contains the tool call ID - look up actual result
             if tool_name == "Tool Result" {
                 if let Some(tool_result) = app.state.tool_results.get(tool_args).cloned() {
-                    app.show_preview(&format!("Tool Result ({})", tool_args), &tool_result);
+                    app.show_preview(&format!("Tool Result ({tool_args})"), &tool_result);
                 } else {
-                    app.show_preview(tool_name, &format!("Tool result not found for ID: {}", tool_args));
+                    app.show_preview(tool_name, &format!("Tool result not found for ID: {tool_args}"));
                 }
             } else {
                 app.show_preview(tool_name, tool_args);
@@ -1286,7 +1286,7 @@ fn render_tool_info_modal(app: &mut SagittaCodeApp, ctx: &Context, tool_name: &s
             tool_args.to_string()
         };
         
-        app.show_preview(&format!("{} Tool Call", tool_name), &formatted_args);
+        app.show_preview(&format!("{tool_name} Tool Call"), &formatted_args);
     }
     
     // Note: clicked_tool_info is now cleared by take() in the main render function
@@ -1320,12 +1320,12 @@ fn refresh_clusters_periodically(app: &mut SagittaCodeApp) {
                                 // The actual update will happen in the next render cycle
                             },
                             Err(e) => {
-                                log::debug!("No clusters available (clustering disabled): {}", e);
+                                log::debug!("No clusters available (clustering disabled): {e}");
                             }
                         }
                     },
                     Err(e) => {
-                        log::debug!("Clustering not available: {}", e);
+                        log::debug!("Clustering not available: {e}");
                     }
                 }
             }
@@ -1361,23 +1361,74 @@ fn refresh_repository_list_periodically(app: &mut SagittaCodeApp) {
                         .map(|repo| repo.name.clone())
                         .collect();
                     
-                    log::info!("Refreshed repository list: {:?}", repo_names);
+                    log::info!("Refreshed repository list: {repo_names:?}");
                     
                     // Send the repository list update event
                     if let Err(e) = app_event_sender.send(super::events::AppEvent::RepositoryListUpdated(repo_names)) {
-                        log::error!("Failed to send repository list update event: {}", e);
+                        log::error!("Failed to send repository list update event: {e}");
                     } else {
                         log::debug!("Successfully sent repository list update event");
                     }
                 },
                 Err(e) => {
-                    log::error!("Failed to refresh repository list: {}", e);
+                    log::error!("Failed to refresh repository list: {e}");
                 }
             }
         });
         
         unsafe {
             LAST_REPO_REFRESH = Some(std::time::Instant::now());
+        }
+    }
+}
+
+// Helper function to build dependency context message
+fn build_dependency_context(enabled_dependencies: &[String]) -> String {
+    let mut context_message = String::new();
+    
+    if !enabled_dependencies.is_empty() {
+        if enabled_dependencies.len() == 1 {
+            context_message.push_str(&format!(
+                "[System: The repository '{}' is enabled as a dependency. You can use the repository tools to understand this dependency's requirements]\n\n", 
+                enabled_dependencies[0]
+            ));
+        } else {
+            let deps_list = enabled_dependencies.join("', '");
+            context_message.push_str(&format!(
+                "[System: The following repositories are enabled as dependencies: '{deps_list}'. You can use the repository tools to understand these dependencies' requirements]\n\n"
+            ));
+        }
+    }
+    
+    context_message
+}
+
+/// Render CLAUDE.md modal
+fn render_claude_md_modal(app: &mut SagittaCodeApp, ctx: &Context) {
+    // Render the modal and handle any actions
+    if let Some(action) = app.claude_md_modal.render(ctx, &app.state.current_theme) {
+        // Handle the action
+        match action {
+            crate::gui::claude_md_modal::ClaudeMdModalAction::Save => {
+                // Schedule save action to be handled asynchronously
+                if let Err(e) = app.app_event_sender.send(crate::gui::app::AppEvent::SaveClaudeMdTemplate) {
+                    log::error!("Failed to send SaveClaudeMdTemplate event: {e}");
+                }
+            },
+            crate::gui::claude_md_modal::ClaudeMdModalAction::LoadFromFile => {
+                // Trigger file dialog (would be handled by main app)
+                log::info!("CLAUDE.md modal: Load from file requested");
+            },
+            crate::gui::claude_md_modal::ClaudeMdModalAction::ShowHelp => {
+                // Show help information
+                log::info!("CLAUDE.md modal: Help requested");
+            },
+            crate::gui::claude_md_modal::ClaudeMdModalAction::ApplyToAllRepos => {
+                // Apply template to all repositories
+                if let Err(e) = app.app_event_sender.send(crate::gui::app::AppEvent::ApplyClaudeMdToAllRepos) {
+                    log::error!("Failed to send ApplyClaudeMdToAllRepos event: {e}");
+                }
+            },
         }
     }
 }
@@ -1578,7 +1629,7 @@ mod tests {
         for i in 0..150 {
             app.panels.events_panel.add_event(
                 super::super::panels::SystemEventType::Info,
-                format!("Event {}", i)
+                format!("Event {i}")
             );
         }
         
@@ -2069,7 +2120,7 @@ mod tests {
                           tool_args.contains("stderr") || 
                           tool_args.contains("exit_code");
             
-            assert!(is_shell, "{} should be treated as shell command", tool_name);
+            assert!(is_shell, "{tool_name} should be treated as shell command");
         }
     }
 
@@ -2090,7 +2141,7 @@ mod tests {
                 (tool_name.contains("shell_execution") && !tool_name.contains("search")) ||
                 (tool_args.contains("stdout") && tool_args.contains("stderr") && tool_args.contains("exit_code"));
             
-            assert!(!is_terminal_output, "{} should NOT be treated as terminal output", tool_name);
+            assert!(!is_terminal_output, "{tool_name} should NOT be treated as terminal output");
         }
     }
     
@@ -2113,7 +2164,7 @@ mod tests {
         assert!(clicked_tool_info.is_none());
         
         // Second frame - should not process anything
-        if let Some(_) = clicked_tool_info.take() {
+        if clicked_tool_info.take().is_some() {
             panic!("clicked_tool_info should have been cleared by first take()");
         }
     }
@@ -2170,58 +2221,6 @@ mod tests {
                           
             assert_eq!(is_terminal_output, test.expected, 
                       "Failed for {}: {}", test.tool_name, test.description);
-        }
-    }
-}
-
-// Helper function to build dependency context message
-fn build_dependency_context(enabled_dependencies: &[String]) -> String {
-    let mut context_message = String::new();
-    
-    if !enabled_dependencies.is_empty() {
-        if enabled_dependencies.len() == 1 {
-            context_message.push_str(&format!(
-                "[System: The repository '{}' is enabled as a dependency. You can use the repository tools to understand this dependency's requirements]\n\n", 
-                enabled_dependencies[0]
-            ));
-        } else {
-            let deps_list = enabled_dependencies.join("', '");
-            context_message.push_str(&format!(
-                "[System: The following repositories are enabled as dependencies: '{}'. You can use the repository tools to understand these dependencies' requirements]\n\n", 
-                deps_list
-            ));
-        }
-    }
-    
-    context_message
-}
-
-/// Render CLAUDE.md modal
-fn render_claude_md_modal(app: &mut SagittaCodeApp, ctx: &Context) {
-    // Render the modal and handle any actions
-    if let Some(action) = app.claude_md_modal.render(ctx, &app.state.current_theme) {
-        // Handle the action
-        match action {
-            crate::gui::claude_md_modal::ClaudeMdModalAction::Save => {
-                // Schedule save action to be handled asynchronously
-                if let Err(e) = app.app_event_sender.send(crate::gui::app::AppEvent::SaveClaudeMdTemplate) {
-                    log::error!("Failed to send SaveClaudeMdTemplate event: {}", e);
-                }
-            },
-            crate::gui::claude_md_modal::ClaudeMdModalAction::LoadFromFile => {
-                // Trigger file dialog (would be handled by main app)
-                log::info!("CLAUDE.md modal: Load from file requested");
-            },
-            crate::gui::claude_md_modal::ClaudeMdModalAction::ShowHelp => {
-                // Show help information
-                log::info!("CLAUDE.md modal: Help requested");
-            },
-            crate::gui::claude_md_modal::ClaudeMdModalAction::ApplyToAllRepos => {
-                // Apply template to all repositories
-                if let Err(e) = app.app_event_sender.send(crate::gui::app::AppEvent::ApplyClaudeMdToAllRepos) {
-                    log::error!("Failed to send ApplyClaudeMdToAllRepos event: {}", e);
-                }
-            },
         }
     }
 } 

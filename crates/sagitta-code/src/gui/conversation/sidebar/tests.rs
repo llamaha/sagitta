@@ -1,5 +1,5 @@
 use super::*;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use uuid::Uuid;
 use crate::agent::conversation::types::{ConversationSummary, ProjectType};
 use crate::agent::state::types::ConversationStatus;
@@ -62,7 +62,7 @@ mod tests {
         // We can't actually run the rendering without a full egui context, but we can verify
         // that all the methods exist and are callable
         
-        let mut sidebar = ConversationSidebar::new(SidebarConfig::default());
+        let sidebar = ConversationSidebar::new(SidebarConfig::default());
         let conversations = create_test_conversations();
         
         // Test that the organization method exists and works
@@ -265,15 +265,15 @@ mod tests {
         let group_id = "test_group";
         
         // Initially not expanded
-        assert!(!sidebar.expanded_groups.contains(&format!("expanded_{}", group_id)));
+        assert!(!sidebar.expanded_groups.contains(&format!("expanded_{group_id}")));
         
         // Toggle to expand
         sidebar.toggle_group(group_id);
-        assert!(sidebar.expanded_groups.contains(&format!("expanded_{}", group_id)));
+        assert!(sidebar.expanded_groups.contains(&format!("expanded_{group_id}")));
         
         // Toggle to collapse
         sidebar.toggle_group(group_id);
-        assert!(sidebar.expanded_groups.contains(&format!("collapsed_{}", group_id)));
+        assert!(sidebar.expanded_groups.contains(&format!("collapsed_{group_id}")));
     }
 
     #[test]

@@ -1293,7 +1293,7 @@ impl ConversationTree {
     
     /// Draw a node
     fn draw_node(&self, painter: &egui::Painter, node: &TreeNode, theme: &crate::gui::theme::AppTheme, hovered: bool) {
-        use egui::{Color32, FontId, Pos2, Rect, Rounding, Stroke, Vec2};
+        use egui::{Color32, FontId, Pos2, Rect, CornerRadius, Stroke, Vec2};
         
         let rect = Rect::from_min_size(
             Pos2::new(node.position.x, node.position.y),
@@ -1325,10 +1325,10 @@ impl ConversationTree {
         };
         
         // Draw node background
-        painter.rect_filled(rect, Rounding::same(4), final_bg_color);
+        painter.rect_filled(rect, CornerRadius::same(4), final_bg_color);
         
         // Draw node border
-        painter.rect_stroke(rect, Rounding::same(4), Stroke::new(2.0, final_border_color), egui::StrokeKind::Outside);
+        painter.rect_stroke(rect, CornerRadius::same(4), Stroke::new(2.0, final_border_color), egui::StrokeKind::Outside);
         
         // Draw node label
         let text_color = Color32::WHITE;

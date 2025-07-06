@@ -133,7 +133,7 @@ impl ConversationTaskIntegration {
             ..Default::default()
         };
         
-        let request = CreateTaskRequest {
+        let _request = CreateTaskRequest {
             title: suggestion.title,
             description: suggestion.description,
             task_type: suggestion.task_type,
@@ -158,11 +158,11 @@ impl ConversationTaskIntegration {
         
         // Add initial message with task context
         if let Some(ref context) = task.metadata.conversation_context {
-            let initial_content = format!(
+            let _initial_content = format!(
                 "Starting work on task: {}\n\nRequirements:\n{}\n\nExpected outcomes:\n{}",
                 task.title,
-                context.requirements.iter().map(|r| format!("- {}", r)).collect::<Vec<_>>().join("\n"),
-                context.expected_outcomes.iter().map(|o| format!("- {}", o)).collect::<Vec<_>>().join("\n")
+                context.requirements.iter().map(|r| format!("- {r}")).collect::<Vec<_>>().join("\n"),
+                context.expected_outcomes.iter().map(|o| format!("- {o}")).collect::<Vec<_>>().join("\n")
             );
             
             // Note: This would require extending the conversation manager to add messages
@@ -229,7 +229,7 @@ impl ConversationTaskIntegration {
             
             // Update task status based on indicators
             if progress_indicators.contains(&"completion") {
-                let update_request = UpdateTaskRequest {
+                let _update_request = UpdateTaskRequest {
                     status: Some(TaskStatus::Completed),
                     completed_at: Some(Utc::now()),
                     ..Default::default()
@@ -237,7 +237,7 @@ impl ConversationTaskIntegration {
                 // Note: This requires mutable access to task manager
                 todo!("Implement task update - requires mutable access to task manager");
             } else if progress_indicators.contains(&"in_progress") {
-                let update_request = UpdateTaskRequest {
+                let _update_request = UpdateTaskRequest {
                     status: Some(TaskStatus::InProgress),
                     ..Default::default()
                 };
@@ -462,7 +462,7 @@ fn extract_repository_references(content: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::conversation::types::*;
+    
     
     #[test]
     fn test_extract_todo_title() {

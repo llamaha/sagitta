@@ -92,7 +92,7 @@ impl ConversationStatusEngine {
                     &event_sender,
                     &manual_overrides,
                 ).await {
-                    eprintln!("Error updating conversation statuses: {}", e);
+                    eprintln!("Error updating conversation statuses: {e}");
                 }
             }
         });

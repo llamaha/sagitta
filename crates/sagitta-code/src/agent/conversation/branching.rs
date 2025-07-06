@@ -311,7 +311,7 @@ impl ConversationBranchingManager {
                     }
                 }
                 Err(e) => {
-                    log::debug!("Fast model branch suggestion failed: {}, falling back to rule-based", e);
+                    log::debug!("Fast model branch suggestion failed: {e}, falling back to rule-based");
                     // Fall back to rule-based analysis
                     return self.analyze_branch_opportunities_rule_based(conversation);
                 }
@@ -623,7 +623,7 @@ impl BranchSuccessPredictor {
         prediction += context_factor;
         
         // Look up historical patterns
-        let pattern_key = format!("{:?}", reason);
+        let pattern_key = format!("{reason:?}");
         if let Some(&historical_success) = self.success_patterns.get(&pattern_key) {
             prediction = prediction * (1.0 - self.config.pattern_weight) + 
                         historical_success * self.config.pattern_weight;
@@ -751,7 +751,7 @@ mod tests {
         
         let prediction = predictor.predict_success(&message, &context, &BranchReason::UserRequested).unwrap();
         
-        assert!(prediction >= 0.0 && prediction <= 1.0);
+        assert!((0.0..=1.0).contains(&prediction));
         assert!(prediction > 0.5); // User-requested should have higher success probability
     }
 

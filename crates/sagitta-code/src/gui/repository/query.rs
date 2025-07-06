@@ -52,7 +52,7 @@ pub fn render_query_repo(
         if !repo_names.is_empty() {
             ui.horizontal(|ui| {
                 ui.label("Select repository:");
-                ComboBox::from_id_source("query_no_repo_selector")
+                ComboBox::from_id_salt("query_no_repo_selector")
                     .selected_text("Choose repository...")
                     .show_ui(ui, |ui| {
                         for name in repo_names {
@@ -84,7 +84,7 @@ pub fn render_query_repo(
             ui.label("Repository:");
             let repo_names = state.repo_names();
             let selected_text = state.selected_repo.as_ref().unwrap_or(&state.query_options.repo_name);
-            ComboBox::from_id_source("repository_select")
+            ComboBox::from_id_salt("repository_select")
                 .selected_text(selected_text)
                 .show_ui(ui, |ui| {
                     for name in repo_names {
@@ -316,7 +316,7 @@ pub fn render_query_repo(
                         state.query_result = QueryResult {
                             is_loading: false,
                             success: false,
-                            error_message: Some(format!("Query failed: {}", err)),
+                            error_message: Some(format!("Query failed: {err}")),
                             results: Vec::new(),
                             channel: None,
                         };
@@ -383,10 +383,10 @@ fn render_query_results(ui: &mut Ui, state: &mut tokio::sync::MutexGuard<'_, Rep
         .max_height(400.0)
         .show(ui, |ui| {
             for (i, result, path, start_line, end_line) in &results_info {
-                let frame = Frame::none()
+                let frame = Frame::NONE
                     .fill(theme.code_background())
                     .stroke(Stroke::new(1.0, theme.border_color()))
-                    .rounding(egui::CornerRadius::same(4))
+                    .corner_radius(egui::CornerRadius::same(4))
                     .inner_margin(Vec2::new(8.0, 8.0))
                     .outer_margin(Vec2::new(0.0, 4.0));
                 
@@ -399,11 +399,11 @@ fn render_query_results(ui: &mut Ui, state: &mut tokio::sync::MutexGuard<'_, Rep
                     });
                     
                     ui.label(RichText::new(path).italics());
-                    ui.label(format!("Lines {}-{}", start_line, end_line));
+                    ui.label(format!("Lines {start_line}-{end_line}"));
                     
-                    let code_frame = Frame::none()
+                    let code_frame = Frame::NONE
                         .fill(ui.visuals().code_bg_color)
-                        .rounding(egui::CornerRadius::same(2))
+                        .corner_radius(egui::CornerRadius::same(2))
                         .inner_margin(Vec2::new(8.0, 8.0));
                     
                     code_frame.show(ui, |ui| {
@@ -438,7 +438,7 @@ fn render_query_results(ui: &mut Ui, state: &mut tokio::sync::MutexGuard<'_, Rep
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
     use crate::gui::repository::types::{RepoPanelState, RepoPanelTab};
     
     #[test]

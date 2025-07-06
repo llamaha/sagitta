@@ -269,7 +269,7 @@ impl BranchSuggestionsUI {
             ui.label(format!("Reason: {:?}", suggestion.reason));
             
             if let Some(success_prob) = suggestion.success_probability {
-                ui.label(format!("Success Probability: {:.2}", success_prob));
+                ui.label(format!("Success Probability: {success_prob:.2}"));
             }
             
             ui.label(format!("Conversation State: {:?}", suggestion.context.conversation_state));
@@ -278,7 +278,7 @@ impl BranchSuggestionsUI {
                 ui.label("Trigger Keywords:");
                 ui.indent("keywords", |ui| {
                     for keyword in &suggestion.context.trigger_keywords {
-                        ui.label(format!("• {}", keyword));
+                        ui.label(format!("• {keyword}"));
                     }
                 });
             }
@@ -287,13 +287,13 @@ impl BranchSuggestionsUI {
                 ui.label("Mentioned Tools:");
                 ui.indent("tools", |ui| {
                     for tool in &suggestion.context.mentioned_tools {
-                        ui.label(format!("• {}", tool));
+                        ui.label(format!("• {tool}"));
                     }
                 });
             }
             
             if let Some(ref project) = suggestion.context.project_context {
-                ui.label(format!("Project Context: {}", project));
+                ui.label(format!("Project Context: {project}"));
             }
         });
         
@@ -411,7 +411,7 @@ impl Default for BranchSuggestionsUI {
 mod tests {
     use super::*;
     use crate::agent::conversation::branching::{BranchContext, ConversationState};
-    use chrono::Utc;
+    
     
     fn create_test_suggestion() -> BranchSuggestion {
         BranchSuggestion {

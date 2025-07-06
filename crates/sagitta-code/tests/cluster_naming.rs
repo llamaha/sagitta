@@ -1,9 +1,8 @@
 use anyhow::Result;
-use sagitta_code::agent::conversation::clustering::{ConversationCluster, ConversationClusteringManager, ClusteringConfig};
+use sagitta_code::agent::conversation::clustering::ConversationCluster;
 use sagitta_code::agent::conversation::cluster_namer::{ClusterNamer, ClusterNamerConfig};
 use sagitta_code::agent::conversation::types::{ConversationSummary, ProjectType};
 use sagitta_code::agent::state::types::ConversationStatus;
-use std::sync::Arc;
 use uuid::Uuid;
 use chrono::Utc;
 
@@ -36,7 +35,7 @@ async fn test_cluster_names_are_descriptive() -> Result<()> {
     
     // Verify the generated name meets requirements
     assert!(!generated_name.is_empty(), "Cluster name should not be empty");
-    assert!(generated_name.len() > 3, "Cluster name should be longer than 3 characters, got: '{}'", generated_name);
+    assert!(generated_name.len() > 3, "Cluster name should be longer than 3 characters, got: '{generated_name}'");
     assert_ne!(generated_name, "Placeholder Title", "Generated name should replace placeholder");
     
     // Should be thematic and descriptive
@@ -44,7 +43,7 @@ async fn test_cluster_names_are_descriptive() -> Result<()> {
         generated_name.to_lowercase().contains("rust") || 
         generated_name.to_lowercase().contains("error") ||
         generated_name.to_lowercase().contains("handling"),
-        "Generated name should be thematic: '{}'", generated_name
+        "Generated name should be thematic: '{generated_name}'"
     );
     
     Ok(())
@@ -103,7 +102,7 @@ async fn test_cluster_naming_different_themes() -> Result<()> {
         python_name.to_lowercase().contains("python") ||
         python_name.to_lowercase().contains("data") ||
         python_name.to_lowercase().contains("analysis"),
-        "Python cluster name should be thematic: '{}'", python_name
+        "Python cluster name should be thematic: '{python_name}'"
     );
     
     // JavaScript cluster name should relate to web/development
@@ -111,7 +110,7 @@ async fn test_cluster_naming_different_themes() -> Result<()> {
         js_name.to_lowercase().contains("javascript") ||
         js_name.to_lowercase().contains("web") ||
         js_name.to_lowercase().contains("development"),
-        "JavaScript cluster name should be thematic: '{}'", js_name
+        "JavaScript cluster name should be thematic: '{js_name}'"
     );
     
     Ok(())
@@ -170,7 +169,7 @@ async fn test_cluster_naming_edge_cases() -> Result<()> {
     assert!(
         similar_name.to_lowercase().contains("rust") ||
         similar_name.to_lowercase().contains("error"),
-        "Similar conversations cluster should identify common theme: '{}'", similar_name
+        "Similar conversations cluster should identify common theme: '{similar_name}'"
     );
     
     Ok(())
@@ -209,7 +208,7 @@ async fn test_cluster_naming_fallback() -> Result<()> {
         fallback_name.contains("Conversations") ||
         fallback_name.contains("Discussions") ||
         fallback_name.contains("test"),
-        "Fallback name should follow expected pattern: '{}'", fallback_name
+        "Fallback name should follow expected pattern: '{fallback_name}'"
     );
     
     Ok(())
@@ -282,7 +281,7 @@ async fn test_cluster_naming_consistency() -> Result<()> {
             name.to_lowercase().contains("neural") ||
             name.to_lowercase().contains("model") ||
             name.to_lowercase().contains("architecture"),
-            "Generated name should be thematic: '{}'", name
+            "Generated name should be thematic: '{name}'"
         );
     }
     

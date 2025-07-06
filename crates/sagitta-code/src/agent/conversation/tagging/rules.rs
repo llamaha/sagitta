@@ -95,8 +95,8 @@ impl TagRule {
             },
             TagRuleType::MessageCount { min, max } => {
                 let count = conversation.messages.len();
-                let min_ok = min.map_or(true, |m| count >= m);
-                let max_ok = max.map_or(true, |m| count <= m);
+                let min_ok = min.is_none_or(|m| count >= m);
+                let max_ok = max.is_none_or(|m| count <= m);
                 min_ok && max_ok
             },
             TagRuleType::TitlePattern { patterns } => {
@@ -113,14 +113,14 @@ impl TagRule {
                 let duration = conversation.last_active.signed_duration_since(conversation.created_at);
                 let hours = duration.num_minutes() as f32 / 60.0;
                 
-                let min_ok = min_hours.map_or(true, |m| hours >= m);
-                let max_ok = max_hours.map_or(true, |m| hours <= m);
+                let min_ok = min_hours.is_none_or(|m| hours >= m);
+                let max_ok = max_hours.is_none_or(|m| hours <= m);
                 min_ok && max_ok
             },
             TagRuleType::BranchCount { min, max } => {
                 let count = conversation.branches.len();
-                let min_ok = min.map_or(true, |m| count >= m);
-                let max_ok = max.map_or(true, |m| count <= m);
+                let min_ok = min.is_none_or(|m| count >= m);
+                let max_ok = max.is_none_or(|m| count <= m);
                 min_ok && max_ok
             },
             TagRuleType::Custom => false, // Custom rules need special handling
@@ -136,8 +136,8 @@ impl TagRule {
         match &self.rule_type {
             TagRuleType::MessageCount { min, max } => {
                 let count = summary.message_count;
-                let min_ok = min.map_or(true, |m| count >= m);
-                let max_ok = max.map_or(true, |m| count <= m);
+                let min_ok = min.is_none_or(|m| count >= m);
+                let max_ok = max.is_none_or(|m| count <= m);
                 min_ok && max_ok
             },
             TagRuleType::TitlePattern { patterns } => {
@@ -147,8 +147,8 @@ impl TagRule {
             TagRuleType::BranchCount { min, max } => {
                 let has_branches = summary.has_branches;
                 let count = if has_branches { 1 } else { 0 }; // Simplified for summary
-                let min_ok = min.map_or(true, |m| count >= m);
-                let max_ok = max.map_or(true, |m| count <= m);
+                let min_ok = min.is_none_or(|m| count >= m);
+                let max_ok = max.is_none_or(|m| count <= m);
                 min_ok && max_ok
             },
             _ => false, // Other rules need full conversation data

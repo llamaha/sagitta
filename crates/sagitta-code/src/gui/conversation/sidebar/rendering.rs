@@ -27,7 +27,7 @@ impl ConversationSidebar {
         let panel_frame = Frame {
             inner_margin: Margin::same(8),
             outer_margin: Margin::same(0),
-            corner_radius: egui::Rounding::same(4),
+            corner_radius: egui::CornerRadius::same(4),
             fill: theme.panel_background(),
             stroke: egui::Stroke::NONE,
             ..Default::default()
@@ -111,7 +111,7 @@ impl ConversationSidebar {
                                     organized_data.filtered_count, organized_data.total_count));
                             },
                             Err(e) => {
-                                log::error!("Failed to organize conversations: {}", e);
+                                log::error!("Failed to organize conversations: {e}");
                                 self.render_simple_conversation_list(ui, app_state, theme);
                             }
                         }
@@ -130,7 +130,7 @@ impl ConversationSidebar {
                                     },
                                     Ok(None) => {},
                                     Err(e) => {
-                                        log::error!("Failed to render checkpoint suggestions: {}", e);
+                                        log::error!("Failed to render checkpoint suggestions: {e}");
                                     }
                                 }
                             }
@@ -407,7 +407,7 @@ impl ConversationSidebar {
                         // Create a small frame for each tag
                         let tag_frame = Frame {
                             inner_margin: Margin { left: 4, right: 4, top: 1, bottom: 1 },
-                            corner_radius: egui::Rounding::same(3),
+                            corner_radius: egui::CornerRadius::same(3),
                             fill: theme.accent_color().gamma_multiply(0.2),
                             stroke: egui::Stroke::NONE,
                             ..Default::default()
@@ -470,12 +470,12 @@ impl ConversationSidebar {
         if let Some(action) = self.pending_action.take() {
             match action {
                 SidebarAction::SwitchToConversation(id) => {
-                    log::info!("Sidebar: Switching to conversation {}", id);
+                    log::info!("Sidebar: Switching to conversation {id}");
                     app_state.current_conversation_id = Some(id);
                     self.selected_conversation = Some(id);
                     match app_event_sender.send(AppEvent::SwitchToConversation(id)) {
                         Ok(_) => log::info!("Sidebar: Successfully sent SwitchToConversation event"),
-                        Err(e) => log::error!("Sidebar: Failed to send SwitchToConversation event: {}", e),
+                        Err(e) => log::error!("Sidebar: Failed to send SwitchToConversation event: {e}"),
                     }
                 }
                 SidebarAction::CreateNewConversation => {
@@ -488,7 +488,7 @@ impl ConversationSidebar {
                     
                     // Send event to notify the app about the new conversation
                     if let Err(e) = app_event_sender.send(AppEvent::CreateNewConversation) {
-                        log::error!("Failed to send CreateNewConversation event: {}", e);
+                        log::error!("Failed to send CreateNewConversation event: {e}");
                     }
                     
                     // The next message will automatically create a new conversation
@@ -506,16 +506,16 @@ impl ConversationSidebar {
                         conversation_id: id,
                         new_title: new_name,
                     }) {
-                        log::error!("Failed to send RenameConversation event: {}", e);
+                        log::error!("Failed to send RenameConversation event: {e}");
                     }
                 }
                 SidebarAction::SetWorkspace(id) => {
                     let _ = app_event_sender.send(AppEvent::RefreshConversationList);
                 }
                 SidebarAction::UpdateConversationTitle(id) => {
-                    log::info!("Sidebar: Requesting title update for conversation {}", id);
+                    log::info!("Sidebar: Requesting title update for conversation {id}");
                     if let Err(e) = app_event_sender.send(AppEvent::UpdateConversationTitle { conversation_id: id }) {
-                        log::error!("Failed to send UpdateConversationTitle event: {}", e);
+                        log::error!("Failed to send UpdateConversationTitle event: {e}");
                     }
                 }
                 _ => {}

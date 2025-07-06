@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use tokio;
 use sagitta_code::{
     agent::Agent,
     config::SagittaCodeConfig,
@@ -9,7 +8,6 @@ use sagitta_code::{
 };
 use sagitta_embed::{EmbeddingPool, EmbeddingConfig, EmbeddingProvider};
 use sagitta_embed::provider::onnx::OnnxEmbeddingModel;
-use sagitta_search;
 use futures_util::StreamExt;
 use std::path::Path;
 use serde_json::Value;
@@ -249,7 +247,7 @@ Please web search for the clone url and correct branch / target_ref then add / s
                 chunks.push(chunk);
             }
             Err(e) => {
-                println!("Stream error: {}", e);
+                println!("Stream error: {e}");
                 break;
             }
         }
@@ -259,7 +257,7 @@ Please web search for the clone url and correct branch / target_ref then add / s
     
     for chunk in &chunks {
         if let sagitta_code::llm::client::MessagePart::Text { text } = &chunk.part {
-            print!("{}", text);
+            print!("{text}");
         }
     }
     println!();
@@ -344,7 +342,7 @@ async fn test_add_repository_already_exists_handling() {
                 first_chunks.push(chunk);
             }
             Err(e) => {
-                println!("First stream error: {}", e);
+                println!("First stream error: {e}");
                 break;
             }
         }
@@ -364,7 +362,7 @@ async fn test_add_repository_already_exists_handling() {
                 second_chunks.push(chunk);
             }
             Err(e) => {
-                println!("Second stream error: {}", e);
+                println!("Second stream error: {e}");
                 break;
             }
         }
@@ -373,13 +371,13 @@ async fn test_add_repository_already_exists_handling() {
     println!("=== First add repository attempt ===");
     for chunk in &first_chunks {
         if let sagitta_code::llm::client::MessagePart::Text { text } = &chunk.part {
-            print!("{}", text);
+            print!("{text}");
         }
     }
     println!("\n\n=== Second add repository attempt (should handle 'already exists') ===");
     for chunk in &second_chunks {
         if let sagitta_code::llm::client::MessagePart::Text { text } = &chunk.part {
-            print!("{}", text);
+            print!("{text}");
         }
     }
     println!();
@@ -394,7 +392,7 @@ async fn test_add_repository_already_exists_handling() {
             None
         }
     }).collect::<String>();
-    assert!(second_response_text.contains("already exists"), "Second response should indicate repository already exists. Got: {}", second_response_text);
+    assert!(second_response_text.contains("already exists"), "Second response should indicate repository already exists. Got: {second_response_text}");
 }
 
 #[tokio::test]

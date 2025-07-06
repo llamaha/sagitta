@@ -579,7 +579,7 @@ impl AppTheme {
 
     /// Get frame for side panels with consistent inner padding
     pub fn side_panel_frame(&self) -> egui::Frame {
-        egui::Frame::none()
+        egui::Frame::NONE
             .fill(self.panel_background())
             .inner_margin(egui::Margin::same(8))
     }
@@ -761,14 +761,14 @@ mod tests {
             let thinking_bg = theme.thinking_background();
             
             // Verify colors are not transparent (alpha > 0)
-            assert!(panel_bg.a() > 0, "Panel background should not be transparent for {:?}", theme);
-            assert!(input_bg.a() > 0, "Input background should not be transparent for {:?}", theme);
-            assert!(button_bg.a() > 0, "Button background should not be transparent for {:?}", theme);
-            assert!(code_bg.a() > 0, "Code background should not be transparent for {:?}", theme);
-            assert!(thinking_bg.a() > 0, "Thinking background should not be transparent for {:?}", theme);
+            assert!(panel_bg.a() > 0, "Panel background should not be transparent for {theme:?}");
+            assert!(input_bg.a() > 0, "Input background should not be transparent for {theme:?}");
+            assert!(button_bg.a() > 0, "Button background should not be transparent for {theme:?}");
+            assert!(code_bg.a() > 0, "Code background should not be transparent for {theme:?}");
+            assert!(thinking_bg.a() > 0, "Thinking background should not be transparent for {theme:?}");
             
             // Test that backgrounds are different from each other
-            assert_ne!(panel_bg, input_bg, "Panel and input backgrounds should be different for {:?}", theme);
+            assert_ne!(panel_bg, input_bg, "Panel and input backgrounds should be different for {theme:?}");
         }
     }
 
@@ -785,14 +785,14 @@ mod tests {
             let timestamp = theme.timestamp_color();
             
             // Verify colors are not transparent
-            assert!(text.a() > 0, "Text color should not be transparent for {:?}", theme);
-            assert!(hint.a() > 0, "Hint text color should not be transparent for {:?}", theme);
-            assert!(code.a() > 0, "Code text color should not be transparent for {:?}", theme);
-            assert!(thinking.a() > 0, "Thinking text color should not be transparent for {:?}", theme);
-            assert!(timestamp.a() > 0, "Timestamp color should not be transparent for {:?}", theme);
+            assert!(text.a() > 0, "Text color should not be transparent for {theme:?}");
+            assert!(hint.a() > 0, "Hint text color should not be transparent for {theme:?}");
+            assert!(code.a() > 0, "Code text color should not be transparent for {theme:?}");
+            assert!(thinking.a() > 0, "Thinking text color should not be transparent for {theme:?}");
+            assert!(timestamp.a() > 0, "Timestamp color should not be transparent for {theme:?}");
             
             // Test that main text color is different from hint text
-            assert_ne!(text, hint, "Main text and hint text should be different colors for {:?}", theme);
+            assert_ne!(text, hint, "Main text and hint text should be different colors for {theme:?}");
         }
     }
 
@@ -807,14 +807,14 @@ mod tests {
             let error = theme.error_color();
             
             // Verify colors are not transparent
-            assert!(accent.a() > 0, "Accent color should not be transparent for {:?}", theme);
-            assert!(success.a() > 0, "Success color should not be transparent for {:?}", theme);
-            assert!(warning.a() > 0, "Warning color should not be transparent for {:?}", theme);
-            assert!(error.a() > 0, "Error color should not be transparent for {:?}", theme);
+            assert!(accent.a() > 0, "Accent color should not be transparent for {theme:?}");
+            assert!(success.a() > 0, "Success color should not be transparent for {theme:?}");
+            assert!(warning.a() > 0, "Warning color should not be transparent for {theme:?}");
+            assert!(error.a() > 0, "Error color should not be transparent for {theme:?}");
             
             // Test that accent colors are distinct
-            assert_ne!(success, error, "Success and error colors should be different for {:?}", theme);
-            assert_ne!(warning, error, "Warning and error colors should be different for {:?}", theme);
+            assert_ne!(success, error, "Success and error colors should be different for {theme:?}");
+            assert_ne!(warning, error, "Warning and error colors should be different for {theme:?}");
         }
     }
 
@@ -827,11 +827,11 @@ mod tests {
             let focus_border = theme.focus_border_color();
             
             // Verify colors are not transparent
-            assert!(border.a() > 0, "Border color should not be transparent for {:?}", theme);
-            assert!(focus_border.a() > 0, "Focus border color should not be transparent for {:?}", theme);
+            assert!(border.a() > 0, "Border color should not be transparent for {theme:?}");
+            assert!(focus_border.a() > 0, "Focus border color should not be transparent for {theme:?}");
             
             // Focus border should be different from regular border
-            assert_ne!(border, focus_border, "Border and focus border should be different for {:?}", theme);
+            assert_ne!(border, focus_border, "Border and focus border should be different for {theme:?}");
         }
     }
 
@@ -847,15 +847,15 @@ mod tests {
             let button_disabled_text = theme.button_disabled_text_color();
             
             // Verify colors are not transparent
-            assert!(button_bg.a() > 0, "Button background should not be transparent for {:?}", theme);
-            assert!(button_hover.a() > 0, "Button hover should not be transparent for {:?}", theme);
-            assert!(button_disabled.a() > 0, "Button disabled should not be transparent for {:?}", theme);
-            assert!(button_text.a() > 0, "Button text should not be transparent for {:?}", theme);
-            assert!(button_disabled_text.a() > 0, "Button disabled text should not be transparent for {:?}", theme);
+            assert!(button_bg.a() > 0, "Button background should not be transparent for {theme:?}");
+            assert!(button_hover.a() > 0, "Button hover should not be transparent for {theme:?}");
+            assert!(button_disabled.a() > 0, "Button disabled should not be transparent for {theme:?}");
+            assert!(button_text.a() > 0, "Button text should not be transparent for {theme:?}");
+            assert!(button_disabled_text.a() > 0, "Button disabled text should not be transparent for {theme:?}");
             
             // Test that button states are different
-            assert_ne!(button_bg, button_hover, "Button background and hover should be different for {:?}", theme);
-            assert_ne!(button_text, button_disabled_text, "Button text and disabled text should be different for {:?}", theme);
+            assert_ne!(button_bg, button_hover, "Button background and hover should be different for {theme:?}");
+            assert_ne!(button_text, button_disabled_text, "Button text and disabled text should be different for {theme:?}");
         }
     }
 
@@ -870,15 +870,15 @@ mod tests {
             let tool = theme.tool_color();
             
             // Verify colors are not transparent
-            assert!(user.a() > 0, "User color should not be transparent for {:?}", theme);
-            assert!(agent.a() > 0, "Agent color should not be transparent for {:?}", theme);
-            assert!(system.a() > 0, "System color should not be transparent for {:?}", theme);
-            assert!(tool.a() > 0, "Tool color should not be transparent for {:?}", theme);
+            assert!(user.a() > 0, "User color should not be transparent for {theme:?}");
+            assert!(agent.a() > 0, "Agent color should not be transparent for {theme:?}");
+            assert!(system.a() > 0, "System color should not be transparent for {theme:?}");
+            assert!(tool.a() > 0, "Tool color should not be transparent for {theme:?}");
             
             // Test that author colors are distinct
-            assert_ne!(user, agent, "User and agent colors should be different for {:?}", theme);
-            assert_ne!(agent, system, "Agent and system colors should be different for {:?}", theme);
-            assert_ne!(system, tool, "System and tool colors should be different for {:?}", theme);
+            assert_ne!(user, agent, "User and agent colors should be different for {theme:?}");
+            assert_ne!(agent, system, "Agent and system colors should be different for {theme:?}");
+            assert_ne!(system, tool, "System and tool colors should be different for {theme:?}");
         }
     }
 
@@ -892,13 +892,13 @@ mod tests {
             let complete = theme.complete_color();
             
             // Verify colors are not transparent
-            assert!(streaming.a() > 0, "Streaming color should not be transparent for {:?}", theme);
-            assert!(thinking.a() > 0, "Thinking indicator should not be transparent for {:?}", theme);
-            assert!(complete.a() > 0, "Complete color should not be transparent for {:?}", theme);
+            assert!(streaming.a() > 0, "Streaming color should not be transparent for {theme:?}");
+            assert!(thinking.a() > 0, "Thinking indicator should not be transparent for {theme:?}");
+            assert!(complete.a() > 0, "Complete color should not be transparent for {theme:?}");
             
             // Test that status colors are distinct
-            assert_ne!(streaming, thinking, "Streaming and thinking colors should be different for {:?}", theme);
-            assert_ne!(thinking, complete, "Thinking and complete colors should be different for {:?}", theme);
+            assert_ne!(streaming, thinking, "Streaming and thinking colors should be different for {theme:?}");
+            assert_ne!(thinking, complete, "Thinking and complete colors should be different for {theme:?}");
         }
     }
 
@@ -953,7 +953,7 @@ mod tests {
             let contrast = (bg_luminance - text_luminance).abs();
             
             // Ensure there's reasonable contrast (at least 0.3 difference)
-            assert!(contrast > 0.3, "Text should have sufficient contrast with background for {:?}", theme);
+            assert!(contrast > 0.3, "Text should have sufficient contrast with background for {theme:?}");
         }
     }
 
@@ -1043,13 +1043,13 @@ mod tests {
             let frame = theme.side_panel_frame();
             
             // Check that the frame has the correct margins (8px all around)
-            assert_eq!(frame.inner_margin.left, 8, "Side panel frame should have 8px left margin for {:?}", theme);
-            assert_eq!(frame.inner_margin.right, 8, "Side panel frame should have 8px right margin for {:?}", theme);
-            assert_eq!(frame.inner_margin.top, 8, "Side panel frame should have 8px top margin for {:?}", theme);
-            assert_eq!(frame.inner_margin.bottom, 8, "Side panel frame should have 8px bottom margin for {:?}", theme);
+            assert_eq!(frame.inner_margin.left, 8, "Side panel frame should have 8px left margin for {theme:?}");
+            assert_eq!(frame.inner_margin.right, 8, "Side panel frame should have 8px right margin for {theme:?}");
+            assert_eq!(frame.inner_margin.top, 8, "Side panel frame should have 8px top margin for {theme:?}");
+            assert_eq!(frame.inner_margin.bottom, 8, "Side panel frame should have 8px bottom margin for {theme:?}");
             
             // Check that the background is set
-            assert_eq!(frame.fill, theme.panel_background(), "Side panel frame should use panel background color for {:?}", theme);
+            assert_eq!(frame.fill, theme.panel_background(), "Side panel frame should use panel background color for {theme:?}");
         }
     }
 } 

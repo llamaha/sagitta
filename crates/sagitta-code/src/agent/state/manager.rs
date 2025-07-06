@@ -48,6 +48,12 @@ pub struct StateManager {
     event_sender: broadcast::Sender<StateEvent>,
 }
 
+impl Default for StateManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StateManager {
     /// Create a new state manager with the default state
     pub fn new() -> Self {
@@ -89,7 +95,7 @@ impl StateManager {
     /// Get the current agent mode
     pub async fn get_agent_mode(&self) -> AgentMode {
         let state = self.state.read().await;
-        state.current_mode.clone()
+        state.current_mode
     }
     
     /// Get the current conversation status
@@ -163,8 +169,8 @@ impl StateManager {
     pub async fn set_agent_mode(&self, mode: AgentMode) -> Result<(), SagittaCodeError> {
         let mut state = self.state.write().await;
         
-        let old_mode = state.current_mode.clone();
-        state.current_mode = mode.clone();
+        let old_mode = state.current_mode;
+        state.current_mode = mode;
         
         // Emit event
         let _ = self.event_sender.send(StateEvent::ModeChanged {

@@ -46,14 +46,14 @@ pub fn convert_messages_to_claude(messages: &[Message]) -> Vec<ClaudeMessage> {
                 }
                 MessagePart::Thought { text } => {
                     content_blocks.push(ClaudeMessageContent::Text { 
-                        text: format!("<thinking>{}</thinking>", text) 
+                        text: format!("<thinking>{text}</thinking>") 
                     });
                 }
                 MessagePart::ToolCall { tool_call_id, name, parameters } => {
                     // Convert tool calls to text format for Claude Code
                     let params_str = serde_json::to_string_pretty(parameters).unwrap_or_default();
                     content_blocks.push(ClaudeMessageContent::Text { 
-                        text: format!("Tool Call [{}]: {} with parameters:\n{}", tool_call_id, name, params_str) 
+                        text: format!("Tool Call [{tool_call_id}]: {name} with parameters:\n{params_str}") 
                     });
                 }
                 MessagePart::ToolResult { tool_call_id, name, result } => {

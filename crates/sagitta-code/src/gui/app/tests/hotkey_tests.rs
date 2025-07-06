@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use super::super::*;
-    use egui::{Context, Key};
+    
+    use egui::Context;
     use crate::gui::app::panels::{ActivePanel, PanelManager};
     
     #[test]

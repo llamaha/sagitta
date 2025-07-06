@@ -145,7 +145,7 @@ impl ThemeCustomizer {
             .default_width(450.0)
             .min_width(400.0)
             .max_width(700.0)
-            .frame(Frame::none().fill(self.colors.panel_background))
+            .frame(Frame::NONE.fill(self.colors.panel_background))
             .show(ctx, |ui| {
                 ui.vertical(|ui| {
                     // Header
@@ -306,7 +306,7 @@ impl ThemeCustomizer {
                 ui.add_space(8.0);
                 
                 // Panel background test
-                Frame::none()
+                Frame::NONE
                     .fill(self.colors.panel_background)
                     .stroke(Stroke::new(1.0, self.colors.border_color))
                     .inner_margin(Vec2::splat(8.0))
@@ -314,7 +314,7 @@ impl ThemeCustomizer {
                         ui.label(RichText::new("Panel Background").color(self.colors.text_color));
                         
                         // Input background test
-                        Frame::none()
+                        Frame::NONE
                             .fill(self.colors.input_background)
                             .stroke(Stroke::new(1.0, self.colors.focus_border_color))
                             .inner_margin(Vec2::splat(4.0))
@@ -351,7 +351,7 @@ impl ThemeCustomizer {
                         ui.add_space(4.0);
                         
                         // Code background test
-                        Frame::none()
+                        Frame::NONE
                             .fill(self.colors.code_background)
                             .stroke(Stroke::new(1.0, self.colors.border_color))
                             .inner_margin(Vec2::splat(4.0))
@@ -362,7 +362,7 @@ impl ThemeCustomizer {
                         ui.add_space(4.0);
                         
                         // Thinking background test
-                        Frame::none()
+                        Frame::NONE
                             .fill(self.colors.thinking_background)
                             .stroke(Stroke::new(1.0, self.colors.border_color))
                             .inner_margin(Vec2::splat(4.0))
@@ -404,7 +404,7 @@ impl ThemeCustomizer {
                         // Diff colors test
                         ui.horizontal(|ui| {
                             // Added diff example
-                            Frame::none()
+                            Frame::NONE
                                 .fill(self.colors.diff_added_bg)
                                 .inner_margin(Vec2::splat(2.0))
                                 .show(ui, |ui| {
@@ -412,7 +412,7 @@ impl ThemeCustomizer {
                                 });
                             
                             // Removed diff example
-                            Frame::none()
+                            Frame::NONE
                                 .fill(self.colors.diff_removed_bg)
                                 .inner_margin(Vec2::splat(2.0))
                                 .show(ui, |ui| {
@@ -558,7 +558,7 @@ impl ThemeCustomizer {
     // Individual test methods for each color property
     fn test_panel_background(&self, ui: &mut Ui) {
         ui.label(RichText::new("Panel Background Test:").strong());
-        Frame::none()
+        Frame::NONE
             .fill(self.colors.panel_background)
             .stroke(Stroke::new(2.0, Color32::RED)) // Red border to highlight the test area
             .inner_margin(Vec2::splat(8.0))
@@ -570,7 +570,7 @@ impl ThemeCustomizer {
 
     fn test_input_background(&self, ui: &mut Ui) {
         ui.label(RichText::new("Input Background Test:").strong());
-        Frame::none()
+        Frame::NONE
             .fill(self.colors.input_background)
             .stroke(Stroke::new(2.0, Color32::RED))
             .inner_margin(Vec2::splat(8.0))
@@ -593,7 +593,7 @@ impl ThemeCustomizer {
 
     fn test_code_background(&self, ui: &mut Ui) {
         ui.label(RichText::new("Code Background Test:").strong());
-        Frame::none()
+        Frame::NONE
             .fill(self.colors.code_background)
             .stroke(Stroke::new(2.0, Color32::RED))
             .inner_margin(Vec2::splat(8.0))
@@ -605,7 +605,7 @@ impl ThemeCustomizer {
 
     fn test_thinking_background(&self, ui: &mut Ui) {
         ui.label(RichText::new("Thinking Background Test:").strong());
-        Frame::none()
+        Frame::NONE
             .fill(self.colors.thinking_background)
             .stroke(Stroke::new(2.0, Color32::RED))
             .inner_margin(Vec2::splat(8.0))
@@ -672,7 +672,7 @@ impl ThemeCustomizer {
 
     fn test_border_color(&self, ui: &mut Ui) {
         ui.label(RichText::new("Border Color Test:").strong());
-        Frame::none()
+        Frame::NONE
             .stroke(Stroke::new(3.0, self.colors.border_color))
             .inner_margin(Vec2::splat(8.0))
             .show(ui, |ui| {
@@ -683,7 +683,7 @@ impl ThemeCustomizer {
 
     fn test_focus_border_color(&self, ui: &mut Ui) {
         ui.label(RichText::new("Focus Border Color Test:").strong());
-        Frame::none()
+        Frame::NONE
             .stroke(Stroke::new(3.0, self.colors.focus_border_color))
             .inner_margin(Vec2::splat(8.0))
             .show(ui, |ui| {
@@ -780,7 +780,7 @@ impl ThemeCustomizer {
 
     fn test_diff_added_bg(&self, ui: &mut Ui) {
         ui.label(RichText::new("Added Background Test:").strong());
-        Frame::none()
+        Frame::NONE
             .fill(self.colors.diff_added_bg)
             .stroke(Stroke::new(2.0, Color32::RED))
             .inner_margin(Vec2::splat(8.0))
@@ -792,7 +792,7 @@ impl ThemeCustomizer {
 
     fn test_diff_removed_bg(&self, ui: &mut Ui) {
         ui.label(RichText::new("Removed Background Test:").strong());
-        Frame::none()
+        Frame::NONE
             .fill(self.colors.diff_removed_bg)
             .stroke(Stroke::new(2.0, Color32::RED))
             .inner_margin(Vec2::splat(8.0))

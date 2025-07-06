@@ -123,7 +123,7 @@ impl ConversationService {
                     let _ = self.event_sender.send(ConversationEvent::ClustersUpdated(clusters));
                 },
                 Err(e) => {
-                    log::warn!("Failed to refresh clusters: {}", e);
+                    log::warn!("Failed to refresh clusters: {e}");
                 }
             }
         }
@@ -237,7 +237,7 @@ impl ConversationService {
                     let _ = self.event_sender.send(ConversationEvent::ClustersUpdated(clusters));
                 },
                 Err(e) => {
-                    log::error!("Failed to refresh clusters: {}", e);
+                    log::error!("Failed to refresh clusters: {e}");
                     return Err(e);
                 }
             }
@@ -264,7 +264,7 @@ impl ConversationService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::conversation::analytics::AnalyticsConfig;
+    
     use crate::agent::conversation::persistence::MockConversationPersistence;
     use crate::agent::conversation::search::MockConversationSearchEngine;
     use crate::agent::conversation::types::ConversationSummary;

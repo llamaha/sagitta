@@ -107,7 +107,7 @@ impl TitleGenerator {
                     }
                 }
                 Err(e) => {
-                    log::debug!("Fast model title generation failed: {}, falling back", e);
+                    log::debug!("Fast model title generation failed: {e}, falling back");
                 }
             }
         }
@@ -122,7 +122,7 @@ impl TitleGenerator {
                     }
                 }
                 Err(e) => {
-                    eprintln!("LLM title generation failed: {}", e);
+                    eprintln!("LLM title generation failed: {e}");
                 }
             }
         }
@@ -266,7 +266,7 @@ impl TitleGenerator {
             if let Some(start) = content_lower.find("how") {
                 let question_part = &content[start..];
                 let words: Vec<&str> = question_part.split_whitespace().take(4).collect();
-                format!("{}", words.join(" "))
+                words.join(" ").to_string()
             } else {
                 "How-To Question".to_string()
             }
@@ -315,7 +315,7 @@ impl TitleGenerator {
             title
         } else {
             let truncated = title.chars().take(self.config.max_title_length - 3).collect::<String>();
-            format!("{}...", truncated)
+            format!("{truncated}...")
         }
     }
 }

@@ -683,7 +683,7 @@ mod tests {
     #[test]
     fn test_agent_message_debug_format() {
         let message = AgentMessage::user("Debug test");
-        let debug_str = format!("{:?}", message);
+        let debug_str = format!("{message:?}");
         
         assert!(debug_str.contains("AgentMessage"));
         assert!(debug_str.contains("Debug test"));
@@ -701,7 +701,7 @@ mod tests {
             execution_time: None,
         };
         
-        let debug_str = format!("{:?}", tool_call);
+        let debug_str = format!("{tool_call:?}");
         
         assert!(debug_str.contains("ToolCall"));
         assert!(debug_str.contains("debug_test"));

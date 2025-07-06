@@ -59,7 +59,7 @@ pub fn render_branch_management(
 /// Process results from async operations and update UI state
 fn process_async_results(state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>) {
     let selected_repo = state.branch_management.selected_repo_for_branches.clone();
-    let selected_repo_str = selected_repo.as_ref().map(|s| s.as_str()).unwrap_or("");
+    let selected_repo_str = selected_repo.as_deref().unwrap_or("");
 
     // Collect branch results
     let mut branch_results = Vec::new();
@@ -183,9 +183,7 @@ fn render_repository_selector(ui: &mut Ui, state: &mut tokio::sync::MutexGuard<'
     ui.horizontal(|ui| {
         ui.label("Repository:");
         
-        let selected_text = state.branch_management.selected_repo_for_branches
-            .as_ref()
-            .map(|s| s.as_str())
+        let selected_text = state.branch_management.selected_repo_for_branches.as_deref()
             .unwrap_or("Select repository...");
             
         let repo_names = state.repo_names();
@@ -195,8 +193,7 @@ fn render_repository_selector(ui: &mut Ui, state: &mut tokio::sync::MutexGuard<'
             .show_ui(ui, |ui| {
                 for repo_name in &repo_names {
                     let is_selected = state.branch_management.selected_repo_for_branches
-                        .as_ref()
-                        .map_or(false, |selected| selected == repo_name);
+                        .as_ref() == Some(repo_name);
                         
                     if ui.selectable_value(
                         &mut state.branch_management.selected_repo_for_branches,
@@ -490,27 +487,27 @@ fn render_status_messages(
 ) {
     // Display messages
     if let Some(ref error) = state.branch_management.switch_error {
-        ui.label(RichText::new(format!("Switch Error: {}", error)).color(theme.error_color()));
+        ui.label(RichText::new(format!("Switch Error: {error}")).color(theme.error_color()));
     }
     
     if let Some(ref success) = state.branch_management.switch_success {
-        ui.label(RichText::new(format!("Switch Success: {}", success)).color(theme.success_color()));
+        ui.label(RichText::new(format!("Switch Success: {success}")).color(theme.success_color()));
     }
     
     if let Some(ref error) = state.branch_management.create_error {
-        ui.label(RichText::new(format!("Create Error: {}", error)).color(theme.error_color()));
+        ui.label(RichText::new(format!("Create Error: {error}")).color(theme.error_color()));
     }
     
     if let Some(ref success) = state.branch_management.create_success {
-        ui.label(RichText::new(format!("Create Success: {}", success)).color(theme.success_color()));
+        ui.label(RichText::new(format!("Create Success: {success}")).color(theme.success_color()));
     }
     
     if let Some(ref error) = state.branch_management.delete_error {
-        ui.label(RichText::new(format!("Delete Error: {}", error)).color(theme.error_color()));
+        ui.label(RichText::new(format!("Delete Error: {error}")).color(theme.error_color()));
     }
     
     if let Some(ref success) = state.branch_management.delete_success {
-        ui.label(RichText::new(format!("Delete Success: {}", success)).color(theme.success_color()));
+        ui.label(RichText::new(format!("Delete Success: {success}")).color(theme.success_color()));
     }
 }
 
@@ -526,7 +523,7 @@ fn render_delete_confirmation(
         if let Some(ref branch_to_delete) = state.branch_management.branch_to_delete.clone() {
             ui.separator();
             ui.horizontal(|ui| {
-                ui.label(format!("Delete branch '{}'?", branch_to_delete));
+                ui.label(format!("Delete branch '{branch_to_delete}'?"));
                 if ui.button(RichText::new("Confirm Delete").color(theme.error_color()))
                     .clicked() {
                     delete_branch(
@@ -573,7 +570,7 @@ fn render_sync_result(ui: &mut Ui, sync_result: &BranchSyncResult, theme: crate:
     }
     
     if let Some(ref error) = sync_result.error_message {
-        ui.label(RichText::new(format!("Error: {}", error)).color(theme.error_color()));
+        ui.label(RichText::new(format!("Error: {error}")).color(theme.error_color()));
     }
 }
 
@@ -597,10 +594,9 @@ fn clear_messages(state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>) {
 }
 
 /// Async operations (these will be implemented to work with the repository manager)
-
 fn load_branches(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String, sender: Option<Sender<BranchOperationResult>>) {
     tokio::spawn(async move {
-        info!("Loading branches for repository: {}", repo_name);
+        info!("Loading branches for repository: {repo_name}");
         
         match repo_manager.lock().await.list_branches(&repo_name).await {
             Ok(branches) => {
@@ -620,16 +616,16 @@ fn load_branches(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String,
                 }
             }
             Err(e) => {
-                error!("Failed to load branches for repository '{}': {}", repo_name, e);
+                error!("Failed to load branches for repository '{repo_name}': {e}");
                 
                 if let Some(sender) = sender {
-                    if let Err(_) = sender.send(BranchOperationResult {
+                    if sender.send(BranchOperationResult {
                         repo_name,
                         success: false,
                         branches: Vec::new(),
                         current_branch: None,
                         error_message: Some(e.to_string()),
-                    }) {
+                    }).is_err() {
                         warn!("Failed to send branch loading error: receiver dropped");
                     }
                 }
@@ -640,7 +636,7 @@ fn load_branches(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String,
 
 fn load_tags(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String, sender: Option<Sender<TagOperationResult>>) {
     tokio::spawn(async move {
-        info!("Loading tags for repository: {}", repo_name);
+        info!("Loading tags for repository: {repo_name}");
         
         match repo_manager.lock().await.list_tags(&repo_name).await {
             Ok(tags) => {
@@ -648,26 +644,26 @@ fn load_tags(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String, sen
                 // TODO: Update UI state with tags
                 // This would require a channel or callback mechanism to update the UI state
                 if let Some(sender) = sender {
-                    if let Err(_) = sender.send(TagOperationResult {
+                    if sender.send(TagOperationResult {
                         repo_name,
                         success: true,
                         tags,
                         error_message: None,
-                    }) {
+                    }).is_err() {
                         warn!("Failed to send tag loading result: receiver dropped");
                     }
                 }
             }
             Err(e) => {
-                error!("Failed to load tags for repository '{}': {}", repo_name, e);
+                error!("Failed to load tags for repository '{repo_name}': {e}");
                 // TODO: Update UI state with error
                 if let Some(sender) = sender {
-                    if let Err(_) = sender.send(TagOperationResult {
+                    if sender.send(TagOperationResult {
                         repo_name,
                         success: false,
                         tags: Vec::new(),
                         error_message: Some(e.to_string()),
-                    }) {
+                    }).is_err() {
                         warn!("Failed to send tag loading error: receiver dropped");
                     }
                 }
@@ -678,7 +674,7 @@ fn load_tags(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String, sen
 
 fn switch_to_ref(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String, ref_name: String, sender: Option<Sender<SwitchOperationResult>>) {
     tokio::spawn(async move {
-        info!("Switching to ref '{}' in repository '{}'", ref_name, repo_name);
+        info!("Switching to ref '{ref_name}' in repository '{repo_name}'");
         
         match repo_manager.lock().await.switch_to_ref(&repo_name, &ref_name, true).await {
             Ok(result) => {
@@ -696,7 +692,7 @@ fn switch_to_ref(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String,
                 }
             }
             Err(e) => {
-                error!("Failed to switch to ref '{}' in repository '{}': {}", ref_name, repo_name, e);
+                error!("Failed to switch to ref '{ref_name}' in repository '{repo_name}': {e}");
                 
                 if let Some(sender) = sender {
                     let _ = sender.send(SwitchOperationResult {
@@ -714,11 +710,11 @@ fn switch_to_ref(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String,
 
 fn create_branch(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String, branch_name: String, sender: Option<Sender<CreateBranchResult>>) {
     tokio::spawn(async move {
-        info!("Creating branch '{}' in repository '{}'", branch_name, repo_name);
+        info!("Creating branch '{branch_name}' in repository '{repo_name}'");
         
         match repo_manager.lock().await.create_branch(&repo_name, &branch_name, false).await {
             Ok(()) => {
-                info!("Successfully created branch '{}' in repository '{}'", branch_name, repo_name);
+                info!("Successfully created branch '{branch_name}' in repository '{repo_name}'");
                 
                 if let Some(sender) = sender {
                     let _ = sender.send(CreateBranchResult {
@@ -730,7 +726,7 @@ fn create_branch(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String,
                 }
             }
             Err(e) => {
-                error!("Failed to create branch '{}' in repository '{}': {}", branch_name, repo_name, e);
+                error!("Failed to create branch '{branch_name}' in repository '{repo_name}': {e}");
                 
                 if let Some(sender) = sender {
                     let _ = sender.send(CreateBranchResult {
@@ -747,11 +743,11 @@ fn create_branch(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String,
 
 fn delete_branch(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String, branch_name: String, sender: Option<Sender<DeleteBranchResult>>) {
     tokio::spawn(async move {
-        info!("Deleting branch '{}' in repository '{}'", branch_name, repo_name);
+        info!("Deleting branch '{branch_name}' in repository '{repo_name}'");
         
         match repo_manager.lock().await.delete_branch(&repo_name, &branch_name, false).await {
             Ok(()) => {
-                info!("Successfully deleted branch '{}' in repository '{}'", branch_name, repo_name);
+                info!("Successfully deleted branch '{branch_name}' in repository '{repo_name}'");
                 
                 if let Some(sender) = sender {
                     let _ = sender.send(DeleteBranchResult {
@@ -763,7 +759,7 @@ fn delete_branch(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String,
                 }
             }
             Err(e) => {
-                error!("Failed to delete branch '{}' in repository '{}': {}", branch_name, repo_name, e);
+                error!("Failed to delete branch '{branch_name}' in repository '{repo_name}': {e}");
                 
                 if let Some(sender) = sender {
                     let _ = sender.send(DeleteBranchResult {
@@ -779,7 +775,6 @@ fn delete_branch(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String,
 }
 
 /// Helper functions for channel management
-
 fn initialize_channels_if_needed(state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>) {
     if state.branch_management.branch_result_receiver.is_none() {
         let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();

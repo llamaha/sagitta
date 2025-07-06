@@ -61,12 +61,12 @@ impl ClaudeCodeClient {
         
         // Start the MCP server and get config
         let mcp_config = mcp.start().await
-            .map_err(|e| SagittaCodeError::LlmError(format!("Failed to start MCP: {}", e)))?;
+            .map_err(|e| SagittaCodeError::LlmError(format!("Failed to start MCP: {e}")))?;
         
         // Extract the config path
         if let Some(path) = mcp_config.get("mcp_config_path").and_then(|v| v.as_str()) {
             self.mcp_config_path = Some(path.to_string());
-            log::info!("CLAUDE_CODE: MCP config created at: {}", path);
+            log::info!("CLAUDE_CODE: MCP config created at: {path}");
         }
         
         self.mcp_integration = Some(mcp);
@@ -155,7 +155,7 @@ impl LlmClient for ClaudeCodeClient {
                         })
                         .collect::<Vec<_>>()
                         .join(" ");
-                    prompt.push_str(&format!("Human: {}\n\n", text));
+                    prompt.push_str(&format!("Human: {text}\n\n"));
                 }
                 Role::Assistant => {
                     // Only include actual text content, not thinking
@@ -167,7 +167,7 @@ impl LlmClient for ClaudeCodeClient {
                         .collect::<Vec<_>>()
                         .join(" ");
                     if !text.is_empty() {
-                        prompt.push_str(&format!("Assistant: {}\n\n", text));
+                        prompt.push_str(&format!("Assistant: {text}\n\n"));
                     }
                 }
                 Role::System => {
@@ -309,7 +309,7 @@ impl LlmClient for ClaudeCodeClient {
                         })
                         .collect::<Vec<_>>()
                         .join(" ");
-                    prompt.push_str(&format!("Human: {}\n\n", text));
+                    prompt.push_str(&format!("Human: {text}\n\n"));
                 }
                 Role::Assistant => {
                     // Only include actual text content, not thinking
@@ -321,7 +321,7 @@ impl LlmClient for ClaudeCodeClient {
                         .collect::<Vec<_>>()
                         .join(" ");
                     if !text.is_empty() {
-                        prompt.push_str(&format!("Assistant: {}\n\n", text));
+                        prompt.push_str(&format!("Assistant: {text}\n\n"));
                     }
                 }
                 Role::System => {

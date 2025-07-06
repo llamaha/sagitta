@@ -245,7 +245,7 @@ impl AppState {
 
     /// Update available repositories list
     pub fn update_available_repositories(&mut self, repositories: Vec<String>) {
-        log::info!("Updating available repositories: {:?}", repositories);
+        log::info!("Updating available repositories: {repositories:?}");
         self.available_repositories = repositories;
         log::info!("Available repositories updated. Current list: {:?}", self.available_repositories);
     }
@@ -258,7 +258,7 @@ impl AppState {
     /// Get current repository context display name
     pub fn get_repository_context_display(&self) -> String {
         match &self.current_repository_context {
-            Some(repo) => format!("📁 {}", repo),
+            Some(repo) => format!("📁 {repo}"),
             None => "📁 No Repository".to_string(),
         }
     }

@@ -1,8 +1,7 @@
 use anyhow::Result;
-use sagitta_code::agent::state::types::ConversationStatus;
 use sagitta_code::agent::message::types::AgentMessage;
 use sagitta_code::llm::client::Role;
-use sagitta_code::llm::title::{TitleGenerator, TitleGeneratorConfig};
+use sagitta_code::llm::title::TitleGenerator;
 use sagitta_code::agent::conversation::branching::{
     ConversationBranchingManager, BranchingConfig, BranchReason
 };
@@ -55,7 +54,7 @@ async fn test_title_generation_filters_system_messages() -> Result<()> {
     
     // Title should be based on user/assistant messages
     assert!(title.contains("build") || title.contains("Build") || title.contains("project") || title.contains("Project"), 
-        "Title should be based on actual conversation content, got: {}", title);
+        "Title should be based on actual conversation content, got: {title}");
     
     Ok(())
 }
@@ -81,7 +80,7 @@ async fn test_title_generation_requires_conversation_content() -> Result<()> {
     let title = generator.generate_title(&messages).await?;
     
     // Should use fallback title since no actual conversation
-    assert!(title.starts_with("Conversation"), "Should use fallback title when only system messages, got: {}", title);
+    assert!(title.starts_with("Conversation"), "Should use fallback title when only system messages, got: {title}");
     
     Ok(())
 }

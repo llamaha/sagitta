@@ -69,7 +69,7 @@ impl StreamingProcessor {
         -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send + '_>>, SagittaCodeError> 
     {
         let message_text = message.into();
-        info!("Processing user message (stream): '{}'", message_text);
+        info!("Processing user message (stream): '{message_text}'");
         
         // Set state to thinking
         self.state_manager.set_thinking("Processing user message").await?;
@@ -81,7 +81,7 @@ impl StreamingProcessor {
         // Get all messages from history
         let messages = self.history.to_llm_messages().await;
         debug!("Retrieved {} messages from history for LLM (stream).", messages.len());
-        trace!("Messages for LLM (stream): {:?}", messages);
+        trace!("Messages for LLM (stream): {messages:?}");
         
         // Get available tool definitions
         let tool_defs_for_llm: Vec<ToolDefinition> = self.tool_registry.get_definitions().await;
@@ -171,7 +171,7 @@ impl StreamingProcessor {
                                     },
                                     MessagePart::ToolCall { tool_call_id, name, parameters } => {
                                         // For Claude CLI, tools are executed through MCP
-                                        info!("Stream: Claude CLI executed tool through MCP - ID: {}, Name: {}", tool_call_id, name);
+                                        info!("Stream: Claude CLI executed tool through MCP - ID: {tool_call_id}, Name: {name}");
                                         
                                         // Store tool call info for result matching
                                         if let Ok(mut tool_calls) = self.tool_calls.lock() {
@@ -194,10 +194,10 @@ impl StreamingProcessor {
                                         
                                         let _ = event_sender.send(AgentEvent::ToolCall { tool_call });
                                         
-                                        info!("Stream: Emitted ToolCall event for {}", name);
+                                        info!("Stream: Emitted ToolCall event for {name}");
                                     },
                                     MessagePart::ToolResult { tool_call_id, name, result } => {
-                                        info!("Stream: Received tool result for ID: {}", tool_call_id);
+                                        info!("Stream: Received tool result for ID: {tool_call_id}");
                                         
                                         // Get tool name from stored tool calls or use the provided name
                                         let tool_name = if let Ok(tool_calls) = self.tool_calls.lock() {
@@ -228,14 +228,14 @@ impl StreamingProcessor {
                                             result: tool_result,
                                         });
                                         
-                                        info!("Stream: Emitted ToolCallComplete event for ID: {}", tool_call_id);
+                                        info!("Stream: Emitted ToolCallComplete event for ID: {tool_call_id}");
                                     },
                                 }
                                 
                                 Ok(chunk)
                             },
                             Err(err) => {
-                                error!("Stream: Error receiving chunk: {}", err);
+                                error!("Stream: Error receiving chunk: {err}");
                                 // Set state to error
                                 let _ = state_manager.set_error(err.to_string(), "Streaming failed").await;
                                 let _ = event_sender.send(AgentEvent::Error(err.to_string()));
@@ -249,7 +249,7 @@ impl StreamingProcessor {
                 Ok(Box::pin(mapped_stream))
             },
             Err(err) => {
-                error!("LLM streaming call failed: {}", err);
+                error!("LLM streaming call failed: {err}");
                 // Set state to error
                 self.state_manager.set_error(err.to_string(), "LLM streaming call failed").await?;
                 self.event_sender.send(AgentEvent::Error(err.to_string()))?;

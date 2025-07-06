@@ -123,15 +123,15 @@ impl LoggingPanel {
                 ui.horizontal(|ui| {
                     if ui.button("Copy 10s").clicked() {
                         let logs = self.get_recent_logs(10);
-                        ui.output_mut(|o| o.copied_text = logs);
+                        ui.ctx().copy_text(logs);
                     }
                     if ui.button("Copy 30s").clicked() {
                         let logs = self.get_recent_logs(30);
-                        ui.output_mut(|o| o.copied_text = logs);
+                        ui.ctx().copy_text(logs);
                     }
                     if ui.button("Copy 60s").clicked() {
                         let logs = self.get_recent_logs(60);
-                        ui.output_mut(|o| o.copied_text = logs);
+                        ui.ctx().copy_text(logs);
                     }
                 });
                 ui.separator();

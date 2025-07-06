@@ -257,7 +257,7 @@ impl SagittaCodeApp {
         let clustering_manager = match self.try_create_clustering_manager().await {
             Ok(manager) => Some(manager),
             Err(e) => {
-                log::warn!("Failed to initialize clustering manager: {}. Clustering features will be disabled.", e);
+                log::warn!("Failed to initialize clustering manager: {e}. Clustering features will be disabled.");
                 None
             }
         };
@@ -287,7 +287,7 @@ impl SagittaCodeApp {
                         Some(Arc::new(provider) as Arc<dyn crate::llm::fast_model::FastModelOperations>)
                     }
                     Err(e) => {
-                        log::warn!("Failed to initialize fast model provider: {}", e);
+                        log::warn!("Failed to initialize fast model provider: {e}");
                         None
                     }
                 }
@@ -346,7 +346,7 @@ impl SagittaCodeApp {
         let clustering_manager = match self.try_create_clustering_manager().await {
             Ok(manager) => Some(manager),
             Err(e) => {
-                log::warn!("Failed to initialize clustering manager: {}. Clustering features will be disabled.", e);
+                log::warn!("Failed to initialize clustering manager: {e}. Clustering features will be disabled.");
                 None
             }
         };
@@ -376,7 +376,7 @@ impl SagittaCodeApp {
                         Some(Arc::new(provider) as Arc<dyn crate::llm::fast_model::FastModelOperations>)
                     }
                     Err(e) => {
-                        log::warn!("Failed to initialize fast model provider: {}", e);
+                        log::warn!("Failed to initialize fast model provider: {e}");
                         None
                     }
                 }
@@ -517,11 +517,7 @@ impl SagittaCodeApp {
     }
 
     pub fn agent_state_info(&self) -> Option<Arc<tokio::sync::RwLock<AgentStateInfo>>> {
-        if let Some(agent_arc) = &self.agent {
-            Some(agent_arc.get_state_manager_state_info_arc())
-        } else {
-            None
-        }
+        self.agent.as_ref().map(|agent_arc| agent_arc.get_state_manager_state_info_arc())
     }
 
     /// Try to create a title generator (may fail if dependencies are not available)
@@ -570,17 +566,17 @@ impl SagittaCodeApp {
                         .map(|repo| repo.name.clone())
                         .collect();
                     
-                    log::info!("Manual refresh completed: {:?}", repo_names);
+                    log::info!("Manual refresh completed: {repo_names:?}");
                     
                     // Send the repository list update event
                     if let Err(e) = app_event_sender.send(crate::gui::app::events::AppEvent::RepositoryListUpdated(repo_names)) {
-                        log::error!("Failed to send repository list update event: {}", e);
+                        log::error!("Failed to send repository list update event: {e}");
                     } else {
                         log::debug!("Successfully sent repository list update event from manual refresh");
                     }
                 },
                 Err(e) => {
-                    log::error!("Failed to manually refresh repository list: {}", e);
+                    log::error!("Failed to manually refresh repository list: {e}");
                 }
             }
         });

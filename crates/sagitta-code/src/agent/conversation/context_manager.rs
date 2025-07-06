@@ -448,7 +448,7 @@ impl ConversationContextManager {
         // Add progress milestone
         context.progress_tracker.milestones.push(ProgressMilestone {
             timestamp: Utc::now(),
-            description: format!("Successfully completed: {}", action),
+            description: format!("Successfully completed: {action}"),
             confidence: 1.0,
             context: HashMap::new(),
         });
@@ -463,7 +463,7 @@ impl ConversationContextManager {
         // Recalculate frustration level
         context.frustration_metrics.frustration_level = self.calculate_frustration_level(&context).await;
 
-        info!("Recorded success: {}", action);
+        info!("Recorded success: {action}");
         
         Ok(())
     }

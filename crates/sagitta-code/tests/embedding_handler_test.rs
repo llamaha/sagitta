@@ -32,7 +32,7 @@ async fn test_embedding_handler_can_be_set_after_initialization() {
     
     // Step 3: Create embedding pool (simulating app initialization)
     let config = config_arc.lock().await;
-    let embedding_config = sagitta_search::app_config_to_embedding_config(&*config);
+    let embedding_config = sagitta_search::app_config_to_embedding_config(&config);
     drop(config);
     
     // Step 4: Set the embedding handler (this is the fix from commit f379b4e)
@@ -44,7 +44,7 @@ async fn test_embedding_handler_can_be_set_after_initialization() {
             println!("✓ Successfully demonstrated embedding handler can be set after initialization");
         }
         Err(e) => {
-            println!("✓ Embedding pool creation failed (expected in test): {}", e);
+            println!("✓ Embedding pool creation failed (expected in test): {e}");
             println!("✓ But the set_embedding_handler method exists and can be called");
         }
     }

@@ -2,7 +2,6 @@
 /// 
 /// This module provides utilities for configuring fonts to ensure better
 /// emoji and symbol support in egui applications.
-
 use egui::{FontDefinitions, FontFamily};
 
 /// Configure fonts for better emoji support

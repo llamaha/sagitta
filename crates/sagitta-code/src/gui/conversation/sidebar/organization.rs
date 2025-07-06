@@ -158,7 +158,7 @@ impl ConversationSidebar {
         for (status, name, priority) in status_order {
             if let Some(mut convs) = status_groups.remove(&status) {
                 convs.sort_by(|a, b| b.last_active.cmp(&a.last_active));
-                let group_id = format!("status_{:?}", status).to_lowercase();
+                let group_id = format!("status_{status:?}").to_lowercase();
                 groups.push(self.create_group(&group_id, name, convs, priority)?);
             }
         }
@@ -444,7 +444,7 @@ impl ConversationSidebar {
             indicators.push(VisualIndicator {
                 indicator_type: IndicatorType::Tag,
                 display: tag.clone(),
-                tooltip: Some(format!("Tag: {}", tag)),
+                tooltip: Some(format!("Tag: {tag}")),
                 style: Some("tag".to_string()),
             });
         }

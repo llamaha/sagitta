@@ -197,7 +197,7 @@ impl ConversationSearchServiceImpl {
         
         // Add tags
         for (i, tag) in conversation.tags.iter().enumerate() {
-            metadata.insert(format!("tag_{}", i), tag.clone().into());
+            metadata.insert(format!("tag_{i}"), tag.clone().into());
         }
         
         // Add branch and checkpoint counts
@@ -404,7 +404,7 @@ impl ConversationSearchService for ConversationSearchServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::conversation::types::ProjectType;
+    
     use sagitta_embed::EmbeddingConfig;
     use std::sync::Arc;
     

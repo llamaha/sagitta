@@ -41,7 +41,7 @@ impl ClaudeCodeStream {
                         for line in stderr_reader.lines() {
                             if let Ok(line) = line {
                                 // Only log stderr for debugging
-                                log::debug!("CLAUDE_CODE stderr: {}", line);
+                                log::debug!("CLAUDE_CODE stderr: {line}");
                                 if let Ok(mut buffer) = stderr_buffer_clone.lock() {
                                     buffer.push(line);
                                 }
@@ -64,15 +64,15 @@ impl ClaudeCodeStream {
                             String::new()
                         };
                         
-                        log::error!("CLAUDE_CODE: Process failed immediately with code: {}", code);
+                        log::error!("CLAUDE_CODE: Process failed immediately with code: {code}");
                         if !stderr_content.is_empty() {
-                            log::error!("CLAUDE_CODE: Early stderr:\n{}", stderr_content);
+                            log::error!("CLAUDE_CODE: Early stderr:\n{stderr_content}");
                             let _ = sender.send(Err(SagittaCodeError::LlmError(
-                                format!("Claude process failed to start: {}", stderr_content)
+                                format!("Claude process failed to start: {stderr_content}")
                             )));
                         } else {
                             let _ = sender.send(Err(SagittaCodeError::LlmError(
-                                format!("Claude process failed to start with code: {}", code)
+                                format!("Claude process failed to start with code: {code}")
                             )));
                         }
                         return;
@@ -105,10 +105,10 @@ impl ClaudeCodeStream {
                                         
                                         // Log all chunk types for debugging
                                         match &chunk {
-                                            ClaudeChunk::Result { .. } => log::info!("CLAUDE_CODE: Received result chunk at offset {}", last_valid_offset),
-                                            ClaudeChunk::Assistant { .. } => log::info!("CLAUDE_CODE: Received assistant chunk at offset {}", last_valid_offset),
-                                            ClaudeChunk::User { .. } => log::info!("CLAUDE_CODE: Received user chunk at offset {}", last_valid_offset),
-                                            ClaudeChunk::System { .. } => log::debug!("CLAUDE_CODE: Received system chunk at offset {}", last_valid_offset),
+                                            ClaudeChunk::Result { .. } => log::info!("CLAUDE_CODE: Received result chunk at offset {last_valid_offset}"),
+                                            ClaudeChunk::Assistant { .. } => log::info!("CLAUDE_CODE: Received assistant chunk at offset {last_valid_offset}"),
+                                            ClaudeChunk::User { .. } => log::info!("CLAUDE_CODE: Received user chunk at offset {last_valid_offset}"),
+                                            ClaudeChunk::System { .. } => log::debug!("CLAUDE_CODE: Received system chunk at offset {last_valid_offset}"),
                                             _ => {}
                                         }
                                     
@@ -117,7 +117,7 @@ impl ClaudeCodeStream {
                                             if subtype == "init" {
                                                 // Subscription usage sets api_key_source to "none"
                                                 is_paid_usage = api_key_source.as_deref() != Some("none");
-                                                log::debug!("CLAUDE_CODE: Paid usage: {}", is_paid_usage);
+                                                log::debug!("CLAUDE_CODE: Paid usage: {is_paid_usage}");
                                             }
                                         }
                                         ClaudeChunk::Assistant { message } => {
@@ -161,7 +161,7 @@ impl ClaudeCodeStream {
                                                     }
                                                     ContentBlock::ToolUse { id, name, input } => {
                                                         // Tools are now handled through MCP
-                                                        log::debug!("CLAUDE_CODE: Tool use '{}' should be handled via MCP", name);
+                                                        log::debug!("CLAUDE_CODE: Tool use '{name}' should be handled via MCP");
                                                         
                                                         // Send tool call part for MCP tools
                                                         let _ = sender.send(Ok(StreamChunk {
@@ -186,7 +186,7 @@ impl ClaudeCodeStream {
                                             // Don't send is_final here - wait for Result chunk
                                             // This allows tool calls to be processed as part of the same message
                                         }
-                                        ClaudeChunk::Result { result, total_cost_usd, subtype, is_error } => {
+                                        ClaudeChunk::Result { result, total_cost_usd: _, subtype, is_error: _ } => {
                                             // Check for error results
                                             if subtype.as_deref() == Some("error_max_turns") {
                                                 log::warn!("CLAUDE_CODE: Received error_max_turns result");
@@ -224,11 +224,11 @@ impl ClaudeCodeStream {
                                             for content in message.content {
                                                 match content {
                                                     super::message_converter::UserContentBlock::Text { text } => {
-                                                        log::debug!("CLAUDE_CODE: User text: {}", text);
+                                                        log::debug!("CLAUDE_CODE: User text: {text}");
                                                     }
                                                     super::message_converter::UserContentBlock::ToolResult { content, tool_use_id, is_error } => {
                                                         // Tool results from MCP - store for tool preview instead of displaying inline
-                                                        log::info!("CLAUDE_CODE: Tool result for {} (is_error: {:?}): {}", tool_use_id, is_error, content);
+                                                        log::info!("CLAUDE_CODE: Tool result for {tool_use_id} (is_error: {is_error:?}): {content}");
                                                         
                                                         // Send tool result regardless of error status
                                                         let result_value = if is_error == Some(true) {
@@ -291,9 +291,9 @@ impl ClaudeCodeStream {
                             }
                         }
                         Err(e) => {
-                            log::error!("CLAUDE_CODE: Error reading bytes: {}", e);
+                            log::error!("CLAUDE_CODE: Error reading bytes: {e}");
                             let _ = sender.send(Err(SagittaCodeError::LlmError(
-                                format!("Error reading claude output: {}", e)
+                                format!("Error reading claude output: {e}")
                             )));
                             break;
                         }
@@ -304,7 +304,7 @@ impl ClaudeCodeStream {
                 if !json_buffer.is_empty() {
                     log::warn!("CLAUDE_CODE: {} bytes of unprocessed data at end", json_buffer.len());
                     if let Ok(s) = std::str::from_utf8(&json_buffer) {
-                        log::warn!("CLAUDE_CODE: Unprocessed data: {}", s);
+                        log::warn!("CLAUDE_CODE: Unprocessed data: {s}");
                     }
                 }
                 
@@ -313,7 +313,7 @@ impl ClaudeCodeStream {
                     Ok(status) => {
                         if !status.success() {
                             let code = status.code().unwrap_or(-1);
-                            log::error!("CLAUDE_CODE: Process exited with code: {}", code);
+                            log::error!("CLAUDE_CODE: Process exited with code: {code}");
                             
                             // Get stderr content
                             let stderr_content = if let Ok(buffer) = stderr_buffer.lock() {
@@ -323,21 +323,21 @@ impl ClaudeCodeStream {
                             };
                             
                             if !stderr_content.is_empty() {
-                                log::error!("CLAUDE_CODE: Process stderr:\n{}", stderr_content);
+                                log::error!("CLAUDE_CODE: Process stderr:\n{stderr_content}");
                                 let _ = sender.send(Err(SagittaCodeError::LlmError(
-                                    format!("Claude process failed: {}", stderr_content)
+                                    format!("Claude process failed: {stderr_content}")
                                 )));
                             } else {
                                 let _ = sender.send(Err(SagittaCodeError::LlmError(
-                                    format!("Claude process exited with code: {}", code)
+                                    format!("Claude process exited with code: {code}")
                                 )));
                             }
                         }
                     }
                     Err(e) => {
-                        log::error!("CLAUDE_CODE: Error waiting for process: {}", e);
+                        log::error!("CLAUDE_CODE: Error waiting for process: {e}");
                         let _ = sender.send(Err(SagittaCodeError::LlmError(
-                            format!("Error waiting for claude process: {}", e)
+                            format!("Error waiting for claude process: {e}")
                         )));
                     }
                 }

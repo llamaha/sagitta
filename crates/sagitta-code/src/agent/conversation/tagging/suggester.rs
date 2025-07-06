@@ -118,7 +118,7 @@ impl TagSuggester {
                     log::debug!("Got {} tag suggestions from fast model", suggestions.len());
                 }
                 Err(e) => {
-                    log::debug!("Fast model tag suggestion failed: {}, falling back", e);
+                    log::debug!("Fast model tag suggestion failed: {e}, falling back");
                 }
             }
         }
@@ -236,7 +236,7 @@ impl TagSuggester {
             let matches = keywords.iter().filter(|&keyword| conversation_text.contains(keyword)).count();
             if matches > 0 {
                 let confidence = (matches as f32 / keywords.len() as f32).min(1.0) * 0.8;
-                let reasoning = format!("Detected {} programming language keywords", matches);
+                let reasoning = format!("Detected {matches} programming language keywords");
                 
                 suggestions.push(TagSuggestion::new(
                     language.to_string(),
@@ -263,7 +263,7 @@ impl TagSuggester {
             let matches = keywords.iter().filter(|&keyword| conversation_text.contains(keyword)).count();
             if matches > 0 {
                 let confidence = (matches as f32 / keywords.len() as f32).min(1.0) * 0.6;
-                let reasoning = format!("Detected {} topic-related keywords", matches);
+                let reasoning = format!("Detected {matches} topic-related keywords");
                 
                 suggestions.push(TagSuggestion::new(
                     topic.to_string(),
@@ -298,7 +298,7 @@ impl TagSuggester {
             suggestions.push(TagSuggestion::new(
                 "long-conversation".to_string(),
                 0.5,
-                format!("Conversation has {} messages", message_count),
+                format!("Conversation has {message_count} messages"),
                 TagSource::Rule { rule_name: "message_count".to_string() },
             ));
         }
@@ -329,7 +329,7 @@ impl TagSuggester {
                             let similarity = self.cosine_similarity(&corpus_entry.embedding, &other_entry.embedding);
                             if similarity >= self.config.similarity_threshold {
                                 let confidence = similarity * 0.7; // Lower confidence for indirect similarity
-                                let reasoning = format!("Similar to existing tag '{}' (similarity: {:.2})", tag, similarity);
+                                let reasoning = format!("Similar to existing tag '{tag}' (similarity: {similarity:.2})");
                                 
                                 suggestions.push(TagSuggestion::new(
                                     other_tag.clone(),
@@ -366,7 +366,7 @@ impl TagSuggester {
                 suggestions.push(TagSuggestion::new(
                     tag.to_string(),
                     0.5,
-                    format!("Detected in title: '{}'", title),
+                    format!("Detected in title: '{title}'"),
                     TagSource::Content { keywords: keywords.iter().map(|s| s.to_string()).collect() },
                 ));
             }
@@ -380,7 +380,7 @@ impl TagSuggester {
         vec![TagSuggestion::new(
             project_name.to_lowercase(),
             0.6,
-            format!("Based on project name: {}", project_name),
+            format!("Based on project name: {project_name}"),
             TagSource::Rule { rule_name: "project_name".to_string() },
         )]
     }

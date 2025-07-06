@@ -32,6 +32,7 @@ pub struct RepoFilterOptions {
 
 /// Form data for adding a new repository
 #[derive(Debug)]
+#[derive(Default)]
 pub struct AddRepoForm {
     pub name: String,
     pub url: String,
@@ -62,22 +63,6 @@ impl Clone for AddRepoForm {
     }
 }
 
-impl Default for AddRepoForm {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            url: String::new(),
-            branch: String::new(),
-            target_ref: String::new(),
-            local_path: String::new(),
-            use_local: false,
-            error_message: None,
-            status_message: None,
-            adding: false,
-            result_receiver: None,
-        }
-    }
-}
 
 /// Query options for repository search
 #[derive(Debug, Clone, Default)]
@@ -101,6 +86,7 @@ impl QueryOptions {
 
 /// Query result struct to store the results
 #[derive(Debug)]
+#[derive(Default)]
 pub struct QueryResult {
     pub is_loading: bool,
     pub success: bool,
@@ -121,17 +107,6 @@ impl Clone for QueryResult {
     }
 }
 
-impl Default for QueryResult {
-    fn default() -> Self {
-        Self {
-            is_loading: false,
-            success: false,
-            error_message: None,
-            results: Vec::new(),
-            channel: None,
-        }
-    }
-}
 
 /// Single item in query results
 #[derive(Debug, Clone)]
@@ -598,7 +573,7 @@ impl DisplayableSyncProgress {
                 displayable.stage_detail.files_per_second = *files_per_second;
                 current_overall = *current_file_num as u64;
                 total_overall = *total_files as u64;
-                displayable.stage_detail.overall_message = format!("Indexing file {} of {}", current_file_num, total_files);
+                displayable.stage_detail.overall_message = format!("Indexing file {current_file_num} of {total_files}");
             }
             CoreSyncStage::DeleteFile { current_file, total_files, current_file_num, files_per_second, .. } => {
                 displayable.stage_detail.name = "Deleting Files".to_string();
@@ -607,7 +582,7 @@ impl DisplayableSyncProgress {
                 displayable.stage_detail.files_per_second = *files_per_second;
                 current_overall = *current_file_num as u64;
                 total_overall = *total_files as u64;
-                displayable.stage_detail.overall_message = format!("Deleting file {} of {}", current_file_num, total_files);
+                displayable.stage_detail.overall_message = format!("Deleting file {current_file_num} of {total_files}");
             }
             CoreSyncStage::CollectFiles { total_files, message } => {
                 displayable.stage_detail.name = "Collecting Files".to_string();
@@ -834,7 +809,7 @@ mod tests {
         
         for tab in &tabs {
             // Should be debug printable
-            format!("{:?}", tab);
+            format!("{tab:?}");
         }
         
         // Test equality

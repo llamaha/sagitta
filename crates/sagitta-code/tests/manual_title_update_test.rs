@@ -1,5 +1,4 @@
-use anyhow::Result;
-use sagitta_code::gui::app::events::{AppEvent, handle_update_conversation_title};
+use sagitta_code::gui::app::events::AppEvent;
 use sagitta_code::gui::conversation::sidebar::types::SidebarAction;
 use uuid::Uuid;
 

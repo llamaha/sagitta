@@ -19,6 +19,12 @@ pub struct GitHistoryModal {
     is_loading: bool,
 }
 
+impl Default for GitHistoryModal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GitHistoryModal {
     pub fn new() -> Self {
         Self {
@@ -59,7 +65,7 @@ impl GitHistoryModal {
             .default_size([800.0, 600.0])
             .resizable(true)
             .collapsible(false)
-            .frame(egui::Frame::none())
+            .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
                 self.render_content(ui, theme);
             });
@@ -99,7 +105,7 @@ impl GitHistoryModal {
 
         // Error message if any
         if let Some(error) = &self.error_message {
-            ui.colored_label(theme.error_color(), format!("Error: {}", error));
+            ui.colored_label(theme.error_color(), format!("Error: {error}"));
             ui.separator();
         }
 
@@ -221,7 +227,7 @@ impl GitHistoryModal {
         egui::Window::new("Confirm Revert")
             .collapsible(false)
             .resizable(false)
-            .frame(egui::Frame::none())
+            .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
                 ui.label("⚠️ Warning: This will reset your repository to the selected commit.");
                 ui.label("All changes after this commit will be lost!");
@@ -261,7 +267,7 @@ impl GitHistoryModal {
         self.error_message = None;
         
         if let Some(repo_path) = &self.repository_path.clone() {
-            match self.fetch_commits(&repo_path) {
+            match self.fetch_commits(repo_path) {
                 Ok(()) => {
                     self.error_message = None;
                 }
@@ -349,7 +355,7 @@ impl GitHistoryModal {
                     self.refresh_commits();
                 }
                 Err(e) => {
-                    self.error_message = Some(format!("Failed to revert: {}", e));
+                    self.error_message = Some(format!("Failed to revert: {e}"));
                 }
             }
         }

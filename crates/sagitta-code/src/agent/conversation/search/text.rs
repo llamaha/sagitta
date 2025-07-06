@@ -31,6 +31,12 @@ struct TextIndex {
     tag_index: HashMap<String, HashSet<Uuid>>,
 }
 
+impl Default for TextConversationSearchEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TextConversationSearchEngine {
     /// Create a new text search engine
     pub fn new() -> Self {
@@ -263,7 +269,7 @@ impl ConversationSearchEngine for TextConversationSearchEngine {
         }
 
         // Filter by tags if provided
-        if query.tags.as_ref().map_or(false, |t| !t.is_empty()) {
+        if query.tags.as_ref().is_some_and(|t| !t.is_empty()) {
             if let Some(tags_to_match) = &query.tags {
                 let mut matching_ids_from_tags: HashSet<Uuid> = HashSet::new();
                 for (i, tag) in tags_to_match.iter().enumerate() {
@@ -307,7 +313,7 @@ impl ConversationSearchEngine for TextConversationSearchEngine {
         
         // Re-index all conversations
         for conversation in conversations {
-            self.index_conversation(&conversation).await?;
+            self.index_conversation(conversation).await?;
         }
         
         Ok(())

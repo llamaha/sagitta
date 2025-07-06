@@ -115,7 +115,7 @@ impl CoreAddProgressReporter for GuiProgressReporter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::sync::mpsc;
+    
     use sagitta_search::sync_progress::{SyncStage, SyncProgressReporter};
     use crate::gui::repository::shared_sync_state::{SIMPLE_STATUS, DETAILED_STATUS};
 

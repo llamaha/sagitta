@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use sagitta_embed::provider::EmbeddingProvider;
 use sagitta_embed::EmbeddingModelType;
-use sagitta_embed::{Result, SagittaEmbedError};
+use sagitta_embed::Result;
 
 /// Mock embedding provider for testing
 #[derive(Debug, Clone)]

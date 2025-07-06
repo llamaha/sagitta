@@ -53,11 +53,11 @@ async fn test_auto_suggested_tags_generation() -> Result<()> {
     
     // Check for rust tag (should be present)
     assert!(tag_names.contains(&"rust".to_string()), 
-            "Should suggest 'rust' tag. Got tags: {:?}", tag_names);
+            "Should suggest 'rust' tag. Got tags: {tag_names:?}");
     
     // Check for debugging tag (might not be present, let's see what we get)
     if !tag_names.contains(&"debugging".to_string()) {
-        println!("Note: 'debugging' tag not suggested. Available tags: {:?}", tag_names);
+        println!("Note: 'debugging' tag not suggested. Available tags: {tag_names:?}");
         // For now, let's check for any error-related tag
         let has_error_tag = tag_names.iter().any(|tag| 
             tag.contains("error") || tag.contains("debug") || tag.contains("issue") || tag.contains("problem")
@@ -320,7 +320,7 @@ async fn test_tag_suggestion_merging() -> Result<()> {
     let rust_content = content_tags.iter().any(|s| s.tag == "rust");
     let rust_rule = rule_tags.iter().any(|s| s.tag == "rust");
     
-    println!("Rust from content: {}, Rust from rules: {}", rust_content, rust_rule);
+    println!("Rust from content: {rust_content}, Rust from rules: {rust_rule}");
     
     // At least one source should suggest "rust"
     assert!(rust_content || rust_rule, "At least one source should suggest 'rust' tag");

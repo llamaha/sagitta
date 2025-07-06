@@ -89,13 +89,13 @@ impl RepoPanel {
                             log::info!("RepoPanel: Found {} orphaned repositories.", state_guard.orphaned_repositories.len());
                         }
                         Err(e) => {
-                            log::warn!("RepoPanel: Failed to get orphaned repositories: {}", e);
+                            log::warn!("RepoPanel: Failed to get orphaned repositories: {e}");
                             state_guard.orphaned_repositories.clear();
                         }
                     }
                 }
                 Err(e) => {
-                    log::warn!("RepoPanel: Failed to get enhanced repository list: {}, falling back to basic list", e);
+                    log::warn!("RepoPanel: Failed to get enhanced repository list: {e}, falling back to basic list");
                     
                     // Fallback to basic repository listing
                     let basic_result = {
@@ -116,7 +116,7 @@ impl RepoPanel {
                             log::info!("RepoPanel: Successfully refreshed {} basic repositories.", state_guard.repositories.len());
                         }
                         Err(e) => {
-                            log::error!("RepoPanel: Failed to refresh repositories: {}", e);
+                            log::error!("RepoPanel: Failed to refresh repositories: {e}");
                             // Reset loading flag on error
                             let mut state_guard = state_clone.lock().await;
                             state_guard.is_loading_repos = false;
@@ -327,7 +327,7 @@ mod tests {
     use super::*;
     use crate::config::types::SagittaCodeConfig;
     use sagitta_search::{AppConfig as SagittaAppConfig};
-    use std::path::PathBuf;
+    
 
     fn create_test_config() -> Arc<Mutex<SagittaCodeConfig>> {
         Arc::new(Mutex::new(SagittaCodeConfig::default()))
@@ -364,7 +364,7 @@ mod tests {
     fn test_repo_panel_set_agent() {
         let repo_manager = create_test_repo_manager();
         let config = create_test_config();
-        let mut panel = RepoPanel::new(repo_manager, config.clone(), None);
+        let panel = RepoPanel::new(repo_manager, config.clone(), None);
         
         assert!(panel.agent.is_none());
         

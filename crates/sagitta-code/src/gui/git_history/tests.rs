@@ -1,6 +1,5 @@
 use super::*;
 use chrono::Utc;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use tempfile::TempDir;
 use git2::{Repository, Signature};
@@ -130,7 +129,7 @@ mod modal_tests {
 
 #[cfg(test)]
 mod graph_layout_tests {
-    use super::*;
+    
     use crate::gui::git_history::graph::{find_available_lane};
     
     #[test]
@@ -340,7 +339,7 @@ mod error_handling_tests {
                 Some("HEAD"),
                 &sig,
                 &sig,
-                &format!("Commit {}", i),
+                &format!("Commit {i}"),
                 &tree,
                 &[&parent_commit],
             ).unwrap();
@@ -360,7 +359,7 @@ mod error_handling_tests {
     
     #[test]
     fn test_find_commit_found() {
-        let mut modal = GitHistoryModal::new();
+        let modal = GitHistoryModal::new();
         // Can't test private methods/fields directly - just ensure no panic
     }
 }

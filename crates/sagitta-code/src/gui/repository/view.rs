@@ -17,11 +17,11 @@ static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
 static THEME_SET: OnceLock<ThemeSet> = OnceLock::new();
 
 fn get_syntax_set() -> &'static SyntaxSet {
-    SYNTAX_SET.get_or_init(|| SyntaxSet::load_defaults_newlines())
+    SYNTAX_SET.get_or_init(SyntaxSet::load_defaults_newlines)
 }
 
 fn get_theme_set() -> &'static ThemeSet {
-    THEME_SET.get_or_init(|| ThemeSet::load_defaults())
+    THEME_SET.get_or_init(ThemeSet::load_defaults)
 }
 
 /// Get file extension from path
@@ -74,7 +74,7 @@ pub fn render_file_view(
         if !repo_names.is_empty() {
             ui.horizontal(|ui| {
                 ui.label("Select repository:");
-                ComboBox::from_id_source("view_no_repo_selector")
+                ComboBox::from_id_salt("view_no_repo_selector")
                     .selected_text("Choose repository...")
                     .show_ui(ui, |ui| {
                         for name in repo_names {
@@ -106,7 +106,7 @@ pub fn render_file_view(
             ui.label("Repository:");
             let repo_names: Vec<String> = state.repositories.iter().map(|r| r.name.clone()).collect();
             let selected_text = state.selected_repo.as_ref().unwrap_or(&state.file_view_options.repo_name);
-            ComboBox::from_id_source("repository_select_file_view")
+            ComboBox::from_id_salt("repository_select_file_view")
                 .selected_text(selected_text)
                 .show_ui(ui, |ui| {
                     for name in repo_names {
@@ -218,7 +218,7 @@ pub fn render_file_view(
     if state.file_view_result.is_loading {
         ui.label(RichText::new("Loading file...").color(theme.warning_color()));
     } else if let Some(error) = &state.file_view_result.error_message {
-        ui.label(RichText::new(format!("Error: {}", error)).color(theme.error_color()));
+        ui.label(RichText::new(format!("Error: {error}")).color(theme.error_color()));
     }
     
     // File content
@@ -581,7 +581,7 @@ fn main() {
                 _ => syntax_set.find_syntax_by_extension(extension),
             };
             
-            assert!(syntax.is_some(), "Syntax for .{} should be available (or JavaScript as fallback)", extension);
+            assert!(syntax.is_some(), "Syntax for .{extension} should be available (or JavaScript as fallback)");
             
             if let Some(syntax) = syntax {
                 // For TypeScript/JSX, accept JavaScript syntax as valid

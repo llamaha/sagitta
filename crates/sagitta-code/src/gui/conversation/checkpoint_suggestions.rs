@@ -220,9 +220,7 @@ impl CheckpointSuggestionsUI {
         if total_count > filtered_count {
             ui.add_space(4.0);
             ui.label(RichText::new(format!(
-                "Showing {} of {} suggestions",
-                filtered_count,
-                total_count
+                "Showing {filtered_count} of {total_count} suggestions"
             )).small().weak());
         }
         
@@ -241,10 +239,10 @@ impl CheckpointSuggestionsUI {
         
         let frame_color = self.get_reason_color(&suggestion.reason, theme);
         
-        Frame::none()
+        Frame::NONE
             .fill(theme.panel_background())
             .stroke(Stroke::new(1.0, frame_color))
-            .rounding(4.0)
+            .corner_radius(egui::CornerRadius::same(4))
             .inner_margin(8.0)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {

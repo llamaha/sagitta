@@ -513,7 +513,7 @@ impl ConversationCheckpointManager {
             CheckpointReason::BeforeRefactoring => "Before Refactoring".to_string(),
             CheckpointReason::TaskCompletion => "Task Completed".to_string(),
             CheckpointReason::UserRequested => "User Checkpoint".to_string(),
-            CheckpointReason::PeriodicAutomatic => format!("Auto Checkpoint - {:?}", phase),
+            CheckpointReason::PeriodicAutomatic => format!("Auto Checkpoint - {phase:?}"),
             CheckpointReason::BeforeBranching => "Before Branching".to_string(),
         }
     }
@@ -837,7 +837,7 @@ impl ContextSnapshotGenerator {
         if git_dir.exists() {
             // Get current commit hash
             if let Ok(output) = tokio::process::Command::new("git")
-                .args(&["rev-parse", "HEAD"])
+                .args(["rev-parse", "HEAD"])
                 .current_dir(&base_dir)
                 .output()
                 .await
@@ -850,7 +850,7 @@ impl ContextSnapshotGenerator {
             
             // Get current branch
             if let Ok(output) = tokio::process::Command::new("git")
-                .args(&["branch", "--show-current"])
+                .args(["branch", "--show-current"])
                 .current_dir(&base_dir)
                 .output()
                 .await
@@ -989,7 +989,7 @@ mod tests {
         
         let value = manager.calculate_restoration_value(&message, &context, &CheckpointReason::SuccessfulSolution);
         
-        assert!(value >= 0.0 && value <= 1.0);
+        assert!((0.0..=1.0).contains(&value));
         assert!(value > 0.5); // Successful solutions should have higher restoration value
     }
 

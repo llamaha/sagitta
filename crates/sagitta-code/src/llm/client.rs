@@ -23,6 +23,7 @@ pub enum Role {
 
 /// Configuration for thinking mode
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct ThinkingConfig {
     /// Whether to include thought summaries in the response
     pub include_thoughts: bool,
@@ -32,14 +33,6 @@ pub struct ThinkingConfig {
     pub thinking_budget: Option<i32>,
 }
 
-impl Default for ThinkingConfig {
-    fn default() -> Self {
-        Self {
-            include_thoughts: false,
-            thinking_budget: None, // Auto budget
-        }
-    }
-}
 
 /// Configuration for grounding
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -138,8 +138,8 @@ pub fn migrate_old_config() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
-    use crate::utils::errors::SagittaCodeError;
+    
+    
 
     #[test]
     fn test_get_sagitta_code_app_config_path() {

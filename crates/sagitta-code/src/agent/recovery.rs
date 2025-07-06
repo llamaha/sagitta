@@ -41,6 +41,7 @@ impl Default for RecoveryConfig {
 
 /// Recovery state tracking
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct RecoveryState {
     /// Current retry attempt count
     pub retry_count: u32,
@@ -55,16 +56,6 @@ pub struct RecoveryState {
     pub last_recovery_attempt: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-impl Default for RecoveryState {
-    fn default() -> Self {
-        Self {
-            retry_count: 0,
-            last_error: None,
-            in_recovery: false,
-            last_recovery_attempt: None,
-        }
-    }
-}
 
 /// Recovery manager for handling agent error recovery
 #[derive(Clone)]
@@ -164,7 +155,7 @@ impl RecoveryManager {
         // Set agent state to indicate recovery
         self.state_manager.set_error(
             format!("Recovery attempt {}/{}", retry_count, self.config.max_retries),
-            &format!("Recovering from: {}", error)
+            &format!("Recovering from: {error}")
         ).await?;
         
         // Emit recovery event

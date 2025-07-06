@@ -79,7 +79,7 @@ impl ClaudeInterface {
             cmd.arg(prompt_text);
         }
 
-        log::debug!("Claude command: {:?}", cmd);
+        log::debug!("Claude command: {cmd:?}");
         Ok(cmd)
     }
 
@@ -118,7 +118,7 @@ impl ClaudeInterface {
                 } else {
                     let error = String::from_utf8_lossy(&output.stderr);
                     Err(SagittaCodeError::ConfigError(
-                        format!("Claude binary error: {}", error)
+                        format!("Claude binary error: {error}")
                     ))
                 }
             }
@@ -212,7 +212,7 @@ mod tests {
         let interface = ClaudeInterface::new(config);
         
         let cmd = interface.build_command(Some("Hello")).unwrap();
-        let cmd_str = format!("{:?}", cmd);
+        let cmd_str = format!("{cmd:?}");
         
         assert!(cmd_str.contains("claude"));
         assert!(cmd_str.contains("--print"));
@@ -231,7 +231,7 @@ mod tests {
         
         let interface = ClaudeInterface::new(config);
         let cmd = interface.build_command(Some("Test")).unwrap();
-        let cmd_str = format!("{:?}", cmd);
+        let cmd_str = format!("{cmd:?}");
         
         assert!(cmd_str.contains("--debug"));
         assert!(cmd_str.contains("--verbose"));

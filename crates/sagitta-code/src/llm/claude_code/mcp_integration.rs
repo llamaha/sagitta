@@ -14,6 +14,12 @@ pub struct McpIntegration {
     config_file: Option<NamedTempFile>,
 }
 
+impl Default for McpIntegration {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl McpIntegration {
     pub fn new() -> Self {
         Self {
@@ -56,8 +62,8 @@ impl McpIntegration {
         let config_path = config_file.path().to_string_lossy().to_string();
         self.config_file = Some(config_file);
         
-        log::info!("MCP: Config file created at: {}", config_path);
-        log::info!("MCP: Server name: {}", server_name);
+        log::info!("MCP: Config file created at: {config_path}");
+        log::info!("MCP: Server name: {server_name}");
         
         // Return the config for Claude CLI
         Ok(json!({

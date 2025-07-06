@@ -520,8 +520,8 @@ impl ConversationSidebar {
 
     /// Toggle group expansion
     pub fn toggle_group(&mut self, group_id: &str) {
-        let collapsed_key = format!("collapsed_{}", group_id);
-        let expanded_key = format!("expanded_{}", group_id);
+        let collapsed_key = format!("collapsed_{group_id}");
+        let expanded_key = format!("expanded_{group_id}");
         
         // Determine current state
         let is_currently_expanded = if self.expanded_groups.contains(&collapsed_key) {

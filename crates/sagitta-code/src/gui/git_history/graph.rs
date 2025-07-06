@@ -37,7 +37,7 @@ pub fn render_commit_graph(ui: &mut Ui, state: &mut GitHistoryState, theme: AppT
         // Check if node is hovered
         let node_rect = Rect::from_center_size(pos, Vec2::splat(NODE_RADIUS * 2.0));
         let is_hovered = ui.input(|i| i.pointer.hover_pos())
-            .map_or(false, |cursor_pos| node_rect.contains(cursor_pos));
+            .is_some_and(|cursor_pos| node_rect.contains(cursor_pos));
         
         if is_hovered {
             state.hovered_commit = Some(commit.id.clone());
@@ -271,7 +271,7 @@ fn draw_commit_label(
     painter.text(
         text_pos + Vec2::new(0.0, 16.0),
         egui::Align2::LEFT_CENTER,
-        format!("{} • {}", author_str, time_str),
+        format!("{author_str} • {time_str}"),
         egui::FontId::proportional(11.0),
         theme.hint_text_color(),
     );

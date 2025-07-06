@@ -71,7 +71,7 @@ mod gui_app {
         // Initialize the repository manager with proper client and embedding handler
         let mut repo_manager_guard = repo_manager.lock().await;
         if let Err(e) = repo_manager_guard.initialize().await {
-            log::warn!("Failed to fully initialize repository manager: {}. Some features may be limited.", e);
+            log::warn!("Failed to fully initialize repository manager: {e}. Some features may be limited.");
         }
         drop(repo_manager_guard); // Release the lock
         
@@ -86,7 +86,7 @@ mod gui_app {
         
         // Initialize the app asynchronously before launching eframe
         if let Err(e) = app_instance.initialize().await {
-            log::error!("Failed to initialize SagittaCodeApp: {}", e);
+            log::error!("Failed to initialize SagittaCodeApp: {e}");
             // Consider showing an error message to the user
         }
         

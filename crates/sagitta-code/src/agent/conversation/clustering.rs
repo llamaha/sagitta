@@ -317,7 +317,7 @@ impl ConversationClusteringManager {
         
         // Add tags
         for (i, tag) in conversation.tags.iter().enumerate() {
-            metadata.insert(format!("tag_{}", i), tag.clone().into());
+            metadata.insert(format!("tag_{i}"), tag.clone().into());
         }
         
         metadata
@@ -569,7 +569,7 @@ impl ConversationClusteringManager {
 
     /// Phase 3: Apply temporal weighting to similarity score
     fn apply_temporal_weighting(&self, base_similarity: f32, conv1: &ConversationSummary, conv2: &ConversationSummary) -> f32 {
-        let time_diff = (conv1.last_active - conv2.last_active).num_hours().abs() as u64;
+        let time_diff = (conv1.last_active - conv2.last_active).num_hours().unsigned_abs();
         let max_diff = self.config.max_temporal_distance_hours;
         
         if time_diff <= max_diff {
@@ -631,7 +631,7 @@ impl ConversationClusteringManager {
         
         // Apply temporal proximity if enabled
         if self.config.use_temporal_proximity {
-            let time_diff = (conv1.last_active - conv2.last_active).num_hours().abs() as u64;
+            let time_diff = (conv1.last_active - conv2.last_active).num_hours().unsigned_abs();
             let max_diff = self.config.max_temporal_distance_hours;
             
             if time_diff <= max_diff {
@@ -789,7 +789,7 @@ impl ConversationClusteringManager {
             match cluster_namer.generate_cluster_name(&cluster, conversations).await {
                 Ok(generated_title) => generated_title,
                 Err(e) => {
-                    eprintln!("Failed to generate cluster name: {}", e);
+                    eprintln!("Failed to generate cluster name: {e}");
                     self.generate_cluster_title(&member_indices, conversations, &cluster.common_tags)
                 }
             }
@@ -970,7 +970,7 @@ fn cosine_similarity(vec1: &[f32], vec2: &[f32]) -> f32 {
 mod tests {
     use super::*;
     use crate::agent::state::types::ConversationStatus;
-    use tempfile::TempDir;
+    
     use sagitta_search::AppConfig;
 
     async fn create_test_setup() -> (Arc<Qdrant>, EmbeddingPool) {

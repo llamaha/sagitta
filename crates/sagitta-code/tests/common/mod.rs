@@ -46,7 +46,7 @@ mod tests {
         let path = PathBuf::from(config_path.unwrap());
         let filename = path.file_name().unwrap().to_str().unwrap();
         assert!(filename == "config.toml" || filename == "dummy.toml", 
-                "Config path should end with config.toml or dummy.toml, got: {}", filename);
+                "Config path should end with config.toml or dummy.toml, got: {filename}");
     }
 
     #[test]
@@ -59,6 +59,6 @@ mod tests {
         let path = path.unwrap();
         let filename = path.file_name().unwrap().to_str().unwrap();
         assert!(filename == "config.toml" || filename == "dummy.toml", 
-                "Should point to config.toml or dummy.toml, got: {}", filename);
+                "Should point to config.toml or dummy.toml, got: {filename}");
     }
 } 

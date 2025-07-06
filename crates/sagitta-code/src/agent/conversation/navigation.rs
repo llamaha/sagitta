@@ -229,8 +229,8 @@ impl ConversationNavigationManager {
         // Filter by time range
         let filtered_conversations: Vec<_> = conversations.into_iter()
             .filter(|conv| {
-                let in_start_range = start_time.map_or(true, |start| conv.created_at >= start);
-                let in_end_range = end_time.map_or(true, |end| conv.created_at <= end);
+                let in_start_range = start_time.is_none_or(|start| conv.created_at >= start);
+                let in_end_range = end_time.is_none_or(|end| conv.created_at <= end);
                 in_start_range && in_end_range
             })
             .collect();
@@ -612,7 +612,7 @@ impl ConversationNavigationManager {
         for node in nodes {
             if node.node_type == NodeType::Conversation {
                 workspace_groups.entry(node.metadata.workspace_id)
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(node.id);
             }
         }
@@ -621,7 +621,7 @@ impl ConversationNavigationManager {
             if conversation_ids.len() > 1 {
                 clusters.push(ConversationCluster {
                     id: Uuid::new_v4(),
-                    title: format!("Workspace Cluster {:?}", workspace_id),
+                    title: format!("Workspace Cluster {workspace_id:?}"),
                     conversation_ids,
                     center: (0.0, 0.0), // Would be calculated by layout algorithm
                     radius: 1.0,
@@ -825,7 +825,7 @@ fn truncate_text(text: &str, max_length: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::conversation::manager::ConversationManager;
+    
     use crate::agent::conversation::types::*;
     use crate::agent::message::types::AgentMessage;
     use crate::{Role, ConversationStatus};

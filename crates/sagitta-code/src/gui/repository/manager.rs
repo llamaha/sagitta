@@ -120,7 +120,7 @@ impl RepositoryManager {
                     self.client = Some(Arc::new(client));
                 },
                 Err(e) => {
-                    log::warn!("[RepositoryManager] Failed to create Qdrant client: {}. Continuing without Qdrant.", e);
+                    log::warn!("[RepositoryManager] Failed to create Qdrant client: {e}. Continuing without Qdrant.");
                     // Don't fail initialization, just continue without Qdrant
                 }
             }
@@ -139,11 +139,11 @@ impl RepositoryManager {
             let model_path = config_guard.onnx_model_path.as_ref().unwrap();
             let tokenizer_path = config_guard.onnx_tokenizer_path.as_ref().unwrap();
             
-            log::info!("[RepositoryManager] Checking if ONNX model file exists: {}", model_path);
+            log::info!("[RepositoryManager] Checking if ONNX model file exists: {model_path}");
             if !std::path::Path::new(model_path).exists() {
-                log::warn!("[RepositoryManager] ONNX model file does not exist: {}. Skipping embedding handler initialization.", model_path);
+                log::warn!("[RepositoryManager] ONNX model file does not exist: {model_path}. Skipping embedding handler initialization.");
             } else if !std::path::Path::new(tokenizer_path).exists() {
-                log::warn!("[RepositoryManager] ONNX tokenizer path does not exist: {}. Skipping embedding handler initialization.", tokenizer_path);
+                log::warn!("[RepositoryManager] ONNX tokenizer path does not exist: {tokenizer_path}. Skipping embedding handler initialization.");
             } else {
                 log::info!("[RepositoryManager] ONNX files exist, creating embedding handler...");
                 
@@ -153,7 +153,7 @@ impl RepositoryManager {
                         self.embedding_handler = Some(Arc::new(pool));
                     },
                     Err(e) => {
-                        log::error!("Failed to create EmbeddingPool: {}", e);
+                        log::error!("Failed to create EmbeddingPool: {e}");
                         self.embedding_handler = None;
                     }
                 }
@@ -205,14 +205,14 @@ impl RepositoryManager {
         
         // Update the repository cache for sync status updates using enhanced listing
         if !repositories.is_empty() {
-            match sagitta_search::get_enhanced_repository_list(&*config_guard).await {
+            match sagitta_search::get_enhanced_repository_list(&config_guard).await {
                 Ok(enhanced_list) => {
                     let repo_infos: Vec<RepoInfo> = enhanced_list.repositories
                         .into_iter()
                         .map(|enhanced_repo| RepoInfo {
                             name: enhanced_repo.name,
                             remote: Some(enhanced_repo.url),
-                            branch: enhanced_repo.active_branch.or_else(|| Some(enhanced_repo.default_branch)),
+                            branch: enhanced_repo.active_branch.or(Some(enhanced_repo.default_branch)),
                             local_path: Some(enhanced_repo.local_path),
                             is_syncing: enhanced_repo.sync_status.sync_in_progress,
                         })
@@ -223,7 +223,7 @@ impl RepositoryManager {
                     log::info!("RepoManager: Successfully updated repository cache with enhanced information for {} repositories.", repos_guard.len());
                 }
                 Err(e) => {
-                    log::warn!("RepoManager: Failed to get enhanced repository list, using basic conversion: {}", e);
+                    log::warn!("RepoManager: Failed to get enhanced repository list, using basic conversion: {e}");
                     let repo_infos: Vec<RepoInfo> = repositories.iter().map(|config| RepoInfo::from(config.clone())).collect();
                     let mut repos_guard = self.repositories.lock().await;
                     *repos_guard = repo_infos;
@@ -241,14 +241,14 @@ impl RepositoryManager {
     /// Get enhanced repository information
     pub async fn get_enhanced_repository_list(&self) -> Result<sagitta_search::EnhancedRepositoryList> {
         let config_guard = self.config.lock().await;
-        sagitta_search::get_enhanced_repository_list(&*config_guard).await
+        sagitta_search::get_enhanced_repository_list(&config_guard).await
             .map_err(|e| anyhow::anyhow!("Failed to get enhanced repository list: {}", e))
     }
 
     /// Get orphaned repositories (on filesystem but not in config)
     pub async fn get_orphaned_repositories(&self) -> Result<Vec<sagitta_search::OrphanedRepository>> {
         let config_guard = self.config.lock().await;
-        sagitta_search::scan_for_orphaned_repositories(&*config_guard).await
+        sagitta_search::scan_for_orphaned_repositories(&config_guard).await
             .map_err(|e| anyhow::anyhow!("Failed to scan for orphaned repositories: {}", e))
     }
 
@@ -259,7 +259,7 @@ impl RepositoryManager {
         let mut config_guard = self.config.lock().await;
         
         // Add the orphaned repository
-        sagitta_search::add_orphaned_repository(&mut *config_guard, orphaned_repo).await
+        sagitta_search::add_orphaned_repository(&mut config_guard, orphaned_repo).await
             .map_err(|e| anyhow::anyhow!("Failed to add orphaned repository: {}", e))?;
         
         // Find the newly added repository config to create CLAUDE.md
@@ -271,7 +271,7 @@ impl RepositoryManager {
         }
         
         // Save config
-        self.save_core_config_with_guard(&*config_guard).await?;
+        self.save_core_config_with_guard(&config_guard).await?;
         
         Ok(())
     }
@@ -304,7 +304,7 @@ impl RepositoryManager {
     // Helper to save the current AppConfig state to the dedicated path
     async fn save_core_config(&self) -> Result<()> {
         let config_guard = self.config.lock().await;
-        self.save_core_config_with_guard(&*config_guard).await
+        self.save_core_config_with_guard(&config_guard).await
     }
     
     // Helper to save config when we already have the guard
@@ -326,11 +326,11 @@ impl RepositoryManager {
         log::debug!("Config has {} repositories", config.repositories.len());
         
         let result = save_config(config, Some(&shared_config_path))
-            .with_context(|| format!("Failed to save core config to {:?}", shared_config_path));
+            .with_context(|| format!("Failed to save core config to {shared_config_path:?}"));
         
         match &result {
             Ok(_) => log::info!("Successfully saved config to {}", shared_config_path.display()),
-            Err(e) => log::error!("Failed to save config: {}", e),
+            Err(e) => log::error!("Failed to save config: {e}"),
         }
         
         result?;
@@ -339,7 +339,7 @@ impl RepositoryManager {
 
     async fn initialize_sync_status_for_new_repo(&self, repo_name: &str) {
         // This is now handled by the UI and global state, so this function is obsolete.
-        log::info!("[GUI RepoManager] Obsolete initialize_sync_status_for_new_repo called for '{}'", repo_name);
+        log::info!("[GUI RepoManager] Obsolete initialize_sync_status_for_new_repo called for '{repo_name}'");
     }
 
     /// Ensure CLAUDE.md exists in the repository root directory
@@ -379,7 +379,7 @@ impl RepositoryManager {
     }
 
     pub async fn add_local_repository(&self, name: &str, path: &str) -> Result<()> {
-        log::info!("[GUI RepoManager] Add local repo: {} at {}", name, path);
+        log::info!("[GUI RepoManager] Add local repo: {name} at {path}");
         
         // Ensure client is initialized (embedding handler is optional for basic repo management)
         if self.client.is_none() {
@@ -445,11 +445,11 @@ impl RepositoryManager {
                 
                 // Ensure CLAUDE.md exists in the repository
                 if let Err(e) = self.ensure_claude_md(&new_repo_config).await {
-                    log::warn!("[GUI RepoManager] Failed to create CLAUDE.md for repository '{}': {}", name, e);
+                    log::warn!("[GUI RepoManager] Failed to create CLAUDE.md for repository '{name}': {e}");
                 }
                 
                 config_guard.repositories.push(new_repo_config.clone());
-                self.save_core_config_with_guard(&*config_guard).await?;
+                self.save_core_config_with_guard(&config_guard).await?;
                 drop(config_guard); // Release lock before calling the helper
 
                 self.initialize_sync_status_for_new_repo(&new_repo_config.name).await;
@@ -462,7 +462,7 @@ impl RepositoryManager {
     }
 
     pub async fn add_repository(&self, name: &str, url: &str, branch: Option<&str>, target_ref: Option<&str>) -> Result<()> {
-        log::info!("[GUI RepoManager] Add repo: {} from {} (branch: {:?}, target_ref: {:?})", name, url, branch, target_ref);
+        log::info!("[GUI RepoManager] Add repo: {name} from {url} (branch: {branch:?}, target_ref: {target_ref:?})");
         
         // Ensure client is initialized (embedding handler is optional for basic repo management)
         if self.client.is_none() {
@@ -510,7 +510,7 @@ impl RepositoryManager {
         let client_clone = self.client.as_ref().unwrap().clone();
         let config_clone = self.config.lock().await.clone();
         
-        log::info!("[GUI RepoManager] Adding repository: {}", name);
+        log::info!("[GUI RepoManager] Adding repository: {name}");
         let repo_config_result = handle_repo_add(
             args,
             repo_base_path,
@@ -525,18 +525,18 @@ impl RepositoryManager {
                 log::info!("[GUI RepoManager] Repository addition successful, saving to config...");
                 let mut config_guard = self.config.lock().await;
                 if config_guard.repositories.iter().any(|r| r.name == new_repo_config.name) {
-                    log::warn!("[GUI RepoManager] Repository '{}' already exists in configuration", name);
+                    log::warn!("[GUI RepoManager] Repository '{name}' already exists in configuration");
                     return Err(anyhow!("Repository '{}' already exists in configuration.", name));
                 }
                 
                 // Ensure CLAUDE.md exists in the repository
                 if let Err(e) = self.ensure_claude_md(&new_repo_config).await {
-                    log::warn!("[GUI RepoManager] Failed to create CLAUDE.md for repository '{}': {}", name, e);
+                    log::warn!("[GUI RepoManager] Failed to create CLAUDE.md for repository '{name}': {e}");
                 }
                 
                 config_guard.repositories.push(new_repo_config.clone());
                 log::info!("[GUI RepoManager] Repository added to config. Total repositories: {}", config_guard.repositories.len());
-                self.save_core_config_with_guard(&*config_guard).await?;
+                self.save_core_config_with_guard(&config_guard).await?;
                 drop(config_guard); // Release lock before calling the helper
 
                 self.initialize_sync_status_for_new_repo(&new_repo_config.name).await;
@@ -545,14 +545,14 @@ impl RepositoryManager {
                 Ok(())
             },
             Err(e) => {
-                log::error!("[GUI RepoManager] Repository addition failed: {}", e);
+                log::error!("[GUI RepoManager] Repository addition failed: {e}");
                 Err(anyhow!("Failed to add repository: {}", e))
             }
         }
     }
 
     pub async fn remove_repository(&mut self, name: &str) -> Result<()> {
-        log::info!("[GUI RepoManager] Remove repo: {}", name);
+        log::info!("[GUI RepoManager] Remove repo: {name}");
         
         // Ensure client is initialized
         if self.client.is_none() {
@@ -585,22 +585,22 @@ impl RepositoryManager {
         }
         
         // Save config
-        self.save_core_config_with_guard(&*config_guard).await?;
+        self.save_core_config_with_guard(&config_guard).await?;
         
         Ok(())
     }
 
     pub async fn reclone_repository(&mut self, name: &str) -> Result<()> {
-        log::info!("[GUI RepoManager] Reclone repo: {}", name);
+        log::info!("[GUI RepoManager] Reclone repo: {name}");
         
         let config_guard = self.config.lock().await;
         
         // Use the sagitta_search reclone function
-        sagitta_search::reclone_missing_repository(&*config_guard, name).await
+        sagitta_search::reclone_missing_repository(&config_guard, name).await
             .map_err(|e| anyhow::anyhow!("Failed to reclone repository '{}': {}", name, e))?;
         
         // After successful reclone, trigger a refresh of repository list
-        log::info!("[GUI RepoManager] Successfully recloned repository '{}'", name);
+        log::info!("[GUI RepoManager] Successfully recloned repository '{name}'");
         
         Ok(())
     }
@@ -610,7 +610,7 @@ impl RepositoryManager {
     }
 
     pub async fn sync_repository_with_options(&mut self, name: &str, force: bool) -> Result<()> {
-        log::info!("[GUI RepoManager] Sync repo: {} (force: {})", name, force);
+        log::info!("[GUI RepoManager] Sync repo: {name} (force: {force})");
         
         if self.client.is_none() {
             return Err(anyhow!("Qdrant client not initialized"));
@@ -662,8 +662,8 @@ impl RepositoryManager {
                                 repo.last_synced_commits.insert(current_branch, commit);
                             }
                             repo.indexed_languages = Some(sync_outcome.indexed_languages.clone());
-                            if let Err(e) = self.save_core_config_with_guard(&*config_guard).await {
-                                 log::error!("Failed to save config after successful sync for {}: {}", name, e);
+                            if let Err(e) = self.save_core_config_with_guard(&config_guard).await {
+                                 log::error!("Failed to save config after successful sync for {name}: {e}");
                                  // Decide if this should make the overall sync fail. For now, it doesn't.
                             }
                         }
@@ -680,7 +680,7 @@ impl RepositoryManager {
             },
             Err(e) => {
                 // This error is from sync_repository itself, not from the SyncResult.
-                log::error!("Error during sync_repository call for {}: {}", name, e);
+                log::error!("Error during sync_repository call for {name}: {e}");
                 // The GuiProgressReporter should have sent an Error stage update.
                 self.cleanup_gpu_memory_after_sync().await;
                 Err(anyhow!("Failed to sync repository {}: {}", name, e))
@@ -707,8 +707,7 @@ impl RepositoryManager {
         let config_guard = self.config.lock().await;
         
         
-        log::info!("[GUI RepoManager] Query repo: {} for '{}' (limit: {}, element: {:?}, lang: {:?}, branch: {:?})", 
-                  repo_name, query_text, limit, element_type, language, branch);
+        log::info!("[GUI RepoManager] Query repo: {repo_name} for '{query_text}' (limit: {limit}, element: {element_type:?}, lang: {language:?}, branch: {branch:?})");
         
         // Log warning if parameters are not specified
         if element_type.is_none() && language.is_none() {
@@ -729,14 +728,14 @@ impl RepositoryManager {
         // Get collection name based on repo and branch using branch-aware naming
         let collection_name = repo_helpers::get_branch_aware_collection_name(repo_name, &branch_name, &config_guard);
         
-        log::info!("[GUI RepoManager] Using collection '{}' for search (branch: {})", collection_name, branch_name);
+        log::info!("[GUI RepoManager] Using collection '{collection_name}' for search (branch: {branch_name})");
         
         // Create filter conditions
         let mut filter_conditions = Vec::new();
         
         // Always add branch filter to ensure we only get results from the correct branch
         filter_conditions.push(Condition::matches("branch", branch_name.clone()));
-        log::debug!("[GUI RepoManager] Added branch filter: {}", branch_name);
+        log::debug!("[GUI RepoManager] Added branch filter: {branch_name}");
         
         // Add element_type filter if provided
         if let Some(element) = element_type {
@@ -755,7 +754,7 @@ impl RepositoryManager {
             None
         };
         
-        log::debug!("[GUI RepoManager] Search filter: {:?}", search_filter);
+        log::debug!("[GUI RepoManager] Search filter: {search_filter:?}");
         
         // Try to use the real search implementation if we have all the required components
         if let (Some(client), Some(embedding_handler)) = (&self.client, &self.embedding_handler) {
@@ -765,7 +764,7 @@ impl RepositoryManager {
             match client.collection_exists(&collection_name).await {
                 Ok(exists) => {
                     if !exists {
-                        log::error!("[GUI RepoManager] Collection '{}' does not exist! Repository may need to be indexed.", collection_name);
+                        log::error!("[GUI RepoManager] Collection '{collection_name}' does not exist! Repository may need to be indexed.");
                         return Err(anyhow!("Collection '{}' does not exist. Please sync/index the repository first.", collection_name));
                     } else {
                         // Check collection info
@@ -775,13 +774,13 @@ impl RepositoryManager {
                                          collection_name, info.result.map(|r| r.points_count));
                             },
                             Err(e) => {
-                                log::warn!("[GUI RepoManager] Failed to get collection info: {}", e);
+                                log::warn!("[GUI RepoManager] Failed to get collection info: {e}");
                             }
                         }
                     }
                 },
                 Err(e) => {
-                    log::warn!("[GUI RepoManager] Failed to check if collection exists: {}", e);
+                    log::warn!("[GUI RepoManager] Failed to check if collection exists: {e}");
                 }
             }
             
@@ -797,15 +796,15 @@ impl RepositoryManager {
             }).await {
                 Ok(result) => {
                     if result.result.is_empty() {
-                        log::warn!("[GUI RepoManager] Search returned 0 results for collection '{}' with query '{}'", collection_name, query_text);
+                        log::warn!("[GUI RepoManager] Search returned 0 results for collection '{collection_name}' with query '{query_text}'");
                     } else {
                         log::info!("[GUI RepoManager] Search returned {} results", result.result.len());
                     }
-                    return Ok(result);
+                    Ok(result)
                 },
                 Err(e) => {
-                    log::error!("Search failed: {}", e);
-                    return Err(anyhow!("Search failed: {}", e));
+                    log::error!("Search failed: {e}");
+                    Err(anyhow!("Search failed: {}", e))
                 }
             }
         } else {
@@ -813,8 +812,7 @@ impl RepositoryManager {
             let client_status = if self.client.is_some() { "initialized" } else { "NOT initialized" };
             let embedding_status = if self.embedding_handler.is_some() { "initialized" } else { "NOT initialized" };
             
-            log::error!("[GUI RepoManager] Cannot perform search - Qdrant client: {}, Embedding handler: {}", 
-                       client_status, embedding_status);
+            log::error!("[GUI RepoManager] Cannot perform search - Qdrant client: {client_status}, Embedding handler: {embedding_status}");
             
             Err(anyhow!("Search infrastructure not initialized. Qdrant client: {}, Embedding handler: {}. \
                         Please ensure Qdrant is running and embedding models are configured.", 
@@ -823,7 +821,7 @@ impl RepositoryManager {
     }
 
     pub async fn search_file(&self, repo_name: &str, pattern: &str, case_sensitive: bool) -> Result<Vec<String>> {
-        log::info!("[GUI RepoManager] Search file in repo: {} for pattern '{}' (case_sensitive: {})", repo_name, pattern, case_sensitive);
+        log::info!("[GUI RepoManager] Search file in repo: {repo_name} for pattern '{pattern}' (case_sensitive: {case_sensitive})");
         
         let config_guard = self.config.lock().await;
         
@@ -851,7 +849,7 @@ impl RepositoryManager {
     }
 
     pub async fn view_file(&self, repo_name: &str, file_path: &str, start_line: Option<u32>, end_line: Option<u32>) -> Result<String> {
-        log::info!("[GUI RepoManager] View file {} in repo: {} (lines: {:?}-{:?})", file_path, repo_name, start_line, end_line);
+        log::info!("[GUI RepoManager] View file {file_path} in repo: {repo_name} (lines: {start_line:?}-{end_line:?})");
         
         let config_guard = self.config.lock().await;
         
@@ -965,7 +963,7 @@ impl RepositoryManager {
     
     /// Switch to any Git reference (branch, tag, commit) with automatic resync
     pub async fn switch_to_ref(&self, repo_name: &str, target_ref: &str, auto_resync: bool) -> Result<super::types::BranchSyncResult> {
-        info!("[GUI RepoManager] Switching to ref '{}' in repository '{}'", target_ref, repo_name);
+        info!("[GUI RepoManager] Switching to ref '{target_ref}' in repository '{repo_name}'");
         
         let mut config_guard = self.config.lock().await;
         
@@ -1014,7 +1012,7 @@ impl RepositoryManager {
         }
         
         // Save configuration
-        self.save_core_config_with_guard(&*config_guard).await?;
+        self.save_core_config_with_guard(&config_guard).await?;
         
         // Convert to GUI result type
         let sync_type = if let Some(ref sync_result) = switch_result.sync_result {
@@ -1055,7 +1053,7 @@ impl RepositoryManager {
         }
         
         // Check if it looks like a semantic version tag
-        if ref_name.starts_with('v') && ref_name[1..].chars().next().map_or(false, |c| c.is_ascii_digit()) {
+        if ref_name.starts_with('v') && ref_name[1..].chars().next().is_some_and(|c| c.is_ascii_digit()) {
             return false;
         }
         
@@ -1071,7 +1069,7 @@ impl RepositoryManager {
     
     /// Create a new branch
     pub async fn create_branch(&self, repo_name: &str, branch_name: &str, _checkout: bool) -> Result<()> {
-        info!("[GUI RepoManager] Creating branch '{}' in repository '{}'", branch_name, repo_name);
+        info!("[GUI RepoManager] Creating branch '{branch_name}' in repository '{repo_name}'");
         
         let config_guard = self.config.lock().await;
         
@@ -1092,7 +1090,7 @@ impl RepositoryManager {
     
     /// Delete a branch
     pub async fn delete_branch(&self, repo_name: &str, branch_name: &str, force: bool) -> Result<()> {
-        info!("[GUI RepoManager] Deleting branch '{}' in repository '{}'", branch_name, repo_name);
+        info!("[GUI RepoManager] Deleting branch '{branch_name}' in repository '{repo_name}'");
         
         let config_guard = self.config.lock().await;
         
@@ -1115,13 +1113,13 @@ impl RepositoryManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sagitta_search::config::{AppConfig, IndexingConfig, PerformanceConfig};
+    use sagitta_search::config::AppConfig;
     use std::sync::Arc;
     use tokio::sync::Mutex;
     use tempfile::TempDir;
-    use std::fs;
-    use sagitta_search::sync_progress::{SyncProgress as CoreSyncProgress, SyncStage as CoreSyncStage};
-    use std::time::Duration;
+    
+    
+    
 
     /// Helper to create a RepositoryManager instance with a temporary AppConfig for testing
     async fn create_test_repo_manager_with_temp_config() -> (RepositoryManager, TempDir) {

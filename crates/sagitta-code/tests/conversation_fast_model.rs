@@ -53,7 +53,7 @@ async fn test_fast_model_configuration() -> Result<()> {
     
     // Check default values
     assert_eq!(config.conversation.fast_model, "claude-haiku-20250102");
-    assert_eq!(config.conversation.enable_fast_model, true);
+    assert!(config.conversation.enable_fast_model);
     
     // Update configuration
     config.conversation.fast_model = "claude-sonnet-4-20250514".to_string();
@@ -61,7 +61,7 @@ async fn test_fast_model_configuration() -> Result<()> {
     
     // Verify updates
     assert_eq!(config.conversation.fast_model, "claude-sonnet-4-20250514");
-    assert_eq!(config.conversation.enable_fast_model, false);
+    assert!(!config.conversation.enable_fast_model);
     
     Ok(())
 }

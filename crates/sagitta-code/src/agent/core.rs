@@ -124,7 +124,7 @@ impl Agent {
             provider.generate_system_prompt(&tool_definitions_for_prompt)
         };
         info!("System prompt constructed. Length: {}", system_prompt.len());
-        trace!("System prompt content: {}", system_prompt);
+        trace!("System prompt content: {system_prompt}");
 
         // Set up conversation management system
         debug!("Setting up conversation management system...");
@@ -146,7 +146,7 @@ impl Agent {
             persistence, // Use passed-in persistence
             search_engine, // Use passed-in search_engine
         ).await
-        .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation manager: {}", e)))?
+        .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation manager: {e}")))?
         .with_auto_save(config.conversation.auto_save);
         debug!("Conversation manager created.");
         
@@ -160,7 +160,7 @@ impl Agent {
             max_context_tokens,
             system_prompt.clone(),
         ).await
-        .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation-aware history manager: {}", e)))?;
+        .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation-aware history manager: {e}")))?;
         debug!("Conversation-aware history manager created.");
         
         // Get current conversation ID for context manager
@@ -169,13 +169,13 @@ impl Agent {
         } else {
             // Create a new conversation and get its ID
             let new_id = Uuid::new_v4();
-            info!("No current conversation found, will use new ID for context manager: {}", new_id);
+            info!("No current conversation found, will use new ID for context manager: {new_id}");
             new_id
         };
         
         // Create conversation context manager for Phase 3 features
         let context_manager = Arc::new(ConversationContextManager::new(current_conversation_id));
-        debug!("Conversation context manager created for conversation: {}", current_conversation_id);
+        debug!("Conversation context manager created for conversation: {current_conversation_id}");
 
         // Create shared loop break flag
         let loop_break_requested_initial = Arc::new(tokio::sync::Mutex::new(false));
@@ -255,7 +255,7 @@ impl Agent {
         -> Result<Pin<Box<dyn Stream<Item = Result<SagittaCodeStreamChunk, SagittaCodeError>> + Send + '_>>, SagittaCodeError> 
     {
         let message_text = message.into();
-        info!("Processing user message (stream with thinking - FIXED): '{}'", message_text);
+        info!("Processing user message (stream with thinking - FIXED): '{message_text}'");
         
         self.state_manager.set_thinking("Processing user message with thinking").await?;
         
@@ -349,7 +349,7 @@ impl Agent {
         let manager = self.get_conversation_manager();
         let manager_guard = manager.lock().await;
         manager_guard.create_conversation(title, None).await
-            .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation: {}", e)))
+            .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation: {e}")))
     }
     
     /// List all conversations
@@ -357,7 +357,7 @@ impl Agent {
         let manager = self.get_conversation_manager();
         let manager_guard = manager.lock().await;
         manager_guard.list_conversations(None).await
-            .map_err(|e| SagittaCodeError::Unknown(format!("Failed to list conversations: {}", e)))
+            .map_err(|e| SagittaCodeError::Unknown(format!("Failed to list conversations: {e}")))
     }
 
     // Added getter for StateManager's state Arc

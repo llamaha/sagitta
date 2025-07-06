@@ -556,7 +556,7 @@ impl ConversationStarter {
                                         ui.horizontal(|ui| {
                                             ui.label("Tags:");
                                             for tag in &template.suggested_tags {
-                                                ui.small(format!("#{}", tag));
+                                                ui.small(format!("#{tag}"));
                                             }
                                         });
                                     }

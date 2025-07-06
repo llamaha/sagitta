@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use egui::{Ui, RichText, Grid, TextEdit, Button, Checkbox, ComboBox, Frame, Stroke};
+use egui::{Ui, RichText, Grid, TextEdit, Button, Checkbox, ComboBox, Frame, Stroke, CornerRadius};
 use tokio::sync::Mutex;
 
 use crate::gui::theme::AppTheme;
@@ -28,8 +28,7 @@ impl LanguageProjectInfo {
                 command_check: "python",
                 create_command: |name| {
                     format!(
-                        "mkdir {} && cd {} && python -m venv venv && echo '# {}' > README.md",
-                        name, name, name
+                        "mkdir {name} && cd {name} && python -m venv venv && echo '# {name}' > README.md"
                     )
                 },
                 tool_name: "Python",
@@ -83,10 +82,10 @@ pub fn render_create_project(
 
     // Show project info if we have a project name
     if !state.project_form.name.is_empty() {
-        Frame::none()
+        Frame::NONE
             .fill(theme.info_background())
             .stroke(Stroke::new(1.0, theme.info_color()))
-            .rounding(4.0)
+            .corner_radius(CornerRadius::same(4))
             .inner_margin(8.0)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -109,10 +108,10 @@ pub fn render_create_project(
     }
 
     // Main form
-    Frame::none()
+    Frame::NONE
         .fill(theme.panel_background())
         .stroke(Stroke::new(1.0, theme.border_color()))
-        .rounding(6.0)
+        .corner_radius(CornerRadius::same(6))
         .inner_margin(12.0)
         .show(ui, |ui| {
             Grid::new("project_creation_form")
@@ -138,7 +137,7 @@ pub fn render_create_project(
                             ("ruby", "💎"),
                         ];
 
-                        ComboBox::from_id_source("language_combo")
+                        ComboBox::from_id_salt("language_combo")
                             .selected_text(&state.project_form.language)
                             .show_ui(ui, |ui| {
                                 for (lang, _icon) in &languages {
@@ -270,7 +269,7 @@ fn create_project(
                 Ok(output) if output.status.success() => {
                     // Tool is available, create the base directory if it doesn't exist
                     if let Err(e) = tokio::fs::create_dir_all(&project_path).await {
-                        log::error!("Failed to create base directory {}: {}", project_path, e);
+                        log::error!("Failed to create base directory {project_path}: {e}");
                         return;
                     }
                     
@@ -358,7 +357,7 @@ fn create_project(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gui::repository::types::{RepoPanelState, ProjectCreationForm};
+    use crate::gui::repository::types::ProjectCreationForm;
 
     #[test]
     fn test_language_project_info() {

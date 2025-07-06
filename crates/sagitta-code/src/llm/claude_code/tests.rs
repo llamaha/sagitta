@@ -1,7 +1,6 @@
 use crate::llm::client::{MessagePart, StreamChunk};
 use crate::utils::errors::SagittaCodeError;
 use tokio::sync::mpsc;
-use std::time::{Duration, Instant};
 
 #[cfg(test)]
 mod streaming_tests {
@@ -59,10 +58,8 @@ mod streaming_tests {
     #[test]
     fn test_message_part_ordering() {
         // Test that thinking parts come before text parts when processed
-        let mut parts = vec![
-            MessagePart::Text { text: "Response text".to_string() },
-            MessagePart::Thought { text: "Thinking text".to_string() },
-        ];
+        let mut parts = [MessagePart::Text { text: "Response text".to_string() },
+            MessagePart::Thought { text: "Thinking text".to_string() }];
         
         // Sort by type - thinking should come first
         parts.sort_by_key(|part| match part {
@@ -114,7 +111,7 @@ mod streaming_tests {
         for (i, (expected_text, _)) in chunks.iter().enumerate() {
             match &received[i] {
                 MessagePart::Thought { text } | MessagePart::Text { text } => {
-                    assert_eq!(text, *expected_text, "Chunk {} text mismatch", i);
+                    assert_eq!(text, *expected_text, "Chunk {i} text mismatch");
                 }
                 _ => panic!("Unexpected message part type"),
             }
@@ -124,7 +121,7 @@ mod streaming_tests {
 
 #[cfg(test)]
 mod claude_cli_behavior_tests {
-    use super::*;
+    
     
     #[test]
     fn test_claude_cli_json_parsing() {

@@ -39,7 +39,7 @@ pub fn render_file_search(
         if !repo_names.is_empty() {
             ui.horizontal(|ui| {
                 ui.label("Select repository:");
-                ComboBox::from_id_source("search_no_repo_selector")
+                ComboBox::from_id_salt("search_no_repo_selector")
                     .selected_text("Choose repository...")
                     .show_ui(ui, |ui| {
                         for name in repo_names {
@@ -71,7 +71,7 @@ pub fn render_file_search(
             ui.label("Repository:");
             let repo_names = state.repo_names();
             let selected_text = state.selected_repo.as_ref().unwrap_or(&state.file_search_options.repo_name);
-            ComboBox::from_id_source("repository_select_file_search")
+            ComboBox::from_id_salt("repository_select_file_search")
                 .selected_text(selected_text)
                 .show_ui(ui, |ui| {
                     for name in repo_names {
@@ -142,7 +142,7 @@ pub fn render_file_search(
                             });
                         },
                         Err(e) => {
-                            log::error!("File search error: {}", e);
+                            log::error!("File search error: {e}");
                             let _ = sender.try_send(FileSearchResult {
                                 is_loading: false,
                                 error_message: Some(e.to_string()),
@@ -162,7 +162,7 @@ pub fn render_file_search(
     if state.file_search_result.is_loading {
         ui.label(RichText::new("Searching...").color(theme.warning_color()));
     } else if let Some(error) = &state.file_search_result.error_message {
-        ui.label(RichText::new(format!("Error: {}", error)).color(theme.error_color()));
+        ui.label(RichText::new(format!("Error: {error}")).color(theme.error_color()));
     }
     
     // Search results

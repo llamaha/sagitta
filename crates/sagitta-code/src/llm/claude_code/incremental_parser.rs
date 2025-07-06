@@ -10,6 +10,12 @@ pub struct IncrementalJsonParser {
     brace_stack: Vec<char>,
 }
 
+impl Default for IncrementalJsonParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IncrementalJsonParser {
     pub fn new() -> Self {
         Self {
@@ -185,14 +191,14 @@ mod tests {
         let mut parser = IncrementalJsonParser::new();
         
         let chunk = r#"{"text":"Line 1\nLine 2\"quoted\""}"#;
-        println!("Test input: {}", chunk);
+        println!("Test input: {chunk}");
         let events = parser.feed(chunk);
         
         // Debug: print all events
         for (i, event) in events.iter().enumerate() {
             match event {
-                StreamEvent::TextChar(ch) => println!("Event {}: TextChar('{}')", i, ch),
-                StreamEvent::CompleteJson(_) => println!("Event {}: CompleteJson", i),
+                StreamEvent::TextChar(ch) => println!("Event {i}: TextChar('{ch}')"),
+                StreamEvent::CompleteJson(_) => println!("Event {i}: CompleteJson"),
             }
         }
         
@@ -204,7 +210,7 @@ mod tests {
             .collect();
         
         let text: String = text_chars.into_iter().collect();
-        println!("Extracted: '{}'", text);
+        println!("Extracted: '{text}'");
         println!("Expected:  'Line 1\\nLine 2\"quoted\"'");
         assert_eq!(text, "Line 1\nLine 2\"quoted\"");
     }
