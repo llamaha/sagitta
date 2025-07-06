@@ -390,6 +390,31 @@ where
         info!("Ensuring Qdrant collection '{collection_name}' exists (dim={}) for existing clone...", params.embedding_dim);
         ensure_collection_exists(client.clone(), &collection_name, params.embedding_dim).await?;
         info!("Qdrant collection ensured for existing clone.");
+        
+        // For existing local repositories, check if we need to checkout the specified branch
+        if let Some(branch) = params.branch_opt {
+            if branch != "main" && branch != "master" {
+                info!("Checking out specified branch '{}' for existing repository...", branch);
+                
+                let checkout_result = Command::new("git")
+                    .current_dir(&final_local_path)
+                    .arg("checkout")
+                    .arg(branch)
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .context(format!("Failed to spawn git checkout {branch} for {repo_name}"))?
+                    .wait_with_output()
+                    .context(format!("Failed to wait for git checkout {branch} for {repo_name}"))?;
+                
+                if !checkout_result.status.success() {
+                    let stderr = String::from_utf8_lossy(&checkout_result.stderr);
+                    warn!("Failed to checkout branch '{}': {}. Will use current branch.", branch, stderr);
+                } else {
+                    info!("Successfully checked out branch '{}'", branch);
+                }
+            }
+        }
     }
 
     // --- Handle target_ref --- 

@@ -281,7 +281,7 @@ mod enhanced_repository_tests {
             active_branch: Some("main".to_string()),
             remote_name: Some("origin".to_string()),
             last_synced_commits: std::collections::HashMap::from([
-                ("main".to_string(), "abc123".to_string()),
+                ("main".to_string(), commit_oid.to_string()),
             ]),
             ssh_key_path: None,
             ssh_key_passphrase: None,
@@ -318,7 +318,7 @@ mod enhanced_repository_tests {
         assert_eq!(rust_ext.unwrap().count, 1);
         
         // Check sync status
-        assert_eq!(enhanced_info.sync_status.state, SyncState::Unknown); // Since git status might not match
+        assert_eq!(enhanced_info.sync_status.state, SyncState::UpToDate); // Commit hash matches
         assert!(enhanced_info.sync_status.last_synced_commits.contains_key("main"));
         
         // Check other fields
