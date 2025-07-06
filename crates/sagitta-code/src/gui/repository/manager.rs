@@ -3,10 +3,9 @@ use anyhow::{Result, Context, anyhow};
 use tokio::sync::Mutex;
 use sagitta_search::AppConfig;
 use sagitta_search::RepositoryConfig;
-use sagitta_search::search_impl::search_collection;
+use sagitta_search::search_impl::{search_collection, SearchParams};
 use sagitta_search::EmbeddingPool;
 use sagitta_search::repo_helpers;
-use sagitta_search::qdrant_client_trait::QdrantClientTrait;
 use qdrant_client::qdrant::{QueryResponse, Filter, Condition};
 use qdrant_client::Qdrant as QdrantClient;
 use qdrant_client::config::QdrantConfig;
@@ -786,16 +785,16 @@ impl RepositoryManager {
                 }
             }
             
-            match search_collection(
-                client.clone(),
-                &collection_name,
-                embedding_handler,
+            match search_collection(SearchParams {
+                client: client.clone(),
+                collection_name: &collection_name,
+                embedding_pool: embedding_handler,
                 query_text,
-                limit as u64,
-                search_filter,
-                &config_guard,
-                None, // Use default search configuration
-            ).await {
+                limit: limit as u64,
+                filter: search_filter,
+                config: &config_guard,
+                search_config: None, // Use default search configuration
+            }).await {
                 Ok(result) => {
                     if result.result.is_empty() {
                         log::warn!("[GUI RepoManager] Search returned 0 results for collection '{}' with query '{}'", collection_name, query_text);
@@ -976,7 +975,7 @@ impl RepositoryManager {
             .find(|r| r.name == repo_name)
             .ok_or_else(|| anyhow!("Repository '{}' not found", repo_name))?;
         
-        let previous_branch = repo_config.active_branch.clone()
+        let _previous_branch = repo_config.active_branch.clone()
             .unwrap_or_else(|| repo_config.default_branch.clone());
         
         // Create GitManager for this repository
@@ -1071,7 +1070,7 @@ impl RepositoryManager {
     }
     
     /// Create a new branch
-    pub async fn create_branch(&self, repo_name: &str, branch_name: &str, checkout: bool) -> Result<()> {
+    pub async fn create_branch(&self, repo_name: &str, branch_name: &str, _checkout: bool) -> Result<()> {
         info!("[GUI RepoManager] Creating branch '{}' in repository '{}'", branch_name, repo_name);
         
         let config_guard = self.config.lock().await;

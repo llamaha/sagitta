@@ -199,20 +199,23 @@ where
 
     // Call prepare_repository for both new clones and existing local paths.
     // It handles cloning if necessary and ensures the Qdrant collection (tenant-specific).
-    let new_repo_config = helpers::prepare_repository(
-        repo_url.as_deref().unwrap_or_default(), // Pass URL, or empty if only local path given
-        Some(&repo_name),
-        if added_as_local_path_flag { Some(&local_path) } else { None }, // Pass local_path if it was an arg
-        args.branch.as_deref(),
-        args.target_ref.as_deref(),
-        args.remote.as_deref(),
-        args.ssh_key.as_ref(),
-        args.ssh_passphrase.as_deref(),
-        &repo_base_path, // Base path for new clones if local_path is not set by arg
-        client.clone(),
+    let prepare_params = helpers::PrepareRepositoryParams {
+        url: repo_url.as_deref().unwrap_or_default(), // Pass URL, or empty if only local path given
+        name_opt: Some(&repo_name),
+        local_path_opt: if added_as_local_path_flag { Some(&local_path) } else { None }, // Pass local_path if it was an arg
+        branch_opt: args.branch.as_deref(),
+        target_ref_opt: args.target_ref.as_deref(),
+        remote_opt: args.remote.as_deref(),
+        ssh_key_path_opt: args.ssh_key.as_ref(),
+        ssh_passphrase_opt: args.ssh_passphrase.as_deref(),
+        base_path_for_new_clones: &repo_base_path, // Base path for new clones if local_path is not set by arg
         embedding_dim,
         config,      // Pass AppConfig for collection_name_prefix and other settings
-        progress_reporter,
+        add_progress_reporter: progress_reporter,
+    };
+    let new_repo_config = helpers::prepare_repository(
+        prepare_params,
+        client.clone(),
     ).await.map_err(|e| {
         error!("[handle_repo_add] prepare_repository failed: {e}");
         // Map internal Error to AddRepoError

@@ -320,7 +320,7 @@ impl TagSuggester {
     async fn find_similar_tags(&self, existing_tags: &[String]) -> Result<Vec<TagSuggestion>, Box<dyn std::error::Error>> {
         let mut suggestions = Vec::new();
 
-        if let Some(embedding_pool) = &self.embedding_pool {
+        if let Some(_embedding_pool) = &self.embedding_pool {
             for tag in existing_tags {
                 if let Some(corpus_entry) = self.tag_corpus.get(tag) {
                     // Find similar tags in corpus

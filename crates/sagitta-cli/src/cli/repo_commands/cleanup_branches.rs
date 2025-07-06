@@ -144,7 +144,7 @@ where
 
     // Display what will be cleaned up
     println!("\n🗑️  Collections to be cleaned up:");
-    for (collection_name, branch_name, reasons) in &cleanup_reasons {
+    for (collection_name, _branch_name, reasons) in &cleanup_reasons {
         println!("  {} {} ({})", 
             "●".red(), 
             collection_name.yellow(), 

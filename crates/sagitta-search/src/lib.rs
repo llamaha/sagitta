@@ -112,13 +112,13 @@ pub use search::{VectorStore, VectorStoreError, VectorSearchResult, UpsertResult
 
 // Re-export core functionalities
 // pub use indexing::index_paths; // Removed - indexing mod not directly exposed
-pub use search_impl::search_collection; // Correctly export search_collection
+pub use search_impl::{search_collection, SearchParams}; // Correctly export search_collection and SearchParams
 pub use qdrant_ops::delete_all_points;
 
 // Re-export other necessary items if needed by CLI directly
 pub use edit::{apply_edit, validate_edit, EditTarget, EngineEditOptions, EngineValidationIssue, EngineValidationSeverity};
 pub use repo_helpers::{delete_repository_data, get_collection_name};
-pub use indexing::ensure_collection_exists;
+pub use indexing::{ensure_collection_exists, IndexRepoFilesParams};
 pub use repo_add::{handle_repo_add, AddRepoArgs, AddRepoError}; // Assuming repo_add is needed by CLI
 pub use sync::{sync_repository, SyncOptions, SyncResult}; // Added sync re-export
 
@@ -775,6 +775,7 @@ pub struct EmbeddingPoolAdapter {
 }
 
 impl EmbeddingPoolAdapter {
+    /// Creates a new EmbeddingPoolAdapter with the given pool
     pub fn new(pool: Arc<EmbeddingPool>) -> Self {
         Self { pool }
     }

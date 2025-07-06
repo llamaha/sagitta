@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, error};
 
 use crate::http_transport::AppState;
-use crate::api_key::{ApiKey, ApiKeyStore};
+use crate::api_key::ApiKey;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CreateApiKeyRequest {

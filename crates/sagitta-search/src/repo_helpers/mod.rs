@@ -23,6 +23,8 @@ pub use repo_indexing::{
     delete_repository_data,
     sync_repository_branch,
     update_sync_status_and_languages,
+    IndexFilesParams,
+    PrepareRepositoryParams,
 };
 
 pub use git_utils::{

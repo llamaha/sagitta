@@ -164,7 +164,7 @@ pub enum SagittaError {
 
     /// Error originating from the Qdrant client
     #[error("Qdrant client error: {0}")]
-    QdrantError(#[from] qdrant_client::QdrantError),
+    QdrantError(Box<qdrant_client::QdrantError>),
 
     /// Custom error during a Qdrant operation (e.g., unexpected response)
     #[error("Qdrant operation error: {0}")]
@@ -172,7 +172,7 @@ pub enum SagittaError {
 
     /// Error related to Git operations
     #[error("Git error: {0}")]
-    GitError(#[from] git2::Error),
+    GitError(Box<git2::Error>),
 
     /// Error when a required feature is not yet implemented
     #[error("Feature not implemented: {0}")]
@@ -199,6 +199,20 @@ pub enum SagittaError {
     /// Configuration error with a custom message.
     #[error("Config error: {0}")]
     ConfigError(String),
+}
+
+// Manual From implementation for QdrantError
+impl From<qdrant_client::QdrantError> for SagittaError {
+    fn from(err: qdrant_client::QdrantError) -> Self {
+        SagittaError::QdrantError(Box::new(err))
+    }
+}
+
+// Manual From implementation for git2::Error
+impl From<git2::Error> for SagittaError {
+    fn from(err: git2::Error) -> Self {
+        SagittaError::GitError(Box::new(err))
+    }
 }
 
 // Custom conversion from anyhow::Error to SagittaError

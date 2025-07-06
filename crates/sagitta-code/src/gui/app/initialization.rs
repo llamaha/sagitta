@@ -170,7 +170,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     log::info!("SagittaCodeApp: Initializing...");
 
     // Load both sagitta-code and sagitta-search configs
-    let (code_config, core_config) = match load_all_configs() {
+    let (_code_config, core_config) = match load_all_configs() {
         Ok((code_cfg, core_cfg_opt)) => {
             log::info!("SagittaCodeApp: Loaded both configurations successfully");
             let core_cfg = core_cfg_opt.unwrap_or_else(|| {
@@ -238,7 +238,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     };
 
     // Create trait version for tools that need it
-    let qdrant_client: Arc<dyn QdrantClientTrait> = if let Some(ref concrete_client) = qdrant_client_concrete {
+    let _qdrant_client: Arc<dyn QdrantClientTrait> = if let Some(ref concrete_client) = qdrant_client_concrete {
         concrete_client.clone()
     } else {
         // Fallback - should not happen in normal operation, but provides safety

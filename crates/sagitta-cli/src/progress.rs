@@ -234,7 +234,7 @@ impl IndicatifProgressReporter {
         });
 
         // Define styles
-        let style = ProgressStyle::default_bar()
+        let _style = ProgressStyle::default_bar()
             .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} ({eta}) {msg}")
             .unwrap()
             .progress_chars("#>-");
@@ -327,7 +327,7 @@ impl SyncProgressReporter for IndicatifProgressReporter {
 
         self.update_or_create_pb(&stage_key, &progress).await;
 
-        if let Some(overall_pb_instance) = &self.overall_pb {
+        if let Some(_overall_pb_instance) = &self.overall_pb {
             // Logic to update overall progress bar if you have one
             // This might involve tracking the total number of stages or total work units
             // For now, let's just increment it or set it based on current stage
@@ -391,7 +391,7 @@ impl AddProgressReporter for IndicatifProgressReporter {
 
         self.update_or_create_add_pb(&stage_key, &progress).await;
 
-        if let Some(overall_pb_instance) = &self.overall_pb {
+        if let Some(_overall_pb_instance) = &self.overall_pb {
             // Logic to update overall progress bar if you have one
             // This might involve tracking the total number of stages or total work units
             // For now, let's just increment it or set it based on current stage

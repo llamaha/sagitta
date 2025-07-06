@@ -7,7 +7,7 @@ use crate::{
     sync_progress::{SyncProgressReporter, SyncProgress, SyncStage, NoOpProgressReporter},
     constants::FIELD_LANGUAGE,
 };
-use crate::repo_helpers; // Use core repo_helpers
+use crate::repo_helpers::{self, IndexFilesParams}; // Use core repo_helpers
 use anyhow::{anyhow, Context};
 use qdrant_client::qdrant::{
     ScrollPointsBuilder,
@@ -23,6 +23,9 @@ use std::{
 use tokio::task;
 use git2::{Repository, FetchOptions, RemoteCallbacks, AutotagOption, DiffOptions, Delta, Oid as GitOid};
 use log::{info, warn, debug, trace};
+
+// Type alias for git operations result
+type GitOperationResult = Result<(String, Vec<PathBuf>, Vec<PathBuf>, bool, Option<String>)>;
 
 // Import git-manager traits for integration
 use git_manager::{VectorSyncTrait, VectorSyncResult};
@@ -120,7 +123,7 @@ where
     );
     
     // --- Step 1: Git Operations (blocking) ---
-    let git_result = task::spawn_blocking(move || -> Result<(String, Vec<PathBuf>, Vec<PathBuf>, bool, Option<String>)> {
+    let git_result = task::spawn_blocking(move || -> GitOperationResult {
         debug!("Inside blocking task for Git operations.");
         let repo = Repository::open(&repo_path_clone)
             .with_context(|| format!("Failed to open repository at {}", repo_path_clone.display()))?;
@@ -554,16 +557,16 @@ where
     if !files_to_index.is_empty() {
         info!("Indexing {} added/modified files...", files_to_index.len());
         // Pass AppConfig instead of mutable ref
-        repo_helpers::index_files(
-            client.clone(),
-            app_config, 
-            repo_path,
-            &files_to_index,
-            &collection_name,
-            current_sync_branch_or_ref,
-            &commit_oid_str,
-            Some(reporter.clone()),
-        ).await.context("Failed to index new/modified files")?;
+        repo_helpers::index_files(IndexFilesParams {
+            client: client.clone(),
+            config: app_config, 
+            repo_root: repo_path,
+            relative_paths: &files_to_index,
+            collection_name: &collection_name,
+            branch_name: current_sync_branch_or_ref,
+            commit_hash: &commit_oid_str,
+            progress_reporter: Some(reporter.clone()),
+        }).await.context("Failed to index new/modified files")?;
         info!("Finished indexing added/modified files.");
     } else {
         info!("No new or modified files to index.");

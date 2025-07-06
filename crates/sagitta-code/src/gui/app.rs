@@ -477,7 +477,7 @@ impl SagittaCodeApp {
             log::info!("Updated conversation sidebar with {} clusters", self.conversation_sidebar.clusters.len());
 
             // After refresh, send an event to update conversation list in AppState
-            let convos = service.list_conversations().await?;
+            let _convos = service.list_conversations().await?;
             self.app_event_sender.send(AppEvent::RefreshConversationList)?;
         }
         

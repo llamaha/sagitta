@@ -189,8 +189,8 @@ struct BranchComparison {
 }
 
 async fn compare_two_branches(
-    git_manager: &GitManager,
-    repo_path: &Path,
+    _git_manager: &GitManager,
+    _repo_path: &Path,
     branch_a: &str,
     branch_b: &str,
     branch_metadata: &HashMap<String, Option<BranchSyncMetadata>>,

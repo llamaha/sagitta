@@ -25,7 +25,7 @@ use crate::cli::commands::{ // Only import necessary items from commands
     FIELD_CHUNK_CONTENT, FIELD_ELEMENT_TYPE, FIELD_END_LINE,
     FIELD_FILE_PATH, FIELD_LANGUAGE, FIELD_START_LINE,
 };
-use sagitta_search::search_collection;
+use sagitta_search::{search_collection, SearchParams};
 use sagitta_search::qdrant_ops::{delete_collection_by_name, delete_all_points};
 use sagitta_search::error::SagittaError; // Import SagittaError
  // Import load_config
@@ -312,7 +312,7 @@ async fn handle_simple_index(
 
 async fn handle_simple_query(
     args: &SimpleQueryArgs,
-    cli_args: &CliArgs,
+    _cli_args: &CliArgs,
     config: &AppConfig,
     client: Arc<Qdrant>,
 ) -> Result<()> {
@@ -357,18 +357,18 @@ async fn handle_simple_query(
         .context("Failed to initialize embedding pool")?;
     
     let start_time = std::time::Instant::now(); // Define start_time here
-    let search_response_result: Result<QueryResponse, SagittaError> = search_collection(
-        client.clone(),
+    let search_response_result: Result<QueryResponse, SagittaError> = search_collection(SearchParams {
+        client: client.clone(),
         collection_name,
-        &embedding_pool,
-        &args.query,
-        args.limit,
+        embedding_pool: &embedding_pool,
+        query_text: &args.query,
+        limit: args.limit,
         filter,
         config, // <-- Pass the loaded config
-        None, // Use default search configuration
-    ).await;
+        search_config: None, // Use default search configuration
+    }).await;
 
-    let duration = start_time.elapsed();
+    let _duration = start_time.elapsed();
 
     match search_response_result {
         Ok(response) => {
@@ -447,7 +447,7 @@ async fn handle_simple_query(
 
 async fn handle_simple_clear(
     _args: &SimpleClearArgs,
-    config: &AppConfig, // Keep config in case it's needed by other logic later, or for consistency
+    _config: &AppConfig, // Keep config in case it's needed by other logic later, or for consistency
     client: Arc<Qdrant>,
 ) -> Result<()> {
     let collection_name = LEGACY_INDEX_COLLECTION;

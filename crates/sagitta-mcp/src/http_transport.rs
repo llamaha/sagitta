@@ -46,7 +46,7 @@ pub async fn run_http_server(
     addr_str: String,
     mcp_server_concrete: Server<Qdrant>,
 ) -> anyhow::Result<()> {
-    let config = mcp_server_concrete.get_config().await?;
+    let _config = mcp_server_concrete.get_config().await?;
 
     // Use the concrete type for bootstrapping, then cast to trait object
     let api_key_store_concrete = Arc::new(InMemoryApiKeyStore::default());

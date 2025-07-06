@@ -12,6 +12,9 @@ use tokio::task;
 use futures::future::try_join_all;
 use uuid::Uuid;
 
+// Type alias for syntax parser function
+type SyntaxParserFn = Arc<dyn Fn(&std::path::Path) -> Result<Vec<ParsedChunk>> + Send + Sync>;
+
 /// Default implementation of FileProcessor that handles file I/O, parsing, and chunking.
 /// This is designed to scale to maximum CPU cores without GPU memory concerns.
 /// Optimized for coordination with the embedding pool.
@@ -19,7 +22,7 @@ pub struct DefaultFileProcessor {
     config: ProcessingConfig,
     /// Optional syntax parser integration for more sophisticated element type detection
     /// When None, falls back to simple heuristic-based parsing
-    syntax_parser_fn: Option<Arc<dyn Fn(&std::path::Path) -> Result<Vec<ParsedChunk>> + Send + Sync>>,
+    syntax_parser_fn: Option<SyntaxParserFn>,
 }
 
 impl std::fmt::Debug for DefaultFileProcessor {

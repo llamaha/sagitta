@@ -14,14 +14,14 @@ use sagitta_search::{
     error::SagittaError,
     qdrant_client_trait::QdrantClientTrait,
     repo_helpers::get_branch_aware_collection_name,
-    search_impl::search_collection,
+    search_impl::{search_collection, SearchParams},
 };
 use qdrant_client::qdrant::{value::Kind, Condition, Filter};
 use anyhow::Result;
 use axum::Extension;
 use crate::middleware::auth_middleware::AuthenticatedUser;
 
-#[instrument(skip(config, qdrant_client, auth_user_ext), fields(repo_name = %params.repository_name, query = %params.query_text))]
+#[instrument(skip(config, qdrant_client, _auth_user_ext), fields(repo_name = %params.repository_name, query = %params.query_text))]
 pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
     params: QueryParams,
     config: Arc<RwLock<AppConfig>>,
@@ -95,16 +95,16 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
         }
     })?;
 
-    let search_response = search_collection(
-        qdrant_client,
-        &collection_name,
-        &embedding_pool,
-        &query_text,
+    let search_response = search_collection(SearchParams {
+        client: qdrant_client,
+        collection_name: &collection_name,
+        embedding_pool: &embedding_pool,
+        query_text: &query_text,
         limit,
         filter,
-        &config_read_guard,
-        None,
-    )
+        config: &config_read_guard,
+        search_config: None,
+    })
     .await
     .map_err(|e| {
         error!(error = %e, collection=%collection_name, "Core search failed");

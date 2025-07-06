@@ -338,6 +338,20 @@ pub async fn index_paths<
     Ok((files_to_process.len(), points_processed_count))
 }
 
+/// Parameters for indexing repository files
+pub struct IndexRepoFilesParams<'a, C> {
+    pub config: &'a AppConfig,
+    pub repo_root: &'a PathBuf,
+    pub relative_paths: &'a [PathBuf],
+    pub collection_name: &'a str,
+    pub branch_name: &'a str,
+    pub commit_hash: &'a str,
+    pub client: Arc<C>,
+    pub embedding_pool: Arc<EmbeddingPool>,
+    pub progress_reporter: Option<Arc<dyn SyncProgressReporter>>,
+    pub max_concurrent_upserts: usize,
+}
+
 /// Indexes specific files within a repository context using the decoupled processing architecture.
 ///
 /// # Arguments
@@ -356,29 +370,18 @@ pub async fn index_paths<
 /// * `Result<usize>` - Total number of points successfully processed and attempted to upsert.
 pub async fn index_repo_files<
     C: QdrantClientTrait + Send + Sync + 'static
->(
-    config: &AppConfig,
-    repo_root: &PathBuf,
-    relative_paths: &[PathBuf],
-    collection_name: &str,
-    branch_name: &str,
-    commit_hash: &str,
-    client: Arc<C>,
-    embedding_pool: Arc<EmbeddingPool>,
-    progress_reporter: Option<Arc<dyn SyncProgressReporter>>, 
-    max_concurrent_upserts: usize,
-) -> Result<usize> {
-    let reporter = progress_reporter.as_ref().map(|r| r.clone()).unwrap_or_else(|| Arc::new(NoOpProgressReporter));
+>(params: IndexRepoFilesParams<'_, C>) -> Result<usize> {
+    let reporter = params.progress_reporter.as_ref().map(|r| r.clone()).unwrap_or_else(|| Arc::new(NoOpProgressReporter));
     
     log::info!(
         "Core: Starting repo index process for {} files into collection \"{}\" using decoupled processing (branch: {}, commit: {})",
-        relative_paths.len(),
-        collection_name,
-        branch_name,
-        &commit_hash[..8]
+        params.relative_paths.len(),
+        params.collection_name,
+        params.branch_name,
+        &params.commit_hash[..8]
     );
 
-    if relative_paths.is_empty() {
+    if params.relative_paths.is_empty() {
         log::warn!("Core: No relative paths provided for repo indexing.");
         reporter.report(SyncProgress::new(SyncStage::Error {
             message: "No files provided to index".to_string(),
@@ -387,12 +390,12 @@ pub async fn index_repo_files<
     }
 
     // --- 1. Ensure Collection Exists ---
-    let embedding_dim = embedding_pool.dimension();
-    ensure_collection_exists(client.clone(), collection_name, embedding_dim as u64).await?;
-    log::debug!("Core: Collection \"{collection_name}\" ensured.");
+    let embedding_dim = params.embedding_pool.dimension();
+    ensure_collection_exists(params.client.clone(), params.collection_name, embedding_dim as u64).await?;
+    log::debug!("Core: Collection \"{}\" ensured.", params.collection_name);
 
     // --- 2. Set up decoupled processing ---
-    let embedding_config = app_config_to_embedding_config(config);
+    let embedding_config = app_config_to_embedding_config(params.config);
     let processing_config = ProcessingConfig::from_embedding_config(&embedding_config);
     
     log::info!("Using decoupled processing: {} CPU cores for file processing, {} embedding sessions for GPU control",
@@ -419,11 +422,11 @@ pub async fn index_repo_files<
 
     let file_processor = DefaultFileProcessor::new(processing_config.clone())
         .with_syntax_parser(syntax_parser_fn);
-    let embedding_pool_ref = &*embedding_pool;
+    let embedding_pool_ref = &*params.embedding_pool;
 
     // Convert relative paths to absolute paths
-    let absolute_paths: Vec<PathBuf> = relative_paths.iter()
-        .map(|relative_path| repo_root.join(relative_path))
+    let absolute_paths: Vec<PathBuf> = params.relative_paths.iter()
+        .map(|relative_path| params.repo_root.join(relative_path))
         .collect();
 
     // --- 4. Process Files (CPU-intensive, parallel) ---
@@ -438,7 +441,7 @@ pub async fn index_repo_files<
         return Ok(0);
     }
 
-    log::info!("Processed {} repo files into {} chunks", relative_paths.len(), processed_chunks.len());
+    log::info!("Processed {} repo files into {} chunks", params.relative_paths.len(), processed_chunks.len());
 
     // --- 5. Generate Embeddings (GPU-intensive, controlled) ---
     let progress_bridge = Arc::new(EmbeddingProgressBridge {
@@ -450,7 +453,7 @@ pub async fn index_repo_files<
     log::info!("Generated {} embeddings for repo files", embedded_chunks.len());
 
     // --- 6. Build Vocabulary and Create Points ---
-    let vocab_path = config::get_vocabulary_path(config, collection_name)?;
+    let vocab_path = config::get_vocabulary_path(params.config, params.collection_name)?;
     let mut vocabulary_manager = if vocab_path.exists() {
         match VocabularyManager::load(&vocab_path) {
             Ok(vm) => {
@@ -474,7 +477,7 @@ pub async fn index_repo_files<
         let chunk = &embedded_chunk.chunk;
         
         // Convert absolute path back to relative path for storage
-        let relative_path = chunk.metadata.file_path.strip_prefix(repo_root)
+        let relative_path = chunk.metadata.file_path.strip_prefix(params.repo_root)
             .unwrap_or(&chunk.metadata.file_path)
             .to_string_lossy()
             .to_string();
@@ -521,8 +524,8 @@ pub async fn index_repo_files<
         payload.insert(FIELD_FILE_EXTENSION, chunk.metadata.file_extension.clone());
         payload.insert(FIELD_ELEMENT_TYPE, chunk.metadata.element_type.clone());
         payload.insert(FIELD_CHUNK_CONTENT, chunk.content.clone());
-        payload.insert(FIELD_BRANCH, branch_name.to_string());
-        payload.insert(FIELD_COMMIT_HASH, commit_hash.to_string());
+        payload.insert(FIELD_BRANCH, params.branch_name.to_string());
+        payload.insert(FIELD_COMMIT_HASH, params.commit_hash.to_string());
 
         // Create NamedVectors for both dense and sparse
         let vectors = NamedVectors::default()
@@ -549,18 +552,18 @@ pub async fn index_repo_files<
     log::info!("Updated vocabulary saved to {}", vocab_path.display());
 
     // --- 6. Upload Points to Qdrant (Network Bound, Concurrent) ---
-    let semaphore = Arc::new(Semaphore::new(max_concurrent_upserts));
-    log::info!("Using max_concurrent_upserts: {max_concurrent_upserts}");
+    let semaphore = Arc::new(Semaphore::new(params.max_concurrent_upserts));
+    log::info!("Using max_concurrent_upserts: {}", params.max_concurrent_upserts);
     let mut upsert_tasks = Vec::new();
     let total_points_attempted_upsert = final_points.len();
 
-    for points_batch in final_points.chunks(config.performance.batch_size) {
+    for points_batch in final_points.chunks(params.config.performance.batch_size) {
         if points_batch.is_empty() {
             continue;
         }
         let batch_to_upsert = points_batch.to_vec();
-        let client_clone = client.clone();
-        let collection_name_clone = collection_name.to_string();
+        let client_clone = params.client.clone();
+        let collection_name_clone = params.collection_name.to_string();
         let semaphore_clone = semaphore.clone();
 
         let task = tokio::spawn(async move {
@@ -605,7 +608,7 @@ pub async fn index_repo_files<
 
     log::info!(
         "Core: Repo indexing finished using decoupled processing. Processed {} files, uploaded {} points.",
-        relative_paths.len(),
+        params.relative_paths.len(),
         total_points_attempted_upsert
     );
 

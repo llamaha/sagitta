@@ -6,7 +6,7 @@ use sagitta_search::{
     qdrant_client_trait::QdrantClientTrait,
     repo_helpers::get_branch_aware_collection_name,
     error::SagittaError,
-    search_impl::search_collection,
+    search_impl::{search_collection, SearchParams},
     EmbeddingPool,
     app_config_to_embedding_config,
     constants::{FIELD_BRANCH, FIELD_LANGUAGE, FIELD_ELEMENT_TYPE},
@@ -105,16 +105,16 @@ where
     let search_filter = Filter::must(filter_conditions);
 
     log::debug!("Calling core search_collection...");
-    let search_response_result: Result<QueryResponse, SagittaError> = search_collection(
+    let search_response_result: Result<QueryResponse, SagittaError> = search_collection(SearchParams {
         client,
-        &collection_name,
-        &embedding_pool,
-        &args.query,
-        args.limit,
-        Some(search_filter),
+        collection_name: &collection_name,
+        embedding_pool: &embedding_pool,
+        query_text: &args.query,
+        limit: args.limit,
+        filter: Some(search_filter),
         config,
-        None,
-    ).await;
+        search_config: None,
+    }).await;
 
     let search_response = match search_response_result {
         Ok(resp) => resp,

@@ -1,6 +1,6 @@
 // Agent orchestration logic will go here
 
-use futures_util::{Stream, StreamExt};
+use futures_util::Stream;
 use serde_json::Value;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -89,7 +89,7 @@ impl Agent {
     pub async fn new(
         config: SagittaCodeConfig,
         tool_registry: Option<Arc<crate::tools::registry::ToolRegistry>>,
-        embedding_provider: Arc<dyn EmbeddingProvider + Send + Sync + 'static>,
+        _embedding_provider: Arc<dyn EmbeddingProvider + Send + Sync + 'static>,
         persistence: Box<dyn ConversationPersistence>,
         search_engine: Box<dyn ConversationSearchEngine>,
         llm_client: Arc<dyn LlmClient>,
@@ -130,7 +130,7 @@ impl Agent {
         debug!("Setting up conversation management system...");
         
         // Determine storage path
-        let storage_path = if let Some(path) = &config.conversation.storage_path {
+        let _storage_path = if let Some(path) = &config.conversation.storage_path {
             path.clone()
         } else {
             // Use default path in user's config directory
@@ -260,7 +260,7 @@ impl Agent {
         self.state_manager.set_thinking("Processing user message with thinking").await?;
         
         // Get current conversation ID for analytics reporting
-        let current_conversation_id = self.history.get_current_conversation().await.ok().flatten().map(|c| c.id);
+        let _current_conversation_id = self.history.get_current_conversation().await.ok().flatten().map(|c| c.id);
         
         // Use direct LLM streaming
         info!("Using direct LLM streaming");

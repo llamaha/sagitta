@@ -28,7 +28,7 @@ impl ConversationTaskIntegration {
     }
     
     /// Analyze a conversation message to detect task creation opportunities
-    pub async fn analyze_message_for_tasks(&self, conversation: &Conversation, message: &AgentMessage) -> Result<Vec<TaskSuggestion>> {
+    pub async fn analyze_message_for_tasks(&self, _conversation: &Conversation, message: &AgentMessage) -> Result<Vec<TaskSuggestion>> {
         let mut suggestions = Vec::new();
         
         // Look for task-related keywords and patterns
@@ -199,7 +199,7 @@ impl ConversationTaskIntegration {
     }
     
     /// Update task progress based on conversation activity
-    pub async fn update_task_progress(&self, task_id: Uuid, conversation_id: Uuid) -> Result<()> {
+    pub async fn update_task_progress(&self, _task_id: Uuid, conversation_id: Uuid) -> Result<()> {
         // Get the conversation to analyze progress
         if let Some(conversation) = self.conversation_manager.get_conversation(conversation_id).await? {
             // Analyze recent messages for progress indicators

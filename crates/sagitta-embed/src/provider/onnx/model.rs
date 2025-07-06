@@ -22,6 +22,10 @@ use ort::{
 #[cfg(feature = "onnx")]
 use tokenizers::Tokenizer;
 
+// Type aliases for complex return types
+type TokenizedInputs = (Vec<i64>, Vec<i64>, Option<Vec<i64>>);
+type BatchTokenizedInputs = (Vec<i64>, Vec<i64>, Option<Vec<i64>>, usize);
+
 /// ONNX-based embedding model with memory management
 #[derive(Debug)]
 pub struct OnnxEmbeddingModel {
@@ -531,7 +535,7 @@ impl OnnxEmbeddingModel {
 
     /// Tokenizes input text and prepares model inputs
     #[cfg(feature = "onnx")]
-    fn prepare_inputs(&self, text: &str) -> Result<(Vec<i64>, Vec<i64>, Option<Vec<i64>>)> {
+    fn prepare_inputs(&self, text: &str) -> Result<TokenizedInputs> {
         debug!("Preparing inputs with max_seq_length: {}", self.max_seq_length);
         
         let encoding = self
@@ -975,7 +979,7 @@ impl OnnxEmbeddingModel {
 impl OnnxEmbeddingModel {
     /// Prepare batch inputs using tokenizer's BatchLongest padding
     #[cfg(feature = "onnx")]
-    fn prepare_batch_inputs_dynamic(&self, texts: &[&str]) -> Result<(Vec<i64>, Vec<i64>, Option<Vec<i64>>, usize)> {
+    fn prepare_batch_inputs_dynamic(&self, texts: &[&str]) -> Result<BatchTokenizedInputs> {
         debug!("Preparing batch inputs with tokenizer's BatchLongest padding for {} texts", texts.len());
         
         let tokenizer = self.tokenizer.lock()

@@ -1,6 +1,6 @@
 // UI rendering for the Sagitta Code application
 
-use egui::{Context, Key, TopBottomPanel, Frame, Vec2, Widget};
+use egui::{Context, Key, TopBottomPanel, Frame, Vec2};
 use crate::gui::app::AppEvent;
 use crate::gui::conversation::sidebar::OrganizationMode;
 use super::SagittaCodeApp;

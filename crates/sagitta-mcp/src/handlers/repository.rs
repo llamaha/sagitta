@@ -15,7 +15,7 @@ use tracing::{error, info, instrument, warn};
 use sagitta_search::{
     config::{self, get_repo_base_path, save_config, AppConfig, RepositoryConfig},
     EmbeddingPool, EmbeddingProcessor, // Use re-export
-    indexing::{self, gather_files},
+    indexing::{self, gather_files, IndexRepoFilesParams},
     qdrant_client_trait::QdrantClientTrait,
     repo_add::{handle_repo_add, AddRepoArgs},
     repo_helpers::{delete_repository_data, get_branch_aware_collection_name},
@@ -29,7 +29,6 @@ use crate::middleware::auth_middleware::AuthenticatedUser;
 use axum::Extension;
  // For creating JSON content
 use git_manager::GitManager;
-use futures_util::TryFutureExt;
 use crate::progress::LoggingProgressReporter; // Added LoggingProgressReporter
 use serde_json::json;
 
@@ -573,18 +572,18 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
         } else {
             info!(repo_name = %repo_name, count = files_to_index_rel.len(), commit=%indexing_commit_hash, "Found files to index, calling index_repo_files");
 
-            match indexing::index_repo_files(
-                &app_config_clone, 
+            match indexing::index_repo_files(IndexRepoFilesParams {
+                config: &app_config_clone, 
                 repo_root,
-                &files_to_index_rel,
-                &collection_name,
-                context_identifier, 
-                &indexing_commit_hash, // Use the potentially derived commit hash
-                qdrant_client.clone(),
-                Arc::new(embedding_pool),
-                None,
-                app_config_clone.indexing.max_concurrent_upserts,
-            )
+                relative_paths: &files_to_index_rel,
+                collection_name: &collection_name,
+                branch_name: context_identifier, 
+                commit_hash: &indexing_commit_hash, // Use the potentially derived commit hash
+                client: qdrant_client.clone(),
+                embedding_pool: Arc::new(embedding_pool),
+                progress_reporter: None,
+                max_concurrent_upserts: app_config_clone.indexing.max_concurrent_upserts,
+            })
             .await
             {
                 Ok(count) => {

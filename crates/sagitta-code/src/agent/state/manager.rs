@@ -192,7 +192,7 @@ impl StateManager {
     }
     
     /// Mark the conversation as failed
-    pub async fn set_conversation_failed(&self, error: impl Into<String>) -> Result<(), SagittaCodeError> {
+    pub async fn set_conversation_failed(&self, _error: impl Into<String>) -> Result<(), SagittaCodeError> {
         self.set_conversation_status(ConversationStatus::Paused).await
     }
     

@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod edge_case_tests {
-    use crate::repo_helpers::{prepare_repository, git_edge_cases::validate_ref_name};
+    use crate::repo_helpers::{prepare_repository, git_edge_cases::validate_ref_name, repo_indexing::PrepareRepositoryParams};
     use crate::config::{AppConfig, PerformanceConfig};
     use crate::test_utils::ManualMockQdrantClient;
     use tempfile::TempDir;
@@ -80,20 +80,23 @@ mod edge_case_tests {
         let client = Arc::new(mock_client);
         
         // Test adding with HEAD as target_ref
+        let prepare_params = PrepareRepositoryParams {
+            url: "",  // No URL, using local path
+            name_opt: Some("test_repo"),
+            local_path_opt: Some(&repo_path),
+            branch_opt: None,  // No branch
+            target_ref_opt: Some("HEAD"),  // This is the problematic case
+            remote_opt: None,
+            ssh_key_path_opt: None,
+            ssh_passphrase_opt: None,
+            base_path_for_new_clones: temp_dir.path(),
+            embedding_dim: 384,
+            config: &config,
+            add_progress_reporter: None,
+        };
         let result = prepare_repository(
-            "",  // No URL, using local path
-            Some("test_repo"),
-            Some(&repo_path),
-            None,  // No branch
-            Some("HEAD"),  // This is the problematic case
-            None,
-            None,
-            None,
-            temp_dir.path(),
+            prepare_params,
             client,
-            384,
-            &config,
-            None,
         ).await;
         
         if let Err(ref e) = result {
@@ -145,20 +148,23 @@ mod edge_case_tests {
         let client = Arc::new(mock_client);
         
         // Test adding in detached HEAD state
+        let prepare_params = PrepareRepositoryParams {
+            url: "",
+            name_opt: Some("test_repo"),
+            local_path_opt: Some(&repo_path),
+            branch_opt: None,
+            target_ref_opt: None,
+            remote_opt: None,
+            ssh_key_path_opt: None,
+            ssh_passphrase_opt: None,
+            base_path_for_new_clones: temp_dir.path(),
+            embedding_dim: 384,
+            config: &config,
+            add_progress_reporter: None,
+        };
         let result = prepare_repository(
-            "",
-            Some("test_repo"),
-            Some(&repo_path),
-            None,
-            None,
-            None,
-            None,
-            None,
-            temp_dir.path(),
+            prepare_params,
             client,
-            384,
-            &config,
-            None,
         ).await;
         
         assert!(result.is_ok());
@@ -208,20 +214,23 @@ mod edge_case_tests {
         
         // Clone and add the repo - should detect 'develop' as default
         let clone_path = temp_dir.path().join("cloned_repo");
+        let prepare_params = PrepareRepositoryParams {
+            url: bare_repo_path.to_str().unwrap(),
+            name_opt: Some("test_repo"),
+            local_path_opt: None,  // Let it clone
+            branch_opt: None,  // No branch specified
+            target_ref_opt: None,
+            remote_opt: None,
+            ssh_key_path_opt: None,
+            ssh_passphrase_opt: None,
+            base_path_for_new_clones: temp_dir.path(),
+            embedding_dim: 384,
+            config: &config,
+            add_progress_reporter: None,
+        };
         let result = prepare_repository(
-            bare_repo_path.to_str().unwrap(),
-            Some("test_repo"),
-            None,  // Let it clone
-            None,  // No branch specified
-            None,
-            None,
-            None,
-            None,
-            temp_dir.path(),
+            prepare_params,
             client,
-            384,
-            &config,
-            None,
         ).await;
         
         // This might fail in current implementation but should ideally work
@@ -254,20 +263,23 @@ mod edge_case_tests {
         let client = Arc::new(mock_client);
         
         // Test adding with special character branch
+        let prepare_params = PrepareRepositoryParams {
+            url: "",
+            name_opt: Some("test_repo"),
+            local_path_opt: Some(&repo_path),
+            branch_opt: Some("feature/user@domain"),
+            target_ref_opt: None,
+            remote_opt: None,
+            ssh_key_path_opt: None,
+            ssh_passphrase_opt: None,
+            base_path_for_new_clones: temp_dir.path(),
+            embedding_dim: 384,
+            config: &config,
+            add_progress_reporter: None,
+        };
         let result = prepare_repository(
-            "",
-            Some("test_repo"),
-            Some(&repo_path),
-            Some("feature/user@domain"),
-            None,
-            None,
-            None,
-            None,
-            temp_dir.path(),
+            prepare_params,
             client,
-            384,
-            &config,
-            None,
         ).await;
         
         assert!(result.is_ok());
@@ -323,20 +335,23 @@ mod edge_case_tests {
         let client = Arc::new(mock_client);
         
         // Test adding empty repo
+        let prepare_params = PrepareRepositoryParams {
+            url: "",
+            name_opt: Some("empty_repo"),
+            local_path_opt: Some(&repo_path),
+            branch_opt: None,
+            target_ref_opt: None,
+            remote_opt: None,
+            ssh_key_path_opt: None,
+            ssh_passphrase_opt: None,
+            base_path_for_new_clones: temp_dir.path(),
+            embedding_dim: 384,
+            config: &config,
+            add_progress_reporter: None,
+        };
         let result = prepare_repository(
-            "",
-            Some("empty_repo"),
-            Some(&repo_path),
-            None,
-            None,
-            None,
-            None,
-            None,
-            temp_dir.path(),
+            prepare_params,
             client,
-            384,
-            &config,
-            None,
         ).await;
         
         // Should handle empty repos gracefully
