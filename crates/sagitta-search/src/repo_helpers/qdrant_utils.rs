@@ -62,10 +62,15 @@ where
 /// Metadata about a repository's sync status for a specific branch/ref
 #[derive(Debug, Clone)]
 pub struct BranchSyncMetadata {
+    /// Name of the Qdrant collection storing this branch's data
     pub collection_name: String,
+    /// SHA hash of the last synchronized commit for this branch
     pub last_commit_hash: Option<String>,
+    /// Name of the branch or reference (e.g., "main", "v1.0.0", "abc123")
     pub branch_or_ref: String,
+    /// Timestamp of the last successful synchronization
     pub last_sync_timestamp: Option<chrono::DateTime<chrono::Utc>>,
+    /// Number of files indexed in this collection
     pub files_count: usize,
 }
 

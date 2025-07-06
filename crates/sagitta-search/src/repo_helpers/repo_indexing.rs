@@ -92,13 +92,21 @@ pub async fn update_sync_status_and_languages<
 
 /// Parameters for indexing files
 pub struct IndexFilesParams<'a, C> {
+    /// Qdrant client instance for database operations
     pub client: Arc<C>,
+    /// Application configuration containing indexing settings
     pub config: &'a AppConfig,
+    /// Root directory path of the repository being indexed
     pub repo_root: &'a PathBuf,
+    /// List of relative file paths within the repository to index
     pub relative_paths: &'a [PathBuf],
+    /// Name of the Qdrant collection to store indexed data
     pub collection_name: &'a str,
+    /// Name of the branch being indexed
     pub branch_name: &'a str,
+    /// Git commit hash being indexed
     pub commit_hash: &'a str,
+    /// Optional progress reporter for tracking indexing progress
     pub progress_reporter: Option<Arc<dyn SyncProgressReporter>>,
 }
 
