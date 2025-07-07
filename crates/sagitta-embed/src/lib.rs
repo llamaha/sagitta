@@ -66,4 +66,4 @@ pub const DEFAULT_SESSION_TIMEOUT_SECONDS: u64 = 300;
 pub const DEFAULT_ENABLE_SESSION_CLEANUP: bool = true;
 
 /// Default embedding batch size for processing multiple texts
-pub const DEFAULT_EMBEDDING_BATCH_SIZE: usize = 256;  // Match FastEmbed's default 
+pub const DEFAULT_EMBEDDING_BATCH_SIZE: usize = 8;  // Optimized default for release 

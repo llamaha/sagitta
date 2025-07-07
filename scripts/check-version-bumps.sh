@@ -3,8 +3,9 @@ set -e
 
 echo "🔍 Checking for required version bumps..."
 
-# Get changed files in merge request
-CHANGED_FILES=$(git diff --name-only origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME..HEAD)
+# In GitLab CI, we need to fetch the target branch first
+git fetch origin $CI_MERGE_REQUEST_TARGET_BRANCH_NAME:$CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+CHANGED_FILES=$(git diff --name-only $CI_MERGE_REQUEST_TARGET_BRANCH_NAME..HEAD)
 
 # Check each crate directory
 for crate_dir in $(find . -name "Cargo.toml" -not -path "./target/*" | xargs dirname | sort -u); do
@@ -18,8 +19,8 @@ for crate_dir in $(find . -name "Cargo.toml" -not -path "./target/*" | xargs dir
     echo "📦 Code changes detected in $crate_dir"
     
     # Check if Cargo.toml version was bumped
-    if git diff --name-only origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME..HEAD | grep -q "^${crate_dir#./}/Cargo.toml$"; then
-      if git diff origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME..HEAD "${crate_dir}/Cargo.toml" | grep -q "^+version"; then
+    if git diff --name-only $CI_MERGE_REQUEST_TARGET_BRANCH_NAME..HEAD | grep -q "^${crate_dir#./}/Cargo.toml$"; then
+      if git diff $CI_MERGE_REQUEST_TARGET_BRANCH_NAME..HEAD "${crate_dir}/Cargo.toml" | grep -q "^+version"; then
         echo "✅ Version bump detected in $crate_dir"
       else
         echo "❌ Cargo.toml changed but no version bump in $crate_dir"

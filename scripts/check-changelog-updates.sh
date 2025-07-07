@@ -3,8 +3,9 @@ set -e
 
 echo "🔍 Checking for required changelog updates..."
 
-# Get changed files in merge request
-CHANGED_FILES=$(git diff --name-only origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME..HEAD)
+# In GitLab CI, we need to fetch the target branch first
+git fetch origin $CI_MERGE_REQUEST_TARGET_BRANCH_NAME:$CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+CHANGED_FILES=$(git diff --name-only $CI_MERGE_REQUEST_TARGET_BRANCH_NAME..HEAD)
 
 # Check each crate directory
 for crate_dir in $(find . -name "Cargo.toml" -not -path "./target/*" | xargs dirname | sort -u); do
