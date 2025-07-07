@@ -37,9 +37,9 @@ Sagitta is a semantic code search and AI development toolkit. This workspace con
 
 2.  **ONNX Runtime**: `sagitta-embed` uses ONNX Runtime for its embedding models.
 
-    **Note:** The crates currently use `ort = "2.0.0-rc.9"` with the `download-binaries` feature enabled by default, so manual ONNX Runtime installation is typically not required. The ONNX Runtime binaries will be automatically downloaded during the build process.
+    **Note:** The crates use `ort = "2.0.0-rc.9"`. You need to have ONNX Runtime installed on your system for embedding generation.
     
-    **Manual Installation (Optional):** For specific optimizations or custom builds, you can manually install ONNX Runtime:
+    **Installation:** Download and install ONNX Runtime:
     
     **Download:** Get the pre-built binaries for your OS/Architecture from the official **[ONNX Runtime v1.20.0 Release](https://github.com/microsoft/onnxruntime/releases/tag/v1.20.0)**. Find the appropriate archive for your system (e.g., `onnxruntime-linux-x64-gpu-1.20.0.tgz`) under the assets menu.
     

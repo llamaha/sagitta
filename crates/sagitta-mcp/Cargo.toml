@@ -65,3 +65,7 @@ tower = { version = "0.4", features = ["full"] }
 
 [features]
 default = []
+cuda = ["sagitta-search/cuda"]
+coreml = ["sagitta-search/coreml"]
+rocm = ["sagitta-search/rocm"]
+directml = ["sagitta-search/directml"]

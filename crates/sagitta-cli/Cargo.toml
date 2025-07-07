@@ -39,6 +39,9 @@ cli_feature = [] # Renamed to avoid conflict with potential 'cli' dependency fea
 onetime_rayon_feature = ["dep:rayon"] # Renamed 
 onnx_feature = ["dep:ort"]          # Renamed
 cuda = ["ort/cuda"]
+coreml = ["ort/coreml"]
+rocm = ["ort/rocm"]
+directml = ["ort/directml"]
 
 [dependencies]
 git-manager = { path = "../git-manager" }
@@ -64,7 +67,7 @@ log = "0.4"
 
 # Optional dependencies gated by features
 rayon = { version = "1.10.0", optional = true }
-ort = { version = "2.0.0-rc.9", default-features = false, optional = true, features = ["download-binaries"] }
+ort = { version = "2.0.0-rc.9", default-features = false, optional = true }
 
 # Other dependencies from old root that might be specific to CLI logic not covered by core
 # These were present in the old root Cargo.toml. Review if they are truly needed by CLI directly

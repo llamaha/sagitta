@@ -9,6 +9,9 @@ default = ["onetime_rayon", "ort"]
 onetime_rayon = ["dep:rayon"]
 onnx = ["ort"]
 cuda = ["ort/cuda"]
+coreml = ["ort/coreml"]
+rocm = ["ort/rocm"]
+directml = ["ort/directml"]
 
 [dependencies]
 anyhow = "1.0"
@@ -41,7 +44,7 @@ git2 = "0.18.3" # Added git2
 rayon = { version = "1.10.0", optional = true }
 
 # Add dependency for ort feature
-ort = { version = "2.0.0-rc.9", default-features = false, optional = true, features = ["download-binaries"] }
+ort = { version = "2.0.0-rc.9", default-features = false, optional = true }
 
 # Dependencies for embedding/provider/onnx.rs
 tokenizers = { version = "0.21.1" }
