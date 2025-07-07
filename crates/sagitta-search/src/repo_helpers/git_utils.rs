@@ -131,4 +131,165 @@ pub fn collect_files_from_tree(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+    use std::fs;
+
+    #[test]
+    fn test_is_supported_extension() {
+        // Test supported extensions
+        assert!(is_supported_extension("rs"));
+        assert!(is_supported_extension("rb"));
+        assert!(is_supported_extension("go"));
+        assert!(is_supported_extension("js"));
+        assert!(is_supported_extension("jsx"));
+        assert!(is_supported_extension("ts"));
+        assert!(is_supported_extension("tsx"));
+        assert!(is_supported_extension("yaml"));
+        assert!(is_supported_extension("yml"));
+        assert!(is_supported_extension("md"));
+        assert!(is_supported_extension("mdx"));
+        assert!(is_supported_extension("py"));
+        
+        // Test uppercase
+        assert!(is_supported_extension("RS"));
+        assert!(is_supported_extension("PY"));
+        assert!(is_supported_extension("YAML"));
+        
+        // Test unsupported extensions
+        assert!(!is_supported_extension("txt"));
+        assert!(!is_supported_extension("pdf"));
+        assert!(!is_supported_extension("exe"));
+        assert!(!is_supported_extension(""));
+        assert!(!is_supported_extension("unknown"));
+    }
+
+    #[test]
+    fn test_create_fetch_options_no_ssh() {
+        let repo_configs = vec![];
+        let repo_url = "https://github.com/example/repo.git";
+        
+        let result = create_fetch_options(repo_configs, repo_url, None, None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_create_fetch_options_with_ssh_key() {
+        let temp_dir = TempDir::new().unwrap();
+        let ssh_key_path = temp_dir.path().join("test_key");
+        fs::write(&ssh_key_path, "dummy key content").unwrap();
+        
+        let repo_configs = vec![];
+        let repo_url = "git@github.com:example/repo.git";
+        
+        let result = create_fetch_options(
+            repo_configs, 
+            repo_url, 
+            Some(&ssh_key_path), 
+            Some("passphrase")
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_create_fetch_options_with_repo_config() {
+        let temp_dir = TempDir::new().unwrap();
+        let ssh_key_path = temp_dir.path().join("repo_key");
+        fs::write(&ssh_key_path, "dummy key content").unwrap();
+        
+        let repo_config = RepositoryConfig {
+            name: "test_repo".to_string(),
+            url: "git@github.com:example/repo.git".to_string(),
+            local_path: PathBuf::from("/tmp/test"),
+            default_branch: "main".to_string(),
+            tracked_branches: vec!["main".to_string()],
+            remote_name: Some("origin".to_string()),
+            last_synced_commits: std::collections::HashMap::new(),
+            active_branch: Some("main".to_string()),
+            ssh_key_path: Some(ssh_key_path.clone()),
+            ssh_key_passphrase: Some("repo_passphrase".to_string()),
+            indexed_languages: None,
+            added_as_local_path: false,
+            target_ref: None,
+            dependencies: vec![],
+        };
+        
+        let repo_configs = vec![repo_config];
+        let repo_url = "git@github.com:example/repo.git";
+        
+        let result = create_fetch_options(repo_configs, repo_url, None, None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_collect_files_from_tree() {
+        // Create a test repository
+        let temp_dir = TempDir::new().unwrap();
+        let repo = Repository::init(&temp_dir).unwrap();
+        
+        // Create test files
+        let test_rs = temp_dir.path().join("test.rs");
+        fs::write(&test_rs, "fn main() {}").unwrap();
+        
+        let test_py = temp_dir.path().join("test.py");
+        fs::write(&test_py, "print('hello')").unwrap();
+        
+        let test_txt = temp_dir.path().join("test.txt");
+        fs::write(&test_txt, "not supported").unwrap();
+        
+        // Create subdirectory with file
+        let sub_dir = temp_dir.path().join("src");
+        fs::create_dir(&sub_dir).unwrap();
+        let sub_file = sub_dir.join("lib.rs");
+        fs::write(&sub_file, "pub fn lib() {}").unwrap();
+        
+        // Add files to index and commit
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("test.rs")).unwrap();
+        index.add_path(Path::new("test.py")).unwrap();
+        index.add_path(Path::new("test.txt")).unwrap();
+        index.add_path(Path::new("src/lib.rs")).unwrap();
+        index.write().unwrap();
+        
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        
+        // Test collecting files
+        let mut file_list = Vec::new();
+        let result = collect_files_from_tree(&repo, &tree, &mut file_list, Path::new(""));
+        
+        assert!(result.is_ok());
+        assert_eq!(file_list.len(), 3); // Should have test.rs, test.py, and src/lib.rs
+        
+        // Check that correct files were collected
+        let file_names: Vec<String> = file_list.iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+        
+        assert!(file_names.contains(&"test.rs".to_string()));
+        assert!(file_names.contains(&"test.py".to_string()));
+        assert!(file_names.contains(&"src/lib.rs".to_string()));
+        assert!(!file_names.contains(&"test.txt".to_string())); // Should not include .txt
+    }
+
+    #[test]
+    fn test_collect_files_empty_tree() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo = Repository::init(&temp_dir).unwrap();
+        
+        // Create empty tree
+        let mut index = repo.index().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        
+        let mut file_list = Vec::new();
+        let result = collect_files_from_tree(&repo, &tree, &mut file_list, Path::new(""));
+        
+        assert!(result.is_ok());
+        assert!(file_list.is_empty());
+    }
 } 

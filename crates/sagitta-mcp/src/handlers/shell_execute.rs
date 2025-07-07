@@ -246,7 +246,7 @@ mod tests {
             command: if cfg!(target_os = "windows") {
                 "cmd /c exit 1".to_string()
             } else {
-                "exit 1".to_string()
+                "sh -c 'exit 1'".to_string()
             },
             working_directory: None,
             timeout_ms: 5000,

@@ -971,4 +971,313 @@ pub struct RepositoryListDependenciesResult {
     pub repository_name: String,
     /// List of dependencies
     pub dependencies: Vec<DependencyInfo>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{json, from_value, to_value};
+
+    #[test]
+    fn test_mcp_request_new() {
+        let params = PingParams {};
+        let request: MCPRequest<PingParams> = MCPRequest::new("ping", params);
+        
+        assert_eq!(request.jsonrpc, "2.0");
+        assert_eq!(request.method, "ping");
+        assert_eq!(request.id, 1);
+    }
+
+    #[test]
+    fn test_mcp_response_success() {
+        let value = json!({"status": "ok"});
+        let response = Response::success(value.clone(), Some(json!(123)));
+        
+        assert_eq!(response.jsonrpc, "2.0");
+        assert_eq!(response.result, Some(value));
+        assert!(response.error.is_none());
+        assert_eq!(response.id, Some(json!(123)));
+    }
+
+    #[test]
+    fn test_mcp_response_error() {
+        let error = ErrorObject {
+            code: -32600,
+            message: "Invalid Request".to_string(),
+            data: None,
+        };
+        let response = Response::error(error.clone(), Some(json!(456)));
+        
+        assert_eq!(response.jsonrpc, "2.0");
+        assert!(response.result.is_none());
+        assert_eq!(response.error.as_ref().unwrap().code, -32600);
+        assert_eq!(response.error.as_ref().unwrap().message, "Invalid Request");
+        assert_eq!(response.id, Some(json!(456)));
+    }
+
+    #[test]
+    fn test_response_null_id_handling() {
+        // Test that null ID gets converted to 0
+        let response = Response::success(json!({"test": "value"}), Some(Value::Null));
+        assert_eq!(response.id, Some(json!(0)));
+
+        let response = Response::success(json!({"test": "value"}), None);
+        assert_eq!(response.id, Some(json!(0)));
+    }
+
+    #[test]
+    fn test_default_functions() {
+        assert_eq!(default_limit(), 10);
+        assert_eq!(default_verbosity(), 1);
+        assert_eq!(default_shell_timeout(), 30000);
+        assert_eq!(default_create_parents(), true);
+        assert_eq!(default_include_remote(), true);
+        assert_eq!(default_include_tags(), true);
+        assert_eq!(default_branch_limit(), 50);
+        assert_eq!(default_max_commits(), 100);
+    }
+
+    #[test]
+    fn test_todo_status_serialization() {
+        assert_eq!(serde_json::to_string(&TodoStatus::Pending).unwrap(), "\"pending\"");
+        assert_eq!(serde_json::to_string(&TodoStatus::InProgress).unwrap(), "\"in_progress\"");
+        assert_eq!(serde_json::to_string(&TodoStatus::Completed).unwrap(), "\"completed\"");
+        
+        let status: TodoStatus = serde_json::from_str("\"pending\"").unwrap();
+        assert_eq!(status, TodoStatus::Pending);
+    }
+
+    #[test]
+    fn test_todo_priority_serialization() {
+        assert_eq!(serde_json::to_string(&TodoPriority::Low).unwrap(), "\"low\"");
+        assert_eq!(serde_json::to_string(&TodoPriority::Medium).unwrap(), "\"medium\"");
+        assert_eq!(serde_json::to_string(&TodoPriority::High).unwrap(), "\"high\"");
+        
+        let priority: TodoPriority = serde_json::from_str("\"high\"").unwrap();
+        assert_eq!(priority, TodoPriority::High);
+    }
+
+    #[test]
+    fn test_initialize_params_deserialization() {
+        let json = json!({
+            "protocolVersion": "1.0",
+            "clientInfo": {
+                "name": "test-client",
+                "version": "0.1.0"
+            }
+        });
+        
+        let params: InitializeParams = from_value(json).unwrap();
+        assert_eq!(params.protocol_version, "1.0");
+        assert_eq!(params.client_info.as_ref().unwrap().name, Some("test-client".to_string()));
+        assert_eq!(params.client_info.as_ref().unwrap().version, Some("0.1.0".to_string()));
+    }
+
+    #[test]
+    fn test_initialize_params_missing_fields() {
+        // Test that missing optional fields don't cause errors
+        let json = json!({
+            "protocolVersion": "1.0"
+        });
+        
+        let params: InitializeParams = from_value(json).unwrap();
+        assert_eq!(params.protocol_version, "1.0");
+        assert!(params.client_info.is_none());
+        assert!(params.capabilities.is_none());
+    }
+
+    #[test]
+    fn test_query_params_defaults() {
+        let json = json!({
+            "repositoryName": "test-repo",
+            "queryText": "search query"
+        });
+        
+        let params: QueryParams = from_value(json).unwrap();
+        assert_eq!(params.repository_name, "test-repo");
+        assert_eq!(params.query_text, "search query");
+        assert_eq!(params.limit, 10); // Should use default
+        assert!(params.branch_name.is_none());
+        assert!(params.element_type.is_none());
+        assert!(params.lang.is_none());
+        assert!(params.show_code.is_none());
+    }
+
+    #[test]
+    fn test_content_block_serialization() {
+        let block = ContentBlock {
+            block_type: "text".to_string(),
+            text: "Hello, world!".to_string(),
+        };
+        
+        let json = to_value(&block).unwrap();
+        assert_eq!(json["type"], "text");
+        assert_eq!(json["text"], "Hello, world!");
+    }
+
+    #[test]
+    fn test_git_commit_serialization() {
+        let commit = GitCommit {
+            id: "abcdef1234567890".to_string(),
+            short_id: "abcdef1".to_string(),
+            message: "Test commit".to_string(),
+            author: "Test Author".to_string(),
+            email: "test@example.com".to_string(),
+            timestamp: "2024-01-01T12:00:00Z".to_string(),
+            parents: vec!["parent1".to_string()],
+            refs: vec![],
+        };
+        
+        let json = to_value(&commit).unwrap();
+        assert_eq!(json["id"], "abcdef1234567890");
+        assert_eq!(json["shortId"], "abcdef1");
+        assert_eq!(json["message"], "Test commit");
+        assert!(!json.as_object().unwrap().contains_key("refs")); // Should be skipped when empty
+    }
+
+    #[test]
+    fn test_repository_add_params_optional_fields() {
+        let json = json!({
+            "name": "test-repo"
+        });
+        
+        let params: RepositoryAddParams = from_value(json).unwrap();
+        assert_eq!(params.name, "test-repo");
+        assert!(params.url.is_none());
+        assert!(params.local_path.is_none());
+        assert!(params.branch.is_none());
+        assert!(params.ssh_key.is_none());
+        assert!(params.ssh_passphrase.is_none());
+        assert!(params.target_ref.is_none());
+    }
+
+    #[test]
+    fn test_shell_execute_params_timeout_default() {
+        let json = json!({
+            "command": "echo hello"
+        });
+        
+        let params: ShellExecuteParams = from_value(json).unwrap();
+        assert_eq!(params.command, "echo hello");
+        assert_eq!(params.timeout_ms, 30000);
+        assert!(params.working_directory.is_none());
+        assert!(params.env.is_none());
+    }
+
+    #[test]
+    fn test_repository_map_params_defaults() {
+        let json = json!({
+            "repositoryName": "test-repo"
+        });
+        
+        let params: RepositoryMapParams = from_value(json).unwrap();
+        assert_eq!(params.repository_name, "test-repo");
+        assert_eq!(params.verbosity, 1);
+        assert!(params.paths.is_none());
+        assert!(params.file_extension.is_none());
+    }
+
+    #[test]
+    fn test_edit_operation_default_replace_all() {
+        let json = json!({
+            "old_string": "foo",
+            "new_string": "bar"
+        });
+        
+        let op: EditOperation = from_value(json).unwrap();
+        assert_eq!(op.old_string, "foo");
+        assert_eq!(op.new_string, "bar");
+        assert!(!op.replace_all); // Should default to false
+    }
+
+    #[test]
+    fn test_switch_branch_params_force_default() {
+        let json = json!({
+            "repositoryName": "test-repo",
+            "branchName": "feature-branch"
+        });
+        
+        let params: RepositorySwitchBranchParams = from_value(json).unwrap();
+        assert_eq!(params.repository_name, "test-repo");
+        assert_eq!(params.branch_name, Some("feature-branch".to_string()));
+        assert!(!params.force); // Should default to false
+        assert!(!params.no_auto_resync); // Should default to false
+    }
+
+    #[test]
+    fn test_dependency_info_serialization() {
+        let info = DependencyInfo {
+            repository_name: "lib-repo".to_string(),
+            target_ref: Some("v1.0.0".to_string()),
+            purpose: Some("Utility functions".to_string()),
+            is_available: true,
+            local_path: Some("/path/to/lib".to_string()),
+            current_ref: Some("v1.0.0".to_string()),
+        };
+        
+        let json = to_value(&info).unwrap();
+        assert_eq!(json["repositoryName"], "lib-repo");
+        assert_eq!(json["targetRef"], "v1.0.0");
+        assert_eq!(json["purpose"], "Utility functions");
+        assert_eq!(json["isAvailable"], true);
+    }
+
+    #[test]
+    fn test_tool_annotations_all_fields() {
+        let annotations = ToolAnnotations {
+            title: Some("Test Tool".to_string()),
+            read_only_hint: Some(true),
+            destructive_hint: Some(false),
+            idempotent_hint: Some(true),
+            open_world_hint: Some(false),
+        };
+        
+        let json = to_value(&annotations).unwrap();
+        assert_eq!(json["title"], "Test Tool");
+        assert_eq!(json["readOnlyHint"], true);
+        assert_eq!(json["destructiveHint"], false);
+        assert_eq!(json["idempotentHint"], true);
+        assert_eq!(json["openWorldHint"], false);
+    }
+
+    #[test]
+    fn test_sync_details_serialization() {
+        let details = SyncDetails {
+            files_added: 10,
+            files_updated: 5,
+            files_removed: 2,
+        };
+        
+        let json = to_value(&details).unwrap();
+        assert_eq!(json["filesAdded"], 10);
+        assert_eq!(json["filesUpdated"], 5);
+        assert_eq!(json["filesRemoved"], 2);
+    }
+
+    #[test]
+    fn test_error_object_with_data() {
+        let error = ErrorObject {
+            code: -32700,
+            message: "Parse error".to_string(),
+            data: Some(json!({"line": 42, "column": 10})),
+        };
+        
+        let json = to_value(&error).unwrap();
+        assert_eq!(json["code"], -32700);
+        assert_eq!(json["message"], "Parse error");
+        assert_eq!(json["data"]["line"], 42);
+        assert_eq!(json["data"]["column"], 10);
+    }
+
+    #[test]
+    fn test_repository_git_history_params_default() {
+        let params = RepositoryGitHistoryParams::default();
+        assert_eq!(params.repository_name, "");
+        assert_eq!(params.max_commits, 100);
+        assert!(params.branch_name.is_none());
+        assert!(params.since.is_none());
+        assert!(params.until.is_none());
+        assert!(params.author.is_none());
+        assert!(params.path.is_none());
+    }
 } 
