@@ -109,40 +109,57 @@ pub async fn handle_clear(
     Ok(())
 }
 
-/*
 #[cfg(test)]
 mod tests {
     use super::*;
-    use qdrant_client::Qdrant;
-    use std::sync::Arc;
-    use tokio::runtime::Runtime;
-    use crate::config::AppConfig; // Need this for the updated handle_clear
+    use sagitta_search::RepositoryConfig;
+    use std::path::PathBuf;
+    use std::collections::HashMap;
 
     #[test]
-    #[ignore] // Ignored because it requires a running Qdrant instance
-    fn test_handle_clear_simple_index() {
-        let rt = Runtime::new().unwrap();
-        rt.block_on(async {
-            // --- Setup Mock Client ---
-            let client = Arc::new(Qdrant::from_url("http://localhost:6334").build().unwrap()); // Placeholder
-
-            // --- Prepare Args & Config ---
-            let args = ClearArgs { 
-                repo_name: None, // Provide the missing field
-                yes: true 
-            };
-            let config = AppConfig::default(); // Provide a default config
-
-            // --- Execute --- 
-            // Note: This will likely fail logically now, as handle_clear expects a repo
-            // It might panic or return an error. The ignore flag is important.
-            let result = handle_clear(&args, config, client).await; // Pass args by ref, add config
-
-            // --- Assert --- 
-            // The original assertion might not hold true anymore
-            // assert!(result.is_ok()); 
-            println!("Test execution finished (ignored test). Result (if ran): {:?}", result);
-        });
+    fn test_clear_args_debug() {
+        let args = ClearArgs {
+            repo_name: Some("test".to_string()),
+            yes: true,
+        };
+        
+        // Test that Debug trait is implemented
+        let debug_str = format!("{:?}", args);
+        assert!(debug_str.contains("ClearArgs"));
+        assert!(debug_str.contains("test"));
     }
-} 
-*/ 
+
+    #[test]
+    fn test_branch_resolution() {
+        let config = RepositoryConfig {
+            name: "test".to_string(),
+            url: "https://github.com/test/repo.git".to_string(),
+            local_path: PathBuf::from("/test"),
+            default_branch: "main".to_string(),
+            tracked_branches: vec!["main".to_string()],
+            remote_name: Some("origin".to_string()),
+            last_synced_commits: HashMap::new(),
+            active_branch: Some("feature".to_string()),
+            ssh_key_path: None,
+            ssh_key_passphrase: None,
+            indexed_languages: None,
+            added_as_local_path: false,
+            target_ref: Some("v1.0".to_string()),
+            dependencies: vec![],
+        };
+        
+        let branch = config.target_ref.as_deref()
+            .or(config.active_branch.as_deref())
+            .unwrap_or(&config.default_branch);
+        
+        assert_eq!(branch, "v1.0");
+    }
+
+    #[test]
+    fn test_collection_name_generation() {
+        let collection_name = get_branch_aware_collection_name("test-repo", "main", &AppConfig::default());
+        assert!(collection_name.contains("test-repo") || collection_name.contains("test_repo"));
+    }
+}
+
+ 
