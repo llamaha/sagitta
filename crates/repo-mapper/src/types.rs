@@ -21,7 +21,7 @@ pub struct MethodInfo {
 }
 
 /// Types of code elements that can be discovered
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum MethodType {
     // Ruby
     RubyInstance,

@@ -46,4 +46,8 @@ impl SyntaxParser for HtmlParser {
 }
 
 // TODO: Implement actual HTML tree-sitter parsing later if needed
-// for more granular chunks (e.g., <script>, <style>, specific tags). 
+// for more granular chunks (e.g., <script>, <style>, specific tags).
+
+#[cfg(test)]
+#[path = "html_tests.rs"]
+mod tests; 

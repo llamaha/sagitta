@@ -14,9 +14,14 @@ pub static DETAILED_STATUS: Lazy<DashMap<String, DisplayableSyncProgress>> =
 
 /// Schedule cleanup of completed sync status after a delay
 pub fn schedule_sync_status_cleanup(repo_name: String) {
+    schedule_sync_status_cleanup_with_delay(repo_name, tokio::time::Duration::from_secs(10));
+}
+
+/// Schedule cleanup with a custom delay (useful for testing)
+fn schedule_sync_status_cleanup_with_delay(repo_name: String, delay: tokio::time::Duration) {
     tokio::spawn(async move {
-        // Wait 10 seconds after completion before clearing
-        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+        // Wait for the specified delay before clearing
+        tokio::time::sleep(delay).await;
         
         // Remove both simple and detailed status for this repository
         SIMPLE_STATUS.remove(&repo_name);
@@ -50,15 +55,15 @@ mod tests {
         // Verify it's there
         assert!(SIMPLE_STATUS.contains_key(repo_name));
         
-        // Schedule cleanup
-        schedule_sync_status_cleanup(repo_name.to_string());
+        // Schedule cleanup with a very short delay for testing
+        schedule_sync_status_cleanup_with_delay(repo_name.to_string(), tokio::time::Duration::from_millis(50));
         
         // Wait a bit less than cleanup time - should still be there
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
         assert!(SIMPLE_STATUS.contains_key(repo_name));
         
         // Wait for cleanup to complete
-        tokio::time::sleep(tokio::time::Duration::from_secs(11)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(40)).await;
         assert!(!SIMPLE_STATUS.contains_key(repo_name));
     }
 } 
