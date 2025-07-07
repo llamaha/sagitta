@@ -80,4 +80,8 @@ fn extract_method_calls(context: &str, max_calls: usize) -> Vec<String> {
     calls.dedup();
     calls.truncate(max_calls);
     calls
-} 
+}
+
+#[cfg(test)]
+#[path = "ruby_tests.rs"]
+mod tests; 

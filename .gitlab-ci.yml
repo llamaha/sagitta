@@ -1,0 +1,22 @@
+stages:
+  - validate
+
+validate-versions:
+  stage: validate
+  image: rust:latest
+  before_script:
+    - apt-get update && apt-get install -y git jq
+  script:
+    - ./scripts/check-version-bumps.sh
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+
+validate-changelogs:
+  stage: validate
+  image: rust:latest
+  before_script:
+    - apt-get update && apt-get install -y git
+  script:
+    - ./scripts/check-changelog-updates.sh
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'

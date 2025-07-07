@@ -7,8 +7,14 @@
 `sagitta-cli` is part of the `sagitta` workspace. To build it, navigate to the root of the `sagitta` repository and run:
 
 ```bash
+# CPU-only build
 cargo build --release --package sagitta-cli
+
+# GPU-accelerated build (recommended)
+cargo build --release --package sagitta-cli --features cuda
 ```
+
+**For other execution providers** (CoreML, ROCm, DirectML), see the [Execution Provider Support](../../README.md#5b-execution-provider-support) section in the main README.
 
 The binary will be located at `target/release/sagitta-cli`.
 

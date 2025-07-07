@@ -10,6 +10,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "cuda")]
 use ort::execution_providers::CUDAExecutionProvider;
+#[cfg(feature = "coreml")]
+use ort::execution_providers::CoreMLExecutionProvider;
+#[cfg(feature = "rocm")]
+use ort::execution_providers::ROCmExecutionProvider;
+#[cfg(feature = "directml")]
+use ort::execution_providers::DirectMLExecutionProvider;
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "onnx")]
@@ -245,41 +251,8 @@ impl OnnxEmbeddingModel {
             return Err(SagittaEmbedError::file_not_found(model_path));
         }
 
-        // Initialize Environment using ort::init()
-        #[cfg(feature = "cuda")]
-        {
-            debug!("Building ONNX session with CUDA execution provider (with CPU fallback)");
-            let mut cuda_provider = CUDAExecutionProvider::default();
-            
-            // Configure CUDA memory limit if specified
-            if let Some(memory_limit) = config.cuda_memory_limit {
-                cuda_provider = cuda_provider.with_memory_limit(memory_limit);
-            }
-            
-            let mut cpu_provider = CPUExecutionProvider::default();
-            if config.enable_cpu_arena {
-                cpu_provider = cpu_provider.with_arena_allocator();
-            }
-            
-            let _ = ort::init()
-                .with_name("sagitta-onnx")
-                .with_execution_providers([cuda_provider.build(), cpu_provider.build()]) // CUDA first, CPU fallback
-                .commit();
-        }
-
-        #[cfg(not(feature = "cuda"))]
-        {
-            debug!("Building ONNX session with CPU execution provider only");
-            let mut cpu_provider = CPUExecutionProvider::default();
-            if config.enable_cpu_arena {
-                cpu_provider = cpu_provider.with_arena_allocator();
-            }
-            
-            let _ = ort::init()
-                .with_name("sagitta-onnx")
-                .with_execution_providers([cpu_provider.build()]) // CPU only
-                .commit();
-        }
+        // Initialize Environment using ort::init() with execution providers based on configuration
+        Self::init_execution_providers(config)?;
 
         // Build session using Session::builder() with performance optimizations
         let mut session_builder = Session::builder()
@@ -344,6 +317,139 @@ impl OnnxEmbeddingModel {
         session_builder
             .commit_from_file(model_path)
             .map_err(|e| SagittaEmbedError::onnx_runtime(format!("Failed to load model from {}: {}", model_path.display(), e)))
+    }
+
+    /// Initialize execution providers based on configuration
+    #[cfg(feature = "onnx")]
+    fn init_execution_providers(config: &crate::config::EmbeddingConfig) -> Result<()> {
+        use ort::execution_providers::ExecutionProviderDispatch;
+        
+        let mut providers: Vec<ExecutionProviderDispatch> = Vec::new();
+        
+        // Determine which execution provider to use based on configuration
+        // Use the first provider from the list, or Auto if empty
+        let provider = config.execution_providers.first().unwrap_or(&crate::config::ExecutionProvider::Auto);
+        match provider {
+            crate::config::ExecutionProvider::Cuda => {
+                #[cfg(feature = "cuda")]
+                {
+                    debug!("Configuring CUDA execution provider");
+                    let mut cuda_provider = CUDAExecutionProvider::default();
+                    
+                    // Configure CUDA memory limit if specified
+                    if let Some(memory_limit) = config.cuda_memory_limit {
+                        cuda_provider = cuda_provider.with_memory_limit(memory_limit);
+                    }
+                    
+                    providers.push(cuda_provider.build());
+                }
+                #[cfg(not(feature = "cuda"))]
+                {
+                    warn!("CUDA execution provider requested but not available. Falling back to CPU.");
+                }
+            }
+            crate::config::ExecutionProvider::CoreML => {
+                #[cfg(feature = "coreml")]
+                {
+                    debug!("Configuring CoreML execution provider");
+                    let coreml_provider = CoreMLExecutionProvider::default();
+                    providers.push(coreml_provider.build());
+                }
+                #[cfg(not(feature = "coreml"))]
+                {
+                    warn!("CoreML execution provider requested but not available. Falling back to CPU.");
+                }
+            }
+            crate::config::ExecutionProvider::ROCm => {
+                #[cfg(feature = "rocm")]
+                {
+                    debug!("Configuring ROCm execution provider");
+                    let rocm_provider = ROCmExecutionProvider::default();
+                    providers.push(rocm_provider.build());
+                }
+                #[cfg(not(feature = "rocm"))]
+                {
+                    warn!("ROCm execution provider requested but not available. Falling back to CPU.");
+                }
+            }
+            crate::config::ExecutionProvider::DirectML => {
+                #[cfg(feature = "directml")]
+                {
+                    debug!("Configuring DirectML execution provider");
+                    let directml_provider = DirectMLExecutionProvider::default();
+                    providers.push(directml_provider.build());
+                }
+                #[cfg(not(feature = "directml"))]
+                {
+                    warn!("DirectML execution provider requested but not available. Falling back to CPU.");
+                }
+            }
+            crate::config::ExecutionProvider::Auto => {
+                debug!("Auto-detecting optimal execution provider");
+                
+                // Try providers in order of preference
+                #[cfg(feature = "cuda")]
+                {
+                    let mut cuda_provider = CUDAExecutionProvider::default();
+                    if let Some(memory_limit) = config.cuda_memory_limit {
+                        cuda_provider = cuda_provider.with_memory_limit(memory_limit);
+                    }
+                    providers.push(cuda_provider.build());
+                }
+                
+                #[cfg(feature = "coreml")]
+                {
+                    let coreml_provider = CoreMLExecutionProvider::default();
+                    providers.push(coreml_provider.build());
+                }
+                
+                #[cfg(feature = "rocm")]
+                {
+                    let rocm_provider = ROCmExecutionProvider::default();
+                    providers.push(rocm_provider.build());
+                }
+                
+                #[cfg(feature = "directml")]
+                {
+                    let directml_provider = DirectMLExecutionProvider::default();
+                    providers.push(directml_provider.build());
+                }
+            }
+            crate::config::ExecutionProvider::Cpu => {
+                debug!("Configuring CPU execution provider");
+                // CPU provider will be added as fallback below
+            }
+        }
+        
+        // Always add CPU as fallback
+        let mut cpu_provider = CPUExecutionProvider::default();
+        if config.enable_cpu_arena {
+            cpu_provider = cpu_provider.with_arena_allocator();
+        }
+        providers.push(cpu_provider.build());
+        
+        // Initialize ORT with the selected providers
+        let init_result = ort::init()
+            .with_name("sagitta-onnx")
+            .with_execution_providers(providers)
+            .commit();
+            
+        match init_result {
+            Ok(_) => {
+                debug!("Successfully initialized ONNX Runtime with execution providers");
+                Ok(())
+            }
+            Err(e) => {
+                warn!("Failed to initialize ONNX Runtime with specified providers: {}", e);
+                // Try with CPU only as last resort
+                let cpu_provider = CPUExecutionProvider::default();
+                let _ = ort::init()
+                    .with_name("sagitta-onnx")
+                    .with_execution_providers([cpu_provider.build()])
+                    .commit();
+                Ok(())
+            }
+        }
     }
 
     /// Gets dimension from an ONNX session

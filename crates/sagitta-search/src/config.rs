@@ -169,7 +169,7 @@ fn default_enable_session_cleanup() -> bool {
 }
 
 fn default_embedding_batch_size() -> usize {
-    128 // Match sagitta-embed default
+    8 // Optimized default for release
 }
 
 
@@ -217,7 +217,7 @@ impl Default for AppConfig {
             qdrant_url: "http://localhost:6334".to_string(),
             onnx_model_path: None,
             onnx_tokenizer_path: None,
-            embed_model: None,
+            embed_model: Some("bge-small-fast".to_string()),
             server_api_key_path: None,
             repositories_base_path: None,
             vocabulary_base_path: None,

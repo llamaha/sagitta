@@ -1,6 +1,6 @@
 [package]
 name = "sagitta-mcp"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [lib]
@@ -65,3 +65,7 @@ tower = { version = "0.4", features = ["full"] }
 
 [features]
 default = []
+cuda = ["sagitta-search/cuda"]
+coreml = ["sagitta-search/coreml"]
+rocm = ["sagitta-search/rocm"]
+directml = ["sagitta-search/directml"]

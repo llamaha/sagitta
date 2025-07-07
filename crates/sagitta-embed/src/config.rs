@@ -17,6 +17,8 @@ pub enum ExecutionProvider {
     DirectML,
     /// CoreML execution provider (macOS)
     CoreML,
+    /// ROCm execution provider (AMD GPU)
+    ROCm,
     /// Auto-detect optimal provider
     #[default]
     Auto,

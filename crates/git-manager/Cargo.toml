@@ -1,6 +1,6 @@
 [package]
 name = "git-manager"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Centralized git functionality for sagitta with branch management and merkle tree optimization"
 license = "MIT OR Apache-2.0"

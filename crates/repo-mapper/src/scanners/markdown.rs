@@ -25,4 +25,8 @@ pub fn scan_line(
             line_number: Some(line_number),
         });
     }
-} 
+}
+
+#[cfg(test)]
+#[path = "markdown_tests.rs"]
+mod tests; 

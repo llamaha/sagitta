@@ -22,8 +22,6 @@ onnx_tokenizer_path = "/absolute/path/to/tokenizer.json" # or directory containi
 vector_dimension = 384 # Moved to top-level
 repositories_base_path = "/absolute/path/to/repos"
 vocabulary_base_path = "/absolute/path/to/vocab"
-# tenant_id = "your-tenant-uuid"  # Optional: see below
-
 # Embedding engine configuration
 [embedding]
 # Session management is now automatic
@@ -31,15 +29,6 @@ max_sequence_length = 128           # Maximum sequence length for tokenization
 session_timeout_seconds = 300       # Session timeout in seconds (0 = no timeout)
 enable_session_cleanup = true       # Enable session cleanup on idle
 embedding_batch_size = 128
-
-# TLS/HTTPS settings (for sagitta-mcp)
-tls_enable = false
-tls_cert_path = null
-tls_key_path = null
-
-# CORS settings (for sagitta-mcp)
-cors_allowed_origins = null
-cors_allow_credentials = true
 ```
 
 ---
@@ -64,11 +53,6 @@ Base directory where repositories are cloned and managed. Example: `"/path/to/re
 ### `vocabulary_base_path` (string, optional)
 Base directory for storing vocabulary files. Example: `"/path/to/vocab"`
 
-### `tenant_id` (string, optional, advanced)
-**Multi-Tenancy:**
-- If set, this value will be used as the default tenant for all CLI/server operations (unless overridden by CLI argument or API key).
-- Useful for single-tenant deployments or for scripting.
-- In multi-user mode (MCP server), tenant_id is usually determined by the API key or authentication context.
 
 ### `repositories` (array of tables, advanced)
 List of managed repositories. Normally managed by the CLI/server, not edited manually.
@@ -121,34 +105,6 @@ embedding_batch_size = 128
 
 **CUDA Support**: CUDA acceleration is automatically enabled if the application was compiled with CUDA support and compatible hardware is available. No configuration needed.
 
-### `oauth` (table, optional, advanced)
-OAuth2 configuration for MCP server. Example:
-```toml
-[oauth]
-client_id = "..."
-client_secret = "..."
-auth_url = "..."
-token_url = "..."
-user_info_url = "..."
-redirect_uri = "..."
-introspection_url = null
-scopes = ["openid", "profile", "email"]
-```
-
-### `tls_enable` (bool, default: false)
-Enable TLS/HTTPS for MCP server.
-
-### `tls_cert_path` (string, optional)
-Path to TLS certificate file.
-
-### `tls_key_path` (string, optional)
-Path to TLS private key file.
-
-### `cors_allowed_origins` (array of strings, optional)
-List of allowed origins for CORS (MCP server).
-
-### `cors_allow_credentials` (bool, default: true)
-Allow credentials in CORS requests.
 
 ---
 
@@ -185,12 +141,6 @@ For detailed embedding performance tuning, refer to the `sagitta-embed` document
 
 ---
 
-## Multi-User / Multi-Tenancy Mode
-
-- By default, the CLI and server operate in single-user mode unless tenant_id is set or required by the operation.
-- In MCP server deployments, tenant_id is determined by the API key or authentication context.
-- To enable multi-user mode explicitly, set `tenant_id` to `null` or omit it, and use API keys for tenant isolation.
-- For scripting or single-tenant use, you may set `tenant_id` globally in config.toml.
 
 ---
 
@@ -207,18 +157,7 @@ For detailed embedding performance tuning, refer to the `sagitta-embed` document
 
 *If you add new configuration options, please update this file!*
 
-## tenant_id
-
-- **Type:** `String` (optional)
-- **Purpose:** If set, this value is used as the default tenant ID for all CLI and server operations. It enables multi-tenancy and is required for most repository operations.
-- **How to set:**
-  - Run `sagitta-cli init` to generate a new UUID and write it to your config.
-  - Or, manually add a line like `tenant_id = "your-uuid-here"` to your `config.toml`.
-- **Multi-user mode:**
-  - If you want to use sagitta-search in a multi-tenant environment, each user or automation should have a unique `tenant_id`.
-  - If you want to run in single-user mode, just use the generated `tenant_id`.
-
-**Note:** If neither `--tenant-id` nor `tenant_id` in config is set, most CLI commands will error out. See the [README](../README.md) for more details and usage examples. 
+ 
 
 # Performance Configuration
 

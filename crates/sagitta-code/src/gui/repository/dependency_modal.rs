@@ -70,7 +70,12 @@ impl DependencyModal {
             .resizable(true)
             .default_size([700.0, 500.0])
             .collapsible(false)
+            .frame(egui::Frame::window(&ctx.style()).fill(theme.panel_background()))
             .show(ctx, |ui| {
+                ui.visuals_mut().override_text_color = Some(theme.text_color());
+                ui.visuals_mut().widgets.noninteractive.bg_fill = theme.panel_background();
+                ui.visuals_mut().widgets.inactive.bg_fill = theme.input_background();
+                ui.visuals_mut().widgets.active.bg_fill = theme.button_background();
                 self.render_content(ui, available_repos, repo_manager.clone(), theme);
                 
                 ui.separator();
@@ -81,18 +86,18 @@ impl DependencyModal {
                         ui.spinner();
                         ui.label("Saving...");
                     } else {
-                        if ui.button("Save Changes").clicked() {
+                        if ui.add(egui::Button::new("Save Changes").fill(theme.button_background())).clicked() {
                             self.save_dependencies(repo_manager.clone());
                         }
                         
-                        if ui.button("Cancel").clicked() {
+                        if ui.add(egui::Button::new("Cancel").fill(theme.button_background())).clicked() {
                             self.hide();
                         }
                     }
                     
                     // Show messages
                     if let Some(error) = &self.error_message {
-                        ui.colored_label(Color32::from_rgb(220, 53, 69), error);
+                        ui.colored_label(theme.error_color(), error);
                     }
                     if let Some(success) = &self.success_message {
                         ui.colored_label(Color32::from_rgb(40, 167, 69), success);
@@ -102,7 +107,7 @@ impl DependencyModal {
         
         // Handle confirmation dialog
         if let Some(index) = self.confirm_remove {
-            self.render_remove_confirmation(ctx, index);
+            self.render_remove_confirmation(ctx, index, theme);
         }
     }
     
@@ -111,7 +116,7 @@ impl DependencyModal {
         ui: &mut Ui,
         available_repos: &[String],
         repo_manager: Arc<Mutex<RepositoryManager>>,
-        _theme: &AppTheme,
+        theme: &AppTheme,
     ) {
         // Current dependencies section
         ui.heading("Current Dependencies");
@@ -199,7 +204,7 @@ impl DependencyModal {
                 ui.label("Adding...");
             } else {
                 let can_add = !self.add_form.selected_repository.is_empty();
-                ui.add_enabled(can_add, egui::Button::new("Add Dependency"))
+                ui.add_enabled(can_add, egui::Button::new("Add Dependency").fill(theme.button_background()))
                     .clicked()
                     .then(|| {
                         self.add_dependency();
@@ -208,21 +213,27 @@ impl DependencyModal {
         });
     }
     
-    fn render_remove_confirmation(&mut self, ctx: &Context, index: usize) {
+    fn render_remove_confirmation(&mut self, ctx: &Context, index: usize, theme: &AppTheme) {
         egui::Window::new("Confirm Remove")
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .frame(egui::Frame::window(&ctx.style()).fill(theme.panel_background()))
             .show(ctx, |ui| {
+                ui.visuals_mut().override_text_color = Some(theme.text_color());
+                ui.visuals_mut().widgets.noninteractive.bg_fill = theme.panel_background();
+                ui.visuals_mut().widgets.inactive.bg_fill = theme.input_background();
+                ui.visuals_mut().widgets.active.bg_fill = theme.button_background();
                 if let Some(dep) = self.dependencies.get(index) {
                     ui.label(format!("Remove dependency on '{}'?", dep.repository_name));
                     
                     ui.horizontal(|ui| {
-                        if ui.button("Cancel").clicked() {
+                        if ui.add(egui::Button::new("Cancel").fill(theme.button_background())).clicked() {
                             self.confirm_remove = None;
                         }
                         
-                        if ui.button("Remove").clicked() {
+                        if ui.add(egui::Button::new(egui::RichText::new("Remove").color(egui::Color32::WHITE))
+                            .fill(theme.error_color())).clicked() {
                             self.dependencies.remove(index);
                             self.confirm_remove = None;
                         }

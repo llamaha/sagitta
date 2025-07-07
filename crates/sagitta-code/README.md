@@ -2,7 +2,7 @@
 
 <!-- Do not update this file unless specifically asked to do so -->
 
-**Sagitta Code** is an AI coding assistant built on top of the [sagitta-embed](../sagitta-embed) search engine with its own [reasoning-engine](../reasoning-engine). It provides intelligent code interaction, repository management, and conversation handling capabilities using OpenRouter or Claude Code subscription.
+**Sagitta Code** is an AI coding assistant built on top of the [sagitta-embed](../sagitta-embed) search engine. It provides intelligent code interaction, repository management, and conversation handling capabilities using Claude Code subscription.
 
 Installation is currently a manual process, with future improvements to the install process being planned.
 
@@ -22,30 +22,27 @@ Installation is currently a manual process, with future improvements to the inst
 
 - **sagitta-embed**: Semantic search and embeddings
 - **sagitta-search**: Core search functionality
-- **reasoning-engine**: Multi-step reasoning capabilities
 - **code-parsers**: Language-specific code parsing
 - **git-manager**: Git repository operations
-- **repo-mapper**: Repository structure analysis
-- **terminal-stream**: Terminal output streaming
 
 ## Prerequisites
 
 1. **Rust Toolchain**: Install from [rustup.rs](https://rustup.rs/)
-2. **ONNX Runtime**: GPU-enabled version recommended (see [main README](../../README.md#prerequisites))
+2. **ONNX Runtime**: Required for embedding generation. See [ONNX Runtime installation](../../README.md#prerequisites) in the main README
 3. **Qdrant**: Vector database for semantic search
-4. **LLM Provider**:
-   - **Claude Max Subscription** for Claude Code (install Claude app and authenticate)
-   - **OpenRouter** for access to a wide variety of models (requires OpenRouter key)
+4. **Claude Code**: Install the Claude desktop app and authenticate with your subscription
 
 ## Installation
 
 1. **Clone and build**:
    ```bash
    git clone https://gitlab.com/amulvany/sagitta.git
-   cd sagitta-search/crates/sagitta-code
-   # Build with Cuda
-   cargo build --release --all --features cuda
+   cd sagitta
+   # Build with GPU acceleration (see main README for all execution provider options)
+   cargo build --release --features cuda
    ```
+   
+   **For other execution providers** (CoreML, ROCm, DirectML), see the [Execution Provider Support](../../README.md#5b-execution-provider-support) section in the main README.
 
 2. **Start Qdrant**:
    ```bash
@@ -69,7 +66,7 @@ Installation is currently a manual process, with future improvements to the inst
 - **Preview Panel**: Display tool outputs and code changes
 - **Analytics Panel**: Conversation statistics and usage metrics
 - **Theme Customizer**: Customize UI colors and appearance
-- **Model Selection**: Quick model switching (OpenRouter only)
+- **Model Selection**: Quick model switching
 
 ## Fast Model for Conversation Features
 
