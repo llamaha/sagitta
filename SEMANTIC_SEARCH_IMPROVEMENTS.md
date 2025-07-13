@@ -51,7 +51,7 @@
    - Move deduplication to indexing time for better performance
    - Use content hash + metadata for unique chunk identification during indexing
 
-### **Phase 3: Investigate Chunking Overlaps** 🔄 **PENDING**
+### **Phase 3: Investigate Chunking Overlaps** 🔄 **IN PROGRESS**
 1. **Audit language parsers**:
    - Check if language-specific parsers create overlapping chunks
    - Ensure semantic element boundaries don't cause duplicates
@@ -71,8 +71,8 @@
 
 ## **Specific Files Modified:**
 - ✅ `crates/sagitta-mcp/src/mcp/types.rs` - Added elementType and language fields to SearchResultItem
-- ✅ `crates/sagitta-mcp/src/handlers/query.rs` - Updated to populate new fields from payload data
-- 🔄 `crates/sagitta-search/src/search_impl.rs` - Fix deduplication logic (Phase 2)
+- ✅ `crates/sagitta-mcp/src/handlers/query.rs` - Updated to populate new fields from payload data  
+- ✅ `crates/sagitta-search/src/search_impl.rs` - Improved deduplication logic with element_type and score-based selection
 - 🔄 `crates/sagitta-search/src/indexing.rs` - Add chunk uniqueness validation (Phase 2)
 - 🔄 `crates/code-parsers/src/*.rs` - Audit for overlapping chunks (Phase 3)
 
