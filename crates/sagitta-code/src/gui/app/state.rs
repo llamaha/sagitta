@@ -31,6 +31,7 @@ pub struct AppState {
     pub current_theme: AppTheme,
     pub show_hotkeys_modal: bool,
     pub show_tools_modal: bool,
+    pub show_new_conversation_confirmation: bool,
     pub clicked_tool_info: Option<(String, String)>, // (tool_name, tool_args)
     pub toasts: Toasts,
     pub copy_button_state: CopyButtonState,
@@ -91,6 +92,9 @@ pub struct AppState {
     pub loop_inject_buffer: String,
     pub show_loop_inject_input: bool,
     
+    // Stop/Cancel request
+    pub stop_requested: bool,
+    
     // Input focus management
     pub should_focus_input: bool,
     
@@ -113,6 +117,7 @@ impl AppState {
             current_theme: AppTheme::default(),
             show_hotkeys_modal: false,
             show_tools_modal: false,
+            show_new_conversation_confirmation: false,
             clicked_tool_info: None,
             toasts: Toasts::default(),
             copy_button_state: CopyButtonState::default(),
@@ -145,7 +150,7 @@ impl AppState {
             conversation_data_loading: false,
             last_conversation_refresh: None,
             tool_results: std::collections::HashMap::new(),
-            messages: Vec::new(),
+            messages: Vec::new(), // Start with empty messages to ensure welcome screen shows
             pending_tool_calls: VecDeque::new(),
             active_tool_call_message_id: None,
             
@@ -172,6 +177,9 @@ impl AppState {
             loop_inject_message: None,
             loop_inject_buffer: String::new(),
             show_loop_inject_input: false,
+            
+            // Stop/Cancel request
+            stop_requested: false,
             
             // Input focus management
             should_focus_input: true, // Focus input on startup

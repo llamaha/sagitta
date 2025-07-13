@@ -4,12 +4,12 @@ use crate::{
 };
 use qdrant_client::qdrant::{
         Filter, PrefetchQueryBuilder, Query, QueryPoints, QueryPointsBuilder,
-        QueryResponse, Fusion,
+        QueryResponse, Fusion, ScoredPoint,
     };
 use std::sync::Arc;
 use crate::tokenizer::{self, TokenizerConfig}; // Import TokenizerConfig
 use crate::vocabulary::VocabularyManager; // Import vocabulary manager
-use std::collections::HashMap; // Add HashMap
+use std::collections::{HashMap, HashSet}; // Add HashMap and HashSet
 use log;
 use crate::config::AppConfig; // Import AppConfig
 use crate::config; // Import config module
@@ -45,12 +45,12 @@ pub enum FusionMethod {
 impl Default for SearchConfig {
     fn default() -> Self {
         Self {
-            fusion_method: FusionMethod::Dbsf, // Use DBSF for better score distribution
-            dense_prefetch_multiplier: 3,
-            sparse_prefetch_multiplier: 5,
+            fusion_method: FusionMethod::Rrf, // Use RRF for less restrictive fusion
+            dense_prefetch_multiplier: 4, // Reasonable multiplier to ensure enough candidates
+            sparse_prefetch_multiplier: 6, // Reasonable multiplier to ensure enough candidates
             use_tfidf_weights: true,
             filename_boost: 2.0,
-            score_threshold: None,
+            score_threshold: None, // Remove score threshold to get more results
         }
     }
 }
@@ -221,9 +221,16 @@ where
         Vec::new()
     };
 
-    // Define prefetch parameters with adaptive sizing
-    let dense_prefetch_limit = params.limit * search_config.dense_prefetch_multiplier;
-    let sparse_prefetch_limit = params.limit * search_config.sparse_prefetch_multiplier;
+    // Check if we have sparse search before the vector gets moved
+    let has_sparse_search = !sparse_query_vec.is_empty();
+
+    // Calculate expanded limit early to align prefetch with final query
+    let dedup_multiplier = if has_sparse_search { 8 } else { 4 }; // More reasonable multipliers
+    let expanded_limit = params.limit * dedup_multiplier.max(1);
+    
+    // Define prefetch parameters aligned with final expanded limit
+    let dense_prefetch_limit = expanded_limit * search_config.dense_prefetch_multiplier;
+    let sparse_prefetch_limit = expanded_limit * search_config.sparse_prefetch_multiplier;
 
     // 2. Build hybrid search request using improved fusion
     let mut dense_prefetch_builder = PrefetchQueryBuilder::default()
@@ -261,8 +268,9 @@ where
         FusionMethod::Dbsf => Fusion::Dbsf,
     };
 
+    // Use the expanded limit calculated earlier (aligned with prefetch)
     query_builder = query_builder.query(Query::new_fusion(fusion)) // Use configured fusion
-        .limit(params.limit) // Apply final limit after fusion
+        .limit(expanded_limit) // Request more results to account for deduplication
         .with_payload(true); // Include payload in final results
 
     // Apply score threshold if configured
@@ -275,21 +283,58 @@ where
     // 3. Perform search using query endpoint
     log::debug!("Core: Executing hybrid search request with {} fusion...", 
                match search_config.fusion_method { FusionMethod::Rrf => "RRF", FusionMethod::Dbsf => "DBSF" });
-    let search_response = params.client.query(query_request).await?; // Use query method
-    log::info!("Found {} search results after {} fusion.", search_response.result.len(),
-              match search_config.fusion_method { FusionMethod::Rrf => "RRF", FusionMethod::Dbsf => "DBSF" });
+    let mut search_response = params.client.query(query_request).await?; // Use query method
+    log::info!("Found {} search results after {} fusion (requested: {}, expanded: {}).", 
+              search_response.result.len(),
+              match search_config.fusion_method { FusionMethod::Rrf => "RRF", FusionMethod::Dbsf => "DBSF" },
+              params.limit,
+              expanded_limit);
+    
+    // If we got significantly fewer results than requested, log a warning
+    if search_response.result.len() < (params.limit as usize / 2) {
+        log::warn!(
+            "Fusion returned only {} results when {} were requested. Consider: \
+             1) Increasing prefetch multipliers, 2) Using RRF fusion instead of DBSF, \
+             3) Checking if vocabulary is properly populated",
+            search_response.result.len(),
+            params.limit
+        );
+    }
+    
+    // 4. Deduplicate results based on file_path, start_line, and end_line
+    search_response.result = deduplicate_search_results(search_response.result);
+    log::debug!("After deduplication: {} unique results", search_response.result.len());
+    
+    // 5. Trim to the requested limit after deduplication
+    if search_response.result.len() > params.limit as usize {
+        search_response.result.truncate(params.limit as usize);
+        log::debug!("Trimmed to requested limit: {} results", search_response.result.len());
+    }
+    
     Ok(search_response)
 }
 
 /// Creates a search config optimized for code search
 pub fn code_search_config() -> SearchConfig {
     SearchConfig {
-        fusion_method: FusionMethod::Dbsf,
-        dense_prefetch_multiplier: 4,
-        sparse_prefetch_multiplier: 6, 
+        fusion_method: FusionMethod::Rrf, // Use RRF instead of DBSF - less restrictive
+        dense_prefetch_multiplier: 4, // Reasonable multiplier for more results
+        sparse_prefetch_multiplier: 6, // Reasonable multiplier for more results
         use_tfidf_weights: true,
         filename_boost: 3.0, // Higher boost for code files
         score_threshold: Some(0.1), // Filter very low scores
+    }
+}
+
+/// Creates a search config using RRF fusion (less restrictive than DBSF)
+pub fn rrf_search_config() -> SearchConfig {
+    SearchConfig {
+        fusion_method: FusionMethod::Rrf, // RRF is less restrictive than DBSF
+        dense_prefetch_multiplier: 5, // Higher multipliers for RRF
+        sparse_prefetch_multiplier: 7, // Higher multipliers for RRF
+        use_tfidf_weights: true,
+        filename_boost: 2.0,
+        score_threshold: None, // No score threshold for RRF
     }
 }
 
@@ -338,6 +383,40 @@ where
 //     // Might involve looking up collection name, default branch etc.
 //     // Calls search_collection internally
 // }
+
+/// Deduplicates search results based on file_path, start_line, and end_line.
+/// This prevents duplicate results that can occur when the same code chunk
+/// is found by both dense and sparse search methods during hybrid search.
+fn deduplicate_search_results(results: Vec<ScoredPoint>) -> Vec<ScoredPoint> {
+    let mut seen = HashSet::new();
+    let mut deduplicated = Vec::new();
+    
+    for result in results {
+        // Extract file_path, start_line, and end_line from the payload
+        let key = if !result.payload.is_empty() {
+            let file_path = result.payload.get("file_path")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| String::new());
+            let start_line = result.payload.get("start_line")
+                .and_then(|v| v.as_integer())
+                .unwrap_or(0);
+            let end_line = result.payload.get("end_line")
+                .and_then(|v| v.as_integer())
+                .unwrap_or(0);
+            format!("{}:{}:{}", file_path, start_line, end_line)
+        } else {
+            // Fallback to using the point ID if payload is missing
+            format!("id:{:?}", result.id)
+        };
+        
+        if seen.insert(key) {
+            deduplicated.push(result);
+        }
+    }
+    
+    deduplicated
+}
 
 #[cfg(test)]
 mod tests {
@@ -511,9 +590,9 @@ mod tests {
     #[test]
     fn test_search_config_defaults() {
         let config = SearchConfig::default();
-        assert!(matches!(config.fusion_method, FusionMethod::Dbsf));
-        assert_eq!(config.dense_prefetch_multiplier, 3);
-        assert_eq!(config.sparse_prefetch_multiplier, 5);
+        assert!(matches!(config.fusion_method, FusionMethod::Rrf));
+        assert_eq!(config.dense_prefetch_multiplier, 4);
+        assert_eq!(config.sparse_prefetch_multiplier, 6);
         assert!(config.use_tfidf_weights);
         assert_eq!(config.filename_boost, 2.0);
         assert!(config.score_threshold.is_none());
@@ -522,7 +601,7 @@ mod tests {
     #[test]
     fn test_code_search_config() {
         let config = code_search_config();
-        assert!(matches!(config.fusion_method, FusionMethod::Dbsf));
+        assert!(matches!(config.fusion_method, FusionMethod::Rrf));
         assert_eq!(config.dense_prefetch_multiplier, 4);
         assert_eq!(config.sparse_prefetch_multiplier, 6);
         assert!(config.use_tfidf_weights);
@@ -540,4 +619,6 @@ mod tests {
         assert_eq!(config.filename_boost, 1.5);
         assert!(config.score_threshold.is_none());
     }
+
+
 }

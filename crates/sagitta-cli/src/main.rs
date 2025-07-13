@@ -40,20 +40,38 @@ async fn main() -> Result<()> {
     }
 
 
-    // Handle ONNX model/tokenizer path overrides from CLI args
-    if let Some(model_path_str) = &args.onnx_model_path_arg {
-        config.onnx_model_path = Some(PathBuf::from(model_path_str).to_string_lossy().into_owned());
-    }
-    if let Some(tokenizer_path_str) = &args.onnx_tokenizer_dir_arg {
-        config.onnx_tokenizer_path = Some(PathBuf::from(tokenizer_path_str).to_string_lossy().into_owned());
+    // Check if this is a simple command (they have special validation rules)
+    let is_simple_command = matches!(args.command, sagitta_cli::cli::Commands::Simple(_));
+    let is_simple_index_command = matches!(
+        args.command, 
+        sagitta_cli::cli::Commands::Simple(ref simple_args) 
+            if matches!(simple_args.command, sagitta_cli::cli::simple::SimpleCommand::Index(_))
+    );
+    
+    // For simple index commands, validate ONNX arguments/env vars before merging them into config
+    if is_simple_index_command {
+        if args.onnx_model_path_arg.is_some() || std::env::var("SAGITTA_ONNX_MODEL").is_ok() {
+            return Err(anyhow!("For 'simple index', ONNX model path must be provided solely via the configuration file, not CLI arguments or environment variables."));
+        }
+        if args.onnx_tokenizer_dir_arg.is_some() || std::env::var("SAGITTA_ONNX_TOKENIZER_DIR").is_ok() {
+            return Err(anyhow!("For 'simple index', ONNX tokenizer path must be provided solely via the configuration file, not CLI arguments or environment variables."));
+        }
+    } else if !is_simple_command {
+        // For non-simple commands, handle ONNX model/tokenizer path overrides from CLI args
+        if let Some(model_path_str) = &args.onnx_model_path_arg {
+            config.onnx_model_path = Some(PathBuf::from(model_path_str).to_string_lossy().into_owned());
+        }
+        if let Some(tokenizer_path_str) = &args.onnx_tokenizer_dir_arg {
+            config.onnx_tokenizer_path = Some(PathBuf::from(tokenizer_path_str).to_string_lossy().into_owned());
+        }
     }
 
-    // Ensure required model configuration exists
-    if config.embed_model.is_none() && (config.onnx_model_path.is_none() || config.onnx_tokenizer_path.is_none()) {
+    // Ensure required model configuration exists (but not for simple commands which have their own validation)
+    if !is_simple_command && config.embed_model.is_none() && (config.onnx_model_path.is_none() || config.onnx_tokenizer_path.is_none()) {
         return Err(anyhow!(
             "No embedding model configuration found.\n\
 Please provide one of the following:\n\
-1. Set 'embed_model' in config.toml (e.g., embed_model = \"bge-small-fast\" or \"bge-small-fp32\")\n\
+1. Set 'embed_model' in config.toml (e.g., embed_model = \"bge-small-fast\", \"bge-small-fp32\", \"bge-medium\", or \"bge-large\")\n\
 2. Provide ONNX paths via CLI arguments (--onnx-model-path, --onnx-tokenizer-dir)\n\
 3. Set ONNX paths in config.toml:\n\
     onnx_model_path = \"/absolute/path/to/model.onnx\"\n\
@@ -62,9 +80,11 @@ Please provide one of the following:\n\
         ));
     }
     
-    // Validate configuration
-    if let Err(e) = config.validate() {
-        return Err(anyhow!("Configuration validation error: {}", e));
+    // Validate configuration (but allow simple commands to handle their own validation)
+    if !is_simple_command {
+        if let Err(e) = config.validate() {
+            return Err(anyhow!("Configuration validation error: {}", e));
+        }
     }
 
     // Initialize Qdrant client

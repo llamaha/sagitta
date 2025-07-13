@@ -16,6 +16,8 @@ use crate::agent::Agent;
 use crate::agent::state::types::AgentMode;
 // Tool imports removed - tools now via MCP
 use crate::config::SagittaCodeConfig;
+use crate::services;
+//use crate::services::auto_title_updater::{AutoTitleUpdater, ConversationUpdateEvent};
 // Add imports for concrete persistence/search and traits
 use crate::agent::conversation::persistence::{
     ConversationPersistence, 
@@ -356,12 +358,36 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
             // Initial conversation data load
             app.refresh_conversation_data();
             
-            // Add a welcome message
-            let welcome_message = StreamingMessage::from_text(
-                MessageAuthor::Agent,
-                "Hello! I'm Sagitta Code, your AI assistant for code repositories. How can I help you today?".to_string(),
-            );
-            app.chat_manager.add_complete_message(welcome_message);
+            // Initialize auto title updater service
+            if let Some(title_updater) = &app.title_updater {
+                // Create auto title config from conversation config
+                let config_guard = app.config.lock().await;
+                let auto_title_config = services::auto_title_updater::AutoTitleConfig {
+                    enabled: config_guard.conversation.enable_fast_model,
+                    min_messages: 4, // Wait for at least 2 exchanges
+                    cooldown_seconds: 300, // 5 minutes between updates
+                    default_title_pattern: "Conversation 20".to_string(),
+                };
+                drop(config_guard);
+                
+                // Create and start the auto title updater
+                let mut auto_title_updater = services::auto_title_updater::AutoTitleUpdater::new(
+                    auto_title_config,
+                    title_updater.clone()
+                );
+                let auto_title_sender = auto_title_updater.start();
+                
+                // Store the updater and sender in the app
+                app.auto_title_updater = Some(Arc::new(auto_title_updater));
+                app.auto_title_sender = Some(auto_title_sender);
+                
+                log::info!("Auto title updater initialized and started");
+            } else {
+                log::warn!("Title updater not available, auto title updates disabled");
+            }
+
+            // Don't add any initial message - let the welcome screen show in the chat view
+            // when there are no conversation items
         },
         Err(err) => {
             log::error!("Failed to initialize agent: {err}");

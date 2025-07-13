@@ -5,6 +5,7 @@ use serde_json::Value;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use log::{debug, info, trace};
 use std::collections::HashMap;
@@ -82,6 +83,9 @@ pub struct Agent {
     
     /// Streaming processor for handling LLM streaming responses
     streaming_processor: Arc<StreamingProcessor>,
+    
+    /// Cancellation token for interrupting operations
+    cancellation_token: Arc<tokio::sync::Mutex<CancellationToken>>,
 }
 
 impl Agent {
@@ -207,6 +211,7 @@ impl Agent {
             recovery_manager: Arc::new(RecoveryManager::new(RecoveryConfig::default(), Arc::new(state_manager_instance), event_sender.clone())),
             context_manager,
             streaming_processor,
+            cancellation_token: Arc::new(tokio::sync::Mutex::new(CancellationToken::new())),
         };
         
         // Start event listeners
@@ -256,6 +261,9 @@ impl Agent {
     {
         let message_text = message.into();
         info!("Processing user message (stream with thinking - FIXED): '{message_text}'");
+        
+        // Reset cancellation token for new operation
+        self.reset_cancellation().await;
         
         self.state_manager.set_thinking("Processing user message with thinking").await?;
         
@@ -321,6 +329,47 @@ impl Agent {
     pub async fn clear_loop_break_request(&self) {
         let mut break_flag = self.loop_break_requested.lock().await;
         *break_flag = false;
+    }
+    
+    /// Cancel any ongoing operations
+    pub async fn cancel(&self) {
+        log::info!("Agent cancel requested");
+        let token = self.cancellation_token.lock().await;
+        token.cancel();
+        
+        // Also cancel the LLM client if it's ClaudeCodeClient
+        if let Some(claude_client) = self.llm_client.as_any().downcast_ref::<crate::llm::claude_code::client::ClaudeCodeClient>() {
+            claude_client.cancel();
+            log::info!("Cancelled ClaudeCodeClient stream");
+        }
+        
+        // Also request loop break for consistency
+        self.request_loop_break().await;
+        
+        // Send cancellation event
+        let _ = self.event_sender.send(AgentEvent::Cancelled);
+    }
+    
+    /// Check if cancellation has been requested
+    pub async fn is_cancelled(&self) -> bool {
+        let token = self.cancellation_token.lock().await;
+        token.is_cancelled()
+    }
+    
+    /// Reset cancellation token for new operations
+    async fn reset_cancellation(&self) {
+        let mut token_guard = self.cancellation_token.lock().await;
+        if token_guard.is_cancelled() {
+            // Create a new token since the old one can't be reset
+            *token_guard = CancellationToken::new();
+            log::debug!("Cancellation token reset");
+        }
+    }
+    
+    /// Get a child cancellation token for sub-operations
+    pub async fn get_cancellation_token(&self) -> CancellationToken {
+        let token = self.cancellation_token.lock().await;
+        token.child_token()
     }
     
     /// Register a tool with the agent (stub - tools now come from MCP)

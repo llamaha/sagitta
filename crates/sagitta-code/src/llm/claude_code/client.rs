@@ -12,6 +12,8 @@ use crate::llm::client::{
 use crate::utils::errors::SagittaCodeError;
 use super::process::ClaudeProcess;
 use super::streaming::ClaudeCodeStream;
+use tokio_util::sync::CancellationToken;
+use std::sync::Arc;
 use super::models::ClaudeCodeModel;
 use super::claude_interface::{ClaudeInterface, ClaudeModelInfo, ClaudeConfigInfo};
 use super::mcp_integration::McpIntegration;
@@ -27,6 +29,7 @@ pub struct ClaudeCodeClient {
     interface: ClaudeInterface,
     mcp_integration: Option<McpIntegration>,
     mcp_config_path: Option<String>,
+    cancellation_token: Arc<tokio::sync::Mutex<CancellationToken>>,
 }
 
 impl ClaudeCodeClient {
@@ -50,6 +53,7 @@ impl ClaudeCodeClient {
             config: claude_config,
             mcp_integration: None,
             mcp_config_path: None,
+            cancellation_token: Arc::new(tokio::sync::Mutex::new(CancellationToken::new())),
         })
     }
     
@@ -71,6 +75,25 @@ impl ClaudeCodeClient {
         
         self.mcp_integration = Some(mcp);
         Ok(())
+    }
+    
+    /// Cancel any ongoing stream
+    pub fn cancel(&self) {
+        log::info!("CLAUDE_CODE: Cancelling client");
+        if let Ok(token) = self.cancellation_token.try_lock() {
+            token.cancel();
+        }
+    }
+    
+    /// Get or create a fresh cancellation token for a new stream
+    async fn get_fresh_cancellation_token(&self) -> Arc<CancellationToken> {
+        let mut token_guard = self.cancellation_token.lock().await;
+        if token_guard.is_cancelled() {
+            // Create a new token since the old one was cancelled
+            *token_guard = CancellationToken::new();
+            log::debug!("CLAUDE_CODE: Created fresh cancellation token");
+        }
+        Arc::new(token_guard.child_token())
     }
     
     /// Extract system prompt from messages
@@ -202,7 +225,8 @@ impl LlmClient for ClaudeCodeClient {
                 .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?
         };
         
-        let stream = ClaudeCodeStream::new(child);
+        let fresh_token = self.get_fresh_cancellation_token().await;
+        let stream = ClaudeCodeStream::new_with_cancellation(child, fresh_token);
         
         // Collect all chunks
         let mut message_parts = Vec::new();
@@ -356,7 +380,8 @@ impl LlmClient for ClaudeCodeClient {
                 .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?
         };
         
-        let stream = ClaudeCodeStream::new(child);
+        let fresh_token = self.get_fresh_cancellation_token().await;
+        let stream = ClaudeCodeStream::new_with_cancellation(child, fresh_token);
         Ok(Box::pin(stream))
     }
     

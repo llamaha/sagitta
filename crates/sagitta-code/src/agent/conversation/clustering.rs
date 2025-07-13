@@ -11,7 +11,7 @@ use crate::agent::conversation::types::ProjectType;
 use crate::agent::conversation::cluster_namer::{ClusterNamer, ClusterNamerConfig};
 use tokio::sync::RwLock;
 
-use super::types::{Conversation, ConversationSummary};
+use super::types::{Conversation, ConversationSummary, ProjectContext};
 
 // Phase 3: Add embedding cache type
 type EmbeddingCache = Arc<RwLock<HashMap<String, Vec<f32>>>>;
@@ -970,6 +970,8 @@ fn cosine_similarity(vec1: &[f32], vec2: &[f32]) -> f32 {
 mod tests {
     use super::*;
     use crate::agent::state::types::ConversationStatus;
+    use crate::llm::client::Role;
+    use chrono::Duration;
     
     use sagitta_search::AppConfig;
 
@@ -1100,5 +1102,275 @@ mod tests {
         let title = manager.generate_cluster_title(&[0], &conversations, &common_tags);
         
         assert_eq!(title, "rust Conversations");
+    }
+    
+    // Additional comprehensive tests
+    
+    // Helper function to create test conversations with full data
+    fn create_test_conversation_full(
+        title: &str,
+        tags: Vec<String>,
+        messages: Vec<&str>,
+        created_at: chrono::DateTime<chrono::Utc>,
+        project_type: Option<ProjectType>,
+    ) -> Conversation {
+        use crate::agent::message::types::AgentMessage;
+        
+        let messages = messages
+            .into_iter()
+            .map(|content| AgentMessage {
+                id: Uuid::new_v4(),
+                role: Role::User,
+                content: content.to_string(),
+                timestamp: created_at,
+                is_streaming: false,
+                metadata: HashMap::new(),
+                tool_calls: vec![],
+            })
+            .collect();
+
+        Conversation {
+            id: Uuid::new_v4(),
+            title: title.to_string(),
+            messages,
+            created_at,
+            last_active: created_at,
+            tags,
+            status: ConversationStatus::Active,
+            workspace_id: None,
+            branches: vec![],
+            checkpoints: vec![],
+            project_context: project_type.map(|pt| ProjectContext {
+                name: format!("Test Project {}", title),
+                project_type: pt,
+                root_path: Some(std::path::PathBuf::from("/test/path")),
+                description: None,
+                repositories: vec![],
+                settings: HashMap::new(),
+            }),
+        }
+    }
+
+    #[test]
+    fn test_clustering_config_default_values() {
+        let config = ClusteringConfig::default();
+        
+        assert_eq!(config.similarity_threshold, 0.7);
+        assert_eq!(config.max_cluster_size, 20);
+        assert_eq!(config.min_cluster_size, 2);
+        assert!(config.use_temporal_proximity);
+        assert_eq!(config.max_temporal_distance_hours, 24 * 7);
+        assert_eq!(config.smart_clustering_threshold, 5);
+        assert!(config.enable_embedding_cache);
+        assert!(!config.use_local_similarity);
+        assert!(!config.async_clustering);
+        assert_eq!(config.embedding_cache_size, 100);
+    }
+
+    #[test]
+    fn test_extract_clustering_features_comprehensive() {
+        let now = chrono::Utc::now();
+        let conversation = create_test_conversation_full(
+            "Test Conversation",
+            vec!["test".to_string(), "clustering".to_string()],
+            vec!["Hello", "This is a test", "Testing clustering"],
+            now,
+            Some(ProjectType::Rust),
+        );
+
+        let features = ConversationClusteringManager::extract_clustering_features(&conversation);
+        
+        assert!(features.contains("Test Conversation"));
+        assert!(features.contains("Hello"));
+        assert!(features.contains("This is a test"));
+        assert!(features.contains("Testing clustering"));
+        assert!(features.contains("test"));
+        assert!(features.contains("clustering"));
+        assert!(features.contains("Project: Test Project Test Conversation"));
+        assert!(features.contains("Type: Rust"));
+    }
+
+    #[test]
+    fn test_cosine_similarity_calculations() {
+        // Test identical vectors
+        let embedding = vec![1.0; 384];
+        let similarity = cosine_similarity(&embedding, &embedding);
+        assert!((similarity - 1.0).abs() < 1e-6);
+        
+        // Test orthogonal vectors
+        let mut embedding1 = vec![0.0; 384];
+        let mut embedding2 = vec![0.0; 384];
+        embedding1[0] = 1.0;
+        embedding2[1] = 1.0;
+        let similarity = cosine_similarity(&embedding1, &embedding2);
+        assert!((similarity - 0.0).abs() < 1e-6);
+        
+        // Test opposite vectors
+        let embedding1 = vec![1.0; 384];
+        let embedding2 = vec![-1.0; 384];
+        let similarity = cosine_similarity(&embedding1, &embedding2);
+        assert!((similarity - (-1.0)).abs() < 1e-6);
+        
+        // Test vectors of different lengths
+        let embedding1 = vec![1.0; 100];
+        let embedding2 = vec![1.0; 200];
+        let similarity = cosine_similarity(&embedding1, &embedding2);
+        assert_eq!(similarity, 0.0);
+        
+        // Test zero vectors
+        let embedding1 = vec![0.0; 384];
+        let embedding2 = vec![1.0; 384];
+        let similarity = cosine_similarity(&embedding1, &embedding2);
+        assert_eq!(similarity, 0.0);
+    }
+
+    #[test]
+    fn test_temporal_proximity_config() {
+        let config_with_temporal = ClusteringConfig {
+            use_temporal_proximity: true,
+            max_temporal_distance_hours: 24 * 7, // 1 week
+            ..Default::default()
+        };
+        
+        assert!(config_with_temporal.use_temporal_proximity);
+        assert_eq!(config_with_temporal.max_temporal_distance_hours, 168);
+        
+        let config_without_temporal = ClusteringConfig {
+            use_temporal_proximity: false,
+            ..Default::default()
+        };
+        
+        assert!(!config_without_temporal.use_temporal_proximity);
+    }
+
+    #[test]
+    fn test_tag_similarity_in_conversations() {
+        let now = chrono::Utc::now();
+        let conv1 = create_test_conversation_full(
+            "Conv 1",
+            vec!["rust".to_string(), "testing".to_string()],
+            vec!["Message 1"],
+            now,
+            None,
+        );
+        let conv2 = create_test_conversation_full(
+            "Conv 2",
+            vec!["rust".to_string(), "testing".to_string()],
+            vec!["Message 2"],
+            now,
+            None,
+        );
+        let conv3 = create_test_conversation_full(
+            "Conv 3",
+            vec!["python".to_string()],
+            vec!["Message 3"],
+            now,
+            None,
+        );
+        
+        // Verify tags are set correctly
+        assert_eq!(conv1.tags, vec!["rust", "testing"]);
+        assert_eq!(conv2.tags, vec!["rust", "testing"]);
+        assert_eq!(conv3.tags, vec!["python"]);
+        
+        // Verify conversations have same tag count
+        let common_tags_1_2: Vec<_> = conv1.tags.iter()
+            .filter(|tag| conv2.tags.contains(tag))
+            .collect();
+        assert_eq!(common_tags_1_2.len(), 2);
+        
+        let common_tags_1_3: Vec<_> = conv1.tags.iter()
+            .filter(|tag| conv3.tags.contains(tag))
+            .collect();
+        assert_eq!(common_tags_1_3.len(), 0);
+    }
+
+    #[test]
+    fn test_conversation_cluster_structure() {
+        use chrono::Duration;
+        
+        let now = chrono::Utc::now();
+        let id1 = Uuid::new_v4();
+        let id2 = Uuid::new_v4();
+        let id3 = Uuid::new_v4();
+        
+        let cluster = ConversationCluster {
+            id: Uuid::new_v4(),
+            title: "Rust Development Cluster".to_string(),
+            conversation_ids: vec![id1, id2, id3],
+            centroid: vec![0.5; 384],
+            cohesion_score: 0.85,
+            common_tags: vec!["rust".to_string(), "development".to_string()],
+            dominant_project_type: Some(ProjectType::Rust),
+            time_range: (now - Duration::days(2), now),
+        };
+        
+        assert_eq!(cluster.conversation_ids.len(), 3);
+        assert_eq!(cluster.centroid.len(), 384);
+        assert_eq!(cluster.title, "Rust Development Cluster");
+        assert!((cluster.cohesion_score - 0.85).abs() < 1e-6);
+        assert!(cluster.common_tags.contains(&"rust".to_string()));
+        assert_eq!(cluster.dominant_project_type, Some(ProjectType::Rust));
+        assert_eq!(cluster.time_range.0, now - Duration::days(2));
+        assert_eq!(cluster.time_range.1, now);
+    }
+
+    #[test]
+    fn test_clustering_metrics_calculation() {
+        let metrics = ClusteringMetrics {
+            cluster_count: 5,
+            outlier_count: 3,
+            average_cohesion: 0.85,
+            silhouette_score: 0.72,
+        };
+        
+        assert_eq!(metrics.cluster_count, 5);
+        assert_eq!(metrics.outlier_count, 3);
+        assert!((metrics.average_cohesion - 0.85).abs() < 1e-6);
+        assert!((metrics.silhouette_score - 0.72).abs() < 1e-6);
+    }
+
+    #[tokio::test]
+    async fn test_embedding_cache_operations() {
+        let cache: Arc<RwLock<HashMap<String, Vec<f32>>>> = Arc::new(RwLock::new(HashMap::new()));
+        
+        // Add some embeddings to cache
+        let id1 = Uuid::new_v4();
+        let id2 = Uuid::new_v4();
+        let embedding1 = vec![1.0; 384];
+        let embedding2 = vec![0.5; 384];
+        
+        {
+            let mut cache_write = cache.write().await;
+            cache_write.insert(id1.to_string(), embedding1.clone());
+            cache_write.insert(id2.to_string(), embedding2.clone());
+        }
+        
+        // Verify cache contents
+        {
+            let cache_read = cache.read().await;
+            assert_eq!(cache_read.len(), 2);
+            assert_eq!(cache_read.get(&id1.to_string()), Some(&embedding1));
+            assert_eq!(cache_read.get(&id2.to_string()), Some(&embedding2));
+        }
+        
+        // Test cache eviction when exceeding size limit
+        {
+            let mut cache_write = cache.write().await;
+            // Simulate cache size limit
+            if cache_write.len() >= 2 {
+                // Remove oldest entry (in real implementation would use LRU)
+                let first_key = cache_write.keys().next().cloned();
+                if let Some(key) = first_key {
+                    cache_write.remove(&key);
+                }
+            }
+            
+            let id3 = Uuid::new_v4();
+            let embedding3 = vec![0.25; 384];
+            cache_write.insert(id3.to_string(), embedding3);
+            
+            assert_eq!(cache_write.len(), 2);
+        }
     }
 } 

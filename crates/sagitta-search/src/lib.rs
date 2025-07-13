@@ -152,6 +152,8 @@ mod tests {
         
         // Create a test AppConfig with custom embedding settings
         let mut app_config = AppConfig::default();
+        // Clear the default embed_model since we want to test manual ONNX paths
+        app_config.embed_model = None;
         app_config.onnx_model_path = Some("/path/to/model.onnx".to_string());
         app_config.onnx_tokenizer_path = Some("/path/to/tokenizer.json".to_string());
         app_config.performance.vector_dimension = 512;
@@ -178,18 +180,31 @@ mod tests {
 
     #[test]
     fn test_app_config_to_embedding_config_defaults() {
-        // Test with default AppConfig
+        // Test with default AppConfig (which now includes bge-small-fast by default)
         let app_config = AppConfig::default();
         let embedding_config = app_config_to_embedding_config(&app_config);
         
-        // Verify defaults are properly set
-        assert_eq!(embedding_config.model_type, EmbeddingModelType::Default); // Default when no model configuration is provided
-        assert_eq!(embedding_config.onnx_model_path, None);
-        assert_eq!(embedding_config.onnx_tokenizer_path, None);
+        // With the new defaults, the default AppConfig includes embed_model = "bge-small-fast"
+        // This should try to download the model and use ONNX type, or fall back to Default if download fails
+        // In test environments without internet access, it might fall back to Default
+        assert!(
+            embedding_config.model_type == EmbeddingModelType::Onnx || 
+            embedding_config.model_type == EmbeddingModelType::Default
+        );
+        
+        // If ONNX model is used, paths should be set; if Default is used, they should be None
+        if embedding_config.model_type == EmbeddingModelType::Onnx {
+            assert!(embedding_config.onnx_model_path.is_some());
+            assert!(embedding_config.onnx_tokenizer_path.is_some());
+        } else {
+            assert_eq!(embedding_config.onnx_model_path, None);
+            assert_eq!(embedding_config.onnx_tokenizer_path, None);
+        }
+        
         assert_eq!(embedding_config.session_timeout_seconds, 300);
         assert_eq!(embedding_config.enable_session_cleanup, true);
         assert_eq!(embedding_config.expected_dimension, Some(384)); // Default vector dimension
-        assert_eq!(embedding_config.embedding_batch_size, Some(128)); // Default batch size
+        assert_eq!(embedding_config.embedding_batch_size, Some(8)); // Default batch size
     }
 
     #[tokio::test]

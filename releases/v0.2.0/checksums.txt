@@ -1,0 +1,3 @@
+a87fa6d4a936544996df00d4857e876f7a94f22a588826d1d926942d13d63a20  sagitta-code-v0.2.0-linux-cpu.tar.gz
+01054953be9ffc58f31a1080a3f13c717e032b7743f45d61af537b5293718bfb  sagitta-code-v0.2.0-linux-cuda.tar.gz
+14674f3aa4bd3afdb9e8895a92d7bbee3e899e47d708d770a0e49b8e3e0d11da  sagitta-code-v0.2.0-linux-rocm.tar.gz

@@ -1822,7 +1822,7 @@ mod tests {
         let config = EmbeddingConfig::default();
         
         // Test getter methods
-        assert_eq!(config.get_embedding_batch_size(), 256); // Default batch size is 256
+        assert_eq!(config.get_embedding_batch_size(), 8); // Default batch size is 8
         assert_eq!(config.get_embedding_dimension(), 384); // Default dimension
         
         // Test should_use_cuda - this checks compile-time feature, not runtime config

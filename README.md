@@ -104,13 +104,15 @@ Tools using `sagitta-search` (like `sagitta-cli`) require embedding models. You 
 #### Option 1: Automatic Download (Recommended)
 Simply specify the model name in your `config.toml`:
 ```toml
-embed_model = "bge-small-fast"  # or "bge-small-fp32"
+embed_model = "bge-small-fast"  # or "bge-small-fp32", "bge-medium", "bge-large"
 ```
 The model will be automatically downloaded from HuggingFace on first use.
 
 Available models:
 - `bge-small-fast`: INT8 quantized BGE model, optimized for speed (recommended)
 - `bge-small-fp32`: Full precision BGE model, slightly better quality
+- `bge-medium`: BGE Base v1.5 model with FP32 precision (medium size, better quality)
+- `bge-large`: BGE Large v1.5 model with FP32 precision (large size, best quality)
 
 #### Option 2: Manual Model Files
 Provide paths to ONNX model files and tokenizers:

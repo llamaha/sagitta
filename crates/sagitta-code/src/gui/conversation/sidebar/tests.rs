@@ -39,11 +39,12 @@ mod tests {
     use super::*;
     use egui::Context;
     use crate::gui::app::AppState;
-    use crate::gui::theme::AppTheme;
-    use std::sync::Arc;
     use tokio::sync::mpsc;
     use crate::gui::app::events::AppEvent;
     use crate::config::SagittaCodeConfig;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+    use crate::gui::theme::AppTheme;
     use crate::agent::conversation::service::ConversationService;
 
     #[test]
@@ -172,7 +173,8 @@ mod tests {
         let ctx = Context::default();
         let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
         
-        sidebar.handle_sidebar_actions(&mut app_state, &ctx, None, tx);
+        let config = Arc::new(Mutex::new(SagittaCodeConfig::default()));
+        sidebar.handle_sidebar_actions(&mut app_state, &ctx, None, tx, config);
         
         // Verify the action was processed
         assert!(sidebar.pending_action.is_none());
@@ -355,11 +357,13 @@ mod tests {
         app_state.conversation_list = conversations;
         
         // Process the pending action
+        let config = Arc::new(Mutex::new(SagittaCodeConfig::default()));
         sidebar.handle_sidebar_actions(
             &mut app_state,
             &Context::default(),
             None,
-            tx
+            tx,
+            config
         );
         
         // Verify the event was sent

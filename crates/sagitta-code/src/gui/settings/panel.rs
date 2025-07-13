@@ -40,12 +40,8 @@ pub struct SettingsPanel {
     pub claude_code_verbose: bool,
     pub claude_code_timeout: u64,
     pub claude_code_max_turns: u32,
-    pub claude_code_output_format: String,
-    pub claude_code_input_format: String,
-    pub claude_code_dangerously_skip_permissions: bool,
     pub claude_code_allowed_tools: String, // Comma-separated list
     pub claude_code_disallowed_tools: String, // Comma-separated list
-    pub claude_code_additional_directories: String, // Comma-separated list of paths
     pub claude_code_auto_ide: bool,
     
     // Conversation features - Fast model
@@ -93,16 +89,8 @@ impl SettingsPanel {
             claude_code_verbose: initial_sagitta_code_config.claude_code.verbose,
             claude_code_timeout: initial_sagitta_code_config.claude_code.timeout,
             claude_code_max_turns: initial_sagitta_code_config.claude_code.max_turns,
-            claude_code_output_format: initial_sagitta_code_config.claude_code.output_format.clone(),
-            claude_code_input_format: initial_sagitta_code_config.claude_code.input_format.clone(),
-            claude_code_dangerously_skip_permissions: initial_sagitta_code_config.claude_code.dangerously_skip_permissions,
             claude_code_allowed_tools: initial_sagitta_code_config.claude_code.allowed_tools.join(","),
             claude_code_disallowed_tools: initial_sagitta_code_config.claude_code.disallowed_tools.join(","),
-            claude_code_additional_directories: initial_sagitta_code_config.claude_code.additional_directories
-                .iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect::<Vec<_>>()
-                .join(","),
             claude_code_auto_ide: initial_sagitta_code_config.claude_code.auto_ide,
             
             // Conversation features - Fast model
@@ -228,31 +216,13 @@ impl SettingsPanel {
                                     });
                             });
                             
-                            // Format and Debug Settings
-                            ui.collapsing("Format and Debug Settings", |ui| {
+                            // Debug Settings
+                            ui.collapsing("Debug Settings", |ui| {
                                 Grid::new("claude_code_format_grid")
                                     .num_columns(2)
                                     .spacing([8.0, 8.0])
                                     .show(ui, |ui| {
-                                        ui.label("Output Format:");
-                                        egui::ComboBox::from_id_salt("output_format_combo")
-                                            .selected_text(&self.claude_code_output_format)
-                                            .show_ui(ui, |ui| {
-                                                ui.selectable_value(&mut self.claude_code_output_format, "text".to_string(), "Text");
-                                                ui.selectable_value(&mut self.claude_code_output_format, "json".to_string(), "JSON");
-                                                ui.selectable_value(&mut self.claude_code_output_format, "stream-json".to_string(), "Stream JSON");
-                                            });
-                                        ui.end_row();
-                                        
-                                        ui.label("Input Format:");
-                                        egui::ComboBox::from_id_salt("input_format_combo")
-                                            .selected_text(&self.claude_code_input_format)
-                                            .show_ui(ui, |ui| {
-                                                ui.selectable_value(&mut self.claude_code_input_format, "text".to_string(), "Text");
-                                                ui.selectable_value(&mut self.claude_code_input_format, "stream-json".to_string(), "Stream JSON");
-                                            });
-                                        ui.end_row();
-                                        
+                                        // Removed Input/Output Format settings - handled internally
                                         ui.label("Debug Mode:");
                                         ui.checkbox(&mut self.claude_code_debug, "Enable debug mode for verbose output");
                                         ui.end_row();
@@ -281,17 +251,8 @@ impl SettingsPanel {
                                             .hint_text("e.g., bash,exec"));
                                         ui.end_row();
                                         
-                                        ui.label("Additional Directories:")
-                                            .on_hover_text("Comma-separated list of additional paths to allow tool access");
-                                        ui.add(TextEdit::singleline(&mut self.claude_code_additional_directories)
-                                            .hint_text("e.g., /home/user/projects,/tmp"));
-                                        ui.end_row();
-                                        
-                                        ui.label("Skip Permissions:");
-                                        ui.checkbox(&mut self.claude_code_dangerously_skip_permissions, 
-                                            "⚠️ Dangerously skip all permission checks (for sandboxes only)")
-                                            .on_hover_text("WARNING: Only enable in secure sandbox environments!");
-                                        ui.end_row();
+                                        // Removed Additional Directories and Skip Permissions settings
+                                        // These are handled internally by the system
                                     });
                             });
                             
@@ -646,9 +607,11 @@ impl SettingsPanel {
         updated_config.claude_code.verbose = self.claude_code_verbose;
         updated_config.claude_code.timeout = self.claude_code_timeout;
         updated_config.claude_code.max_turns = self.claude_code_max_turns;
-        updated_config.claude_code.output_format = self.claude_code_output_format.clone();
-        updated_config.claude_code.input_format = self.claude_code_input_format.clone();
-        updated_config.claude_code.dangerously_skip_permissions = self.claude_code_dangerously_skip_permissions;
+        // output_format and input_format are handled internally
+        updated_config.claude_code.output_format = "stream-json".to_string();
+        updated_config.claude_code.input_format = "text".to_string();
+        // dangerously_skip_permissions is always true internally
+        updated_config.claude_code.dangerously_skip_permissions = true;
         
         // Parse comma-separated lists
         updated_config.claude_code.allowed_tools = if self.claude_code_allowed_tools.trim().is_empty() {
@@ -671,15 +634,8 @@ impl SettingsPanel {
                 .collect()
         };
         
-        updated_config.claude_code.additional_directories = if self.claude_code_additional_directories.trim().is_empty() {
-            Vec::new()
-        } else {
-            self.claude_code_additional_directories
-                .split(',')
-                .map(|s| PathBuf::from(s.trim()))
-                .filter(|p| !p.as_os_str().is_empty())
-                .collect()
-        };
+        // additional_directories is handled internally - empty for now
+        updated_config.claude_code.additional_directories = Vec::new();
         
         // MCP config is now handled internally
         updated_config.claude_code.auto_ide = self.claude_code_auto_ide;

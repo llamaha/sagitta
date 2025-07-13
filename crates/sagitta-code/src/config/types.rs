@@ -167,6 +167,22 @@ pub struct SagittaDbConfig {
 }
 
 
+/// Dialog preferences for controlling when to show confirmation dialogs
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DialogPreferences {
+    /// Whether to show confirmation dialog when creating a new conversation
+    #[serde(default = "default_show_new_conversation_confirmation")]
+    pub show_new_conversation_confirmation: bool,
+}
+
+impl Default for DialogPreferences {
+    fn default() -> Self {
+        Self {
+            show_new_conversation_confirmation: default_show_new_conversation_confirmation(),
+        }
+    }
+}
+
 /// Configuration for the UI
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiConfig {
@@ -199,6 +215,10 @@ pub struct UiConfig {
     /// Custom CLAUDE.md template content
     #[serde(default = "default_claude_md_template")]
     pub claude_md_template: String,
+    
+    /// Dialog preferences for controlling when to show confirmation dialogs
+    #[serde(default)]
+    pub dialog_preferences: DialogPreferences,
 }
 
 impl Default for UiConfig {
@@ -212,6 +232,7 @@ impl Default for UiConfig {
             current_repository_context: None,
             auto_create_claude_md: default_auto_create_claude_md(),
             claude_md_template: default_claude_md_template(),
+            dialog_preferences: DialogPreferences::default(),
         }
     }
 }
@@ -569,6 +590,10 @@ fn default_window_width() -> u32 {
 
 fn default_window_height() -> u32 {
     700
+}
+
+fn default_show_new_conversation_confirmation() -> bool {
+    true
 }
 
 fn default_log_level() -> String {

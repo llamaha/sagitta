@@ -7,6 +7,9 @@ pub mod recovery;
 pub mod streaming;
 pub mod prompts;
 
+#[cfg(test)]
+mod cancellation_tests;
+
 // New reasoning engine modules
 // pub mod reasoning_adapter;
 // pub mod reasoning_config;

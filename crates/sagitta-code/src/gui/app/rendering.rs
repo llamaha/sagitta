@@ -82,6 +82,9 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
     render_hotkeys_modal(app, ctx);
     render_tools_modal(app, ctx);
     
+    // Render new conversation confirmation dialog if needed
+    render_new_conversation_confirmation(app, ctx);
+    
     // Render CLAUDE.md modal
     render_claude_md_modal(app, ctx);
     
@@ -161,9 +164,21 @@ fn render_tools_modal(app: &mut SagittaCodeApp, ctx: &Context) {
 /// Handle keyboard shortcuts
 fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
     if ctx.input(|i| i.key_pressed(Key::N) && i.modifiers.ctrl) {
-        // Ctrl+N: Create new conversation
-        if let Err(e) = app.app_event_sender.send(AppEvent::CreateNewConversation) {
-            log::error!("Failed to send CreateNewConversation event: {e}");
+        // Ctrl+N: Create new conversation (with optional confirmation)
+        let should_show_confirmation = if let Ok(config) = app.config.try_lock() {
+            config.ui.dialog_preferences.show_new_conversation_confirmation
+        } else {
+            true // Default to showing confirmation if config is locked
+        };
+        
+        let event = if should_show_confirmation {
+            AppEvent::ShowNewConversationConfirmation
+        } else {
+            AppEvent::CreateNewConversation
+        };
+        
+        if let Err(e) = app.app_event_sender.send(event) {
+            log::error!("Failed to send new conversation event: {e}");
         }
     }
     if ctx.input(|i| i.key_pressed(Key::R) && i.modifiers.ctrl) {
@@ -181,6 +196,10 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
     if ctx.input(|i| i.key_pressed(Key::T) && i.modifiers.ctrl) {
         // Ctrl+T: Toggle conversation panel
         app.panels.toggle_panel(ActivePanel::Conversation);
+    }
+    if ctx.input(|i| i.key_pressed(Key::K) && i.modifiers.ctrl) {
+        // Ctrl+K: Toggle task panel
+        app.panels.toggle_panel(ActivePanel::Task);
     }
     if ctx.input(|i| i.key_pressed(Key::L) && i.modifiers.ctrl) {
         app.panels.logging_panel.toggle();
@@ -214,8 +233,12 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
         app.state.show_tools_modal = !app.state.show_tools_modal;
     }
     if ctx.input(|i| i.key_pressed(Key::F3)) {
-        // F3: Open CLAUDE.md modal
-        app.open_claude_md_modal();
+        // F3: Toggle CLAUDE.md modal
+        if app.claude_md_modal.is_open() {
+            app.claude_md_modal.close();
+        } else {
+            app.open_claude_md_modal();
+        }
     }
     
     // Undo/redo for chat input
@@ -319,6 +342,35 @@ fn handle_loop_control(app: &mut SagittaCodeApp) {
         app.panels.events_panel.add_event(
             super::SystemEventType::Info,
             format!("Injected message into loop: '{inject_msg}'")
+        );
+    }
+}
+
+/// Handle stop/cancel requests
+fn handle_stop_request(app: &mut SagittaCodeApp) {
+    if app.state.stop_requested {
+        log::info!("Stop requested by user");
+        app.state.stop_requested = false;
+        
+        // Cancel the agent if it exists
+        if let Some(agent) = &app.agent {
+            let agent_clone = agent.clone();
+            tokio::spawn(async move {
+                agent_clone.cancel().await;
+                log::info!("Agent cancellation triggered");
+            });
+        }
+        
+        // Reset UI state
+        app.state.is_waiting_for_response = false;
+        app.state.is_thinking = false;
+        app.state.is_responding = false;
+        app.state.is_streaming_response = false;
+        app.state.thinking_message = None;
+        
+        app.panels.events_panel.add_event(
+            super::SystemEventType::Info,
+            "Operation cancelled".to_string()
         );
     }
 }
@@ -688,6 +740,13 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                 app.panels.toggle_panel(ActivePanel::None);
             }
         },
+        ActivePanel::Task => {
+            // Ensure the task panel is open
+            if !app.task_panel.is_open() {
+                app.task_panel.set_open(true);
+            }
+            app.task_panel.show(ctx, app.state.current_theme);
+        },
         ActivePanel::ModelSelection => {
             // Handle model selection
             if let Some(selected_model) = app.panels.render_model_selection_panel(ctx, app.state.current_theme) {
@@ -738,6 +797,9 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
             }
             if app.settings_panel.is_open() {
                 app.settings_panel.toggle();
+            }
+            if app.task_panel.is_open() {
+                app.task_panel.set_open(false);
             }
         }
     }
@@ -790,6 +852,16 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
                             app.panels.toggle_panel(ActivePanel::Conversation);
+                        }
+                    });
+                });
+                
+                // Task Panel
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + K: Toggle Task Panel").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                            app.panels.toggle_panel(ActivePanel::Task);
                         }
                     });
                 });
@@ -1007,6 +1079,86 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
     }
 }
 
+/// Render new conversation confirmation dialog
+fn render_new_conversation_confirmation(app: &mut SagittaCodeApp, ctx: &Context) {
+    if app.state.show_new_conversation_confirmation {
+        let theme = app.state.current_theme;
+        
+        egui::Window::new("New Conversation")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.set_width(400.0);
+                
+                // Main message
+                ui.vertical_centered(|ui| {
+                    ui.add_space(10.0);
+                    ui.label(egui::RichText::new("Start a new conversation?")
+                        .color(theme.text_color())
+                        .size(18.0)
+                        .strong());
+                    ui.add_space(10.0);
+                    
+                    ui.label(egui::RichText::new("This will clear the current conversation and start fresh with a new Sagitta Code session.")
+                        .color(theme.text_color())
+                        .size(14.0));
+                    ui.add_space(20.0);
+                });
+                
+                // Checkbox for "Don't show this again"
+                let mut current_config = if let Ok(config) = app.config.try_lock() {
+                    config.ui.dialog_preferences.show_new_conversation_confirmation
+                } else {
+                    true // Default value if config is locked
+                };
+                
+                ui.horizontal(|ui| {
+                    if ui.checkbox(&mut current_config, "Don't show this confirmation again").changed() {
+                        // Update config
+                        if let Ok(mut config) = app.config.try_lock() {
+                            config.ui.dialog_preferences.show_new_conversation_confirmation = current_config;
+                            
+                            // Save config to disk
+                            if let Err(e) = crate::config::save_config(&*config) {
+                                log::error!("Failed to save configuration: {}", e);
+                            }
+                        } else {
+                            log::warn!("Could not acquire config lock to update dialog preferences");
+                        }
+                    }
+                });
+                
+                ui.add_space(20.0);
+                
+                // Buttons
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Create New Conversation button
+                        if ui.button(egui::RichText::new("Create New Conversation")
+                            .color(theme.button_text_color())
+                            .strong()).clicked() {
+                            app.state.show_new_conversation_confirmation = false;
+                            if let Err(e) = app.app_event_sender.send(AppEvent::CreateNewConversation) {
+                                log::error!("Failed to send CreateNewConversation event: {}", e);
+                            }
+                        }
+                        
+                        ui.add_space(10.0);
+                        
+                        // Cancel button
+                        if ui.button(egui::RichText::new("Cancel")
+                            .color(theme.button_text_color())).clicked() {
+                            app.state.show_new_conversation_confirmation = false;
+                        }
+                    });
+                });
+                
+                ui.add_space(10.0);
+            });
+    }
+}
+
 /// Helper function to get background color from theme
 fn theme_to_background_color(theme: AppTheme) -> egui::Color32 {
     theme.panel_background()
@@ -1060,6 +1212,8 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 &mut app.state.should_focus_input,
                 // Token usage
                 &app.state.current_token_usage,
+                // Stop/Cancel request
+                &mut app.state.stop_requested,
             );
             
             // Handle repository refresh request
@@ -1338,6 +1492,9 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
         
     // Handle loop control actions
     handle_loop_control(app);
+    
+    // Handle stop/cancel requests
+    handle_stop_request(app);
         
     // Process chat input submission
     handle_chat_input_submission(app);
@@ -1842,6 +1999,7 @@ mod tests {
                 ActivePanel::ThemeCustomizer => {},
                 ActivePanel::ModelSelection => {},
                 ActivePanel::GitHistory => {},
+                ActivePanel::Task => {},
             }
         }
     }
@@ -2110,6 +2268,10 @@ mod tests {
                 ActivePanel::GitHistory => {
                     assert_eq!(app.panels.active_panel, panel);
                     // Can't test git history panel visibility since it might not be exposed
+                },
+                ActivePanel::Task => {
+                    assert_eq!(app.panels.active_panel, panel);
+                    // Task panel visibility check
                 },
                 ActivePanel::None => {
                     // Should not happen in this test

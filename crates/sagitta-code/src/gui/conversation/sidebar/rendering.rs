@@ -113,7 +113,7 @@ impl ConversationSidebar {
             });
         
         log::trace!("Sidebar: About to handle sidebar actions, pending_action: {:?}", self.pending_action);
-        self.handle_sidebar_actions(app_state, ctx, conversation_service, app_event_sender);
+        self.handle_sidebar_actions(app_state, ctx, conversation_service, app_event_sender, sagitta_config);
     }
 
     /// Render the sidebar header
@@ -396,7 +396,8 @@ impl ConversationSidebar {
         app_state: &mut AppState, 
         _ctx: &egui::Context, 
         _conversation_service: Option<Arc<ConversationService>>, 
-        app_event_sender: UnboundedSender<AppEvent>
+        app_event_sender: UnboundedSender<AppEvent>,
+        app_config: Arc<tokio::sync::Mutex<SagittaCodeConfig>>
     ) {
         if let Some(action) = self.pending_action.take() {
             match action {
@@ -412,18 +413,23 @@ impl ConversationSidebar {
                 SidebarAction::CreateNewConversation => {
                     log::info!("Creating new conversation");
                     
-                    // Clear current conversation to start fresh
-                    app_state.current_conversation_id = None;
-                    app_state.messages.clear();
-                    self.selected_conversation = None;
+                    // Check if we should show confirmation dialog
+                    let should_show_confirmation = if let Ok(config) = app_config.try_lock() {
+                        config.ui.dialog_preferences.show_new_conversation_confirmation
+                    } else {
+                        true // Default to showing confirmation if config is locked
+                    };
                     
-                    // Send event to notify the app about the new conversation
-                    if let Err(e) = app_event_sender.send(AppEvent::CreateNewConversation) {
-                        log::error!("Failed to send CreateNewConversation event: {e}");
+                    let event = if should_show_confirmation {
+                        AppEvent::ShowNewConversationConfirmation
+                    } else {
+                        AppEvent::CreateNewConversation
+                    };
+                    
+                    // Send appropriate event
+                    if let Err(e) = app_event_sender.send(event) {
+                        log::error!("Failed to send new conversation event: {e}");
                     }
-                    
-                    // The next message will automatically create a new conversation
-                    log::info!("Ready to create new conversation on next message");
                 }
                 SidebarAction::RefreshConversations => {
                     let _ = app_event_sender.send(AppEvent::RefreshConversationList);

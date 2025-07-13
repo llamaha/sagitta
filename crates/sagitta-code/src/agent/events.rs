@@ -262,6 +262,9 @@ pub enum AgentEvent {
         run_id: ToolRunId,
         event: String, // Simplified from StreamEvent
     },
+    
+    /// Operation was cancelled
+    Cancelled,
 }
 
 /// Event handler for agent events

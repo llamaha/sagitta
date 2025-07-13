@@ -102,7 +102,9 @@ fn format_tool_parameters(tool_name: &str, args: &serde_json::Value) -> Vec<(Str
         // Special handling for common tools
         match tool_name {
             name if name.contains("__query") => {
-                if let Some(query) = obj.get("query").and_then(|v| v.as_str()) {
+                // Check both camelCase (MCP style) and snake_case parameter names
+                if let Some(query) = obj.get("queryText").and_then(|v| v.as_str())
+                    .or_else(|| obj.get("query").and_then(|v| v.as_str())) {
                     params.push(("Query".to_string(), query.to_string()));
                 }
                 if let Some(repo) = obj.get("repository").and_then(|v| v.as_str()) {
@@ -112,14 +114,68 @@ fn format_tool_parameters(tool_name: &str, args: &serde_json::Value) -> Vec<(Str
                     params.push(("Limit".to_string(), limit.to_string()));
                 }
             },
-            "Read" | "Write" | "Edit" => {
+            name if name == "Read" || name == "Write" || name == "Edit" 
+                || name.contains("__read_file") || name.contains("__write_file") 
+                || name.contains("__edit_file") || name.contains("__view_file") => {
+                // Check both camelCase (MCP style) and snake_case parameter names
+                if let Some(path) = obj.get("filePath").and_then(|v| v.as_str())
+                    .or_else(|| obj.get("file_path").and_then(|v| v.as_str())) {
+                    params.push(("File".to_string(), path.to_string()));
+                }
+            },
+            "MultiEdit" => {
                 if let Some(path) = obj.get("file_path").and_then(|v| v.as_str()) {
                     params.push(("File".to_string(), path.to_string()));
+                }
+                if let Some(edits) = obj.get("edits").and_then(|v| v.as_array()) {
+                    params.push(("Edits".to_string(), format!("{} edits", edits.len())));
                 }
             },
             "Bash" => {
                 if let Some(cmd) = obj.get("command").and_then(|v| v.as_str()) {
                     params.push(("Command".to_string(), cmd.to_string()));
+                }
+            },
+            "Grep" => {
+                if let Some(pattern) = obj.get("pattern").and_then(|v| v.as_str()) {
+                    params.push(("Pattern".to_string(), pattern.to_string()));
+                }
+                if let Some(path) = obj.get("path").and_then(|v| v.as_str()) {
+                    params.push(("Path".to_string(), path.to_string()));
+                }
+            },
+            "Glob" => {
+                if let Some(pattern) = obj.get("pattern").and_then(|v| v.as_str()) {
+                    params.push(("Pattern".to_string(), pattern.to_string()));
+                }
+                if let Some(path) = obj.get("path").and_then(|v| v.as_str()) {
+                    params.push(("Path".to_string(), path.to_string()));
+                }
+            },
+            "WebSearch" => {
+                if let Some(query) = obj.get("query").and_then(|v| v.as_str()) {
+                    params.push(("Query".to_string(), query.to_string()));
+                }
+            },
+            "WebFetch" => {
+                if let Some(url) = obj.get("url").and_then(|v| v.as_str()) {
+                    params.push(("URL".to_string(), url.to_string()));
+                }
+                if let Some(prompt) = obj.get("prompt").and_then(|v| v.as_str()) {
+                    let truncated = if prompt.len() > 50 {
+                        format!("{}...", &prompt[..50])
+                    } else {
+                        prompt.to_string()
+                    };
+                    params.push(("Prompt".to_string(), truncated));
+                }
+            },
+            "TodoRead" => {
+                // TodoRead has no parameters
+            },
+            "TodoWrite" => {
+                if let Some(todos) = obj.get("todos").and_then(|v| v.as_array()) {
+                    params.push(("Tasks".to_string(), format!("{} items", todos.len())));
                 }
             },
             _ => {
@@ -499,6 +555,11 @@ pub fn modern_chat_view_ui(ui: &mut egui::Ui, items: &[ChatItem], app_theme: App
                     ui.spacing_mut().button_padding = Vec2::new(6.0, 4.0);
                     
                     ui.add_space(12.0);
+                    
+                    // Show welcome message if no items exist
+                    if items.is_empty() {
+                        render_welcome_message(ui, app_theme);
+                    }
                     
                     // Render each chat item (messages and tool cards)
                     for (item_index, item) in items.iter().enumerate() {
@@ -2242,6 +2303,70 @@ fn render_mixed_content_compact(ui: &mut Ui, content: &str, bg_color: &Color32, 
     None
 }
 
+/// Render welcome message when no conversation items exist
+fn render_welcome_message(ui: &mut egui::Ui, app_theme: AppTheme) {
+    ui.vertical_centered(|ui| {
+        ui.add_space(40.0);
+        
+        // Welcome header
+        ui.label(egui::RichText::new("Welcome to Sagitta Code! 🚀")
+            .size(24.0)
+            .strong()
+            .color(app_theme.accent_color()));
+        
+        ui.add_space(20.0);
+        
+        // Description
+        ui.label(egui::RichText::new("Your intelligent code companion powered by Claude")
+            .size(16.0)
+            .color(app_theme.text_color()));
+        
+        ui.add_space(30.0);
+        
+        // Features list
+        ui.group(|ui| {
+            ui.set_width(500.0);
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new("What you can do:")
+                    .size(14.0)
+                    .strong()
+                    .color(app_theme.text_color()));
+                
+                ui.add_space(10.0);
+                
+                let features = vec![
+                    ("💬", "Have natural conversations about your code"),
+                    ("🔍", "Search and analyze multiple repositories"),
+                    ("⚡", "Execute commands and run code"),
+                    ("🛠️", "Edit files with AI assistance"),
+                    ("📁", "Manage git repositories and branches"),
+                    ("🎯", "Get contextual help with your projects"),
+                ];
+                
+                for (icon, description) in features {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(icon).size(14.0));
+                        ui.label(egui::RichText::new(description)
+                            .size(13.0)
+                            .color(app_theme.text_color()));
+                    });
+                    ui.add_space(5.0);
+                }
+            });
+        });
+        
+        ui.add_space(30.0);
+        
+        // Getting started hint
+        ui.label(egui::RichText::new("Type a message below to get started, or press Ctrl+N to create a new conversation")
+            .size(12.0)
+            .color(app_theme.hint_text_color())
+            .italics());
+        
+        ui.add_space(40.0);
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3027,9 +3152,9 @@ fn render_diff_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme: 
         // Render diff lines with appropriate colors
         for line in diff_content.lines() {
             let (text_color, _prefix) = if line.starts_with('+') && !line.starts_with("+++") {
-                (app_theme.success_color(), "+ ")
+                (app_theme.diff_added_text(), "+ ")
             } else if line.starts_with('-') && !line.starts_with("---") {
-                (app_theme.error_color(), "- ")
+                (app_theme.diff_removed_text(), "- ")
             } else if line.starts_with("@@") {
                 (app_theme.accent_color(), "")
             } else {

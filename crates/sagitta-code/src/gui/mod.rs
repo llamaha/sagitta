@@ -2,6 +2,7 @@ pub mod app;
 pub mod chat;
 pub mod settings;
 pub mod repository;
+pub mod task;
 pub mod theme;
 pub mod theme_customizer;
 pub mod conversation;

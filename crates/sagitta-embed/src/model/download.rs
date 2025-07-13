@@ -7,10 +7,14 @@ use log::{info, debug, warn};
 /// Predefined embedding models with their HuggingFace model IDs and file paths
 #[derive(Debug, Clone, PartialEq)]
 pub enum EmbeddingModel {
-    /// BGE Small v1.5 with INT8 quantization (fast)
+    /// BGE Small v1.5 with INT8 quantization from Qdrant (CPU optimized)
     BgeSmallEnV15Quantized,
-    /// BGE Small v1.5 FP32 (standard precision)
+    /// BGE Small v1.5 with FP32 precision (GPU optimized)
     BgeSmallEnV15Fp32,
+    /// BGE Base v1.5 with FP32 precision (GPU optimized)
+    BgeBaseEnV15Fp32,
+    /// BGE Large v1.5 with FP32 precision (GPU optimized)
+    BgeLargeEnV15Fp32,
     /// Custom model specified by HuggingFace model ID
     Custom(String),
 }
@@ -21,6 +25,8 @@ impl EmbeddingModel {
         match self {
             Self::BgeSmallEnV15Quantized => "Qdrant/bge-small-en-v1.5-onnx-Q",
             Self::BgeSmallEnV15Fp32 => "BAAI/bge-small-en-v1.5",
+            Self::BgeBaseEnV15Fp32 => "BAAI/bge-base-en-v1.5",
+            Self::BgeLargeEnV15Fp32 => "BAAI/bge-large-en-v1.5",
             Self::Custom(id) => id,
         }
     }
@@ -30,6 +36,8 @@ impl EmbeddingModel {
         match self {
             Self::BgeSmallEnV15Quantized => "model_optimized.onnx",
             Self::BgeSmallEnV15Fp32 => "onnx/model.onnx",
+            Self::BgeBaseEnV15Fp32 => "onnx/model.onnx",
+            Self::BgeLargeEnV15Fp32 => "onnx/model.onnx",
             Self::Custom(_) => "model.onnx", // Default for custom models
         }
     }
@@ -39,6 +47,8 @@ impl EmbeddingModel {
         match self {
             Self::BgeSmallEnV15Quantized => "tokenizer.json",
             Self::BgeSmallEnV15Fp32 => "tokenizer.json",
+            Self::BgeBaseEnV15Fp32 => "tokenizer.json",
+            Self::BgeLargeEnV15Fp32 => "tokenizer.json",
             Self::Custom(_) => "tokenizer.json",
         }
     }
@@ -48,20 +58,34 @@ impl EmbeddingModel {
         match self {
             Self::BgeSmallEnV15Quantized => vec!["tokenizer_config.json", "config.json", "special_tokens_map.json"],
             Self::BgeSmallEnV15Fp32 => vec!["tokenizer_config.json", "config.json", "special_tokens_map.json"],
+            Self::BgeBaseEnV15Fp32 => vec!["tokenizer_config.json", "config.json", "special_tokens_map.json"],
+            Self::BgeLargeEnV15Fp32 => vec!["tokenizer_config.json", "config.json", "special_tokens_map.json"],
             Self::Custom(_) => vec!["tokenizer_config.json", "config.json", "special_tokens_map.json"],
         }
     }
 
     /// Returns true if this is a GPU-optimized model
     pub fn is_gpu_model(&self) -> bool {
-        matches!(self, Self::BgeSmallEnV15Fp32)
+        match self {
+            Self::BgeSmallEnV15Quantized => false, // CPU-optimized
+            Self::BgeSmallEnV15Fp32 => true,       // GPU-optimized
+            Self::BgeBaseEnV15Fp32 => true,        // GPU-optimized
+            Self::BgeLargeEnV15Fp32 => true,       // GPU-optimized
+            Self::Custom(_) => false,               // Default to CPU
+        }
     }
 
     /// Parse from string representation
     pub fn parse(s: &str) -> Self {
         match s {
+            // CPU-optimized models
             "bge-small-en-v1.5-q" | "bge-small-fast" => Self::BgeSmallEnV15Quantized,
-            "bge-small-en-v1.5-fp16" | "bge-small-fp32" => Self::BgeSmallEnV15Fp32,
+            // GPU-optimized models
+            "bge-small-fp32" | "bge-small-en-v1.5-fp32" => Self::BgeSmallEnV15Fp32,
+            "bge-base-en-v1.5" | "bge-medium" => Self::BgeBaseEnV15Fp32,
+            "bge-large-en-v1.5" | "bge-large" => Self::BgeLargeEnV15Fp32,
+            // FP16 variant - map to FP32 for now (can add FP16 variants later)
+            "bge-small-fp16" | "bge-small-en-v1.5-fp16" => Self::BgeSmallEnV15Fp32,
             // Don't try to download test-default model
             "test-default" => Self::Custom("test-default".to_string()),
             custom => Self::Custom(custom.to_string()),
@@ -307,6 +331,14 @@ mod tests {
             EmbeddingModel::BgeSmallEnV15Fp32
         );
         assert_eq!(
+            EmbeddingModel::parse("bge-medium"),
+            EmbeddingModel::BgeBaseEnV15Fp32
+        );
+        assert_eq!(
+            EmbeddingModel::parse("bge-large"),
+            EmbeddingModel::BgeLargeEnV15Fp32
+        );
+        assert_eq!(
             EmbeddingModel::parse("custom/model-id"),
             EmbeddingModel::Custom("custom/model-id".to_string())
         );
@@ -323,6 +355,16 @@ mod tests {
         assert_eq!(gpu_model.model_id(), "BAAI/bge-small-en-v1.5");
         assert_eq!(gpu_model.model_file(), "onnx/model.onnx");
         assert!(gpu_model.is_gpu_model());
+
+        let medium_model = EmbeddingModel::BgeBaseEnV15Fp32;
+        assert_eq!(medium_model.model_id(), "BAAI/bge-base-en-v1.5");
+        assert_eq!(medium_model.model_file(), "onnx/model.onnx");
+        assert!(medium_model.is_gpu_model());
+
+        let large_model = EmbeddingModel::BgeLargeEnV15Fp32;
+        assert_eq!(large_model.model_id(), "BAAI/bge-large-en-v1.5");
+        assert_eq!(large_model.model_file(), "onnx/model.onnx");
+        assert!(large_model.is_gpu_model());
     }
     
     #[test]
