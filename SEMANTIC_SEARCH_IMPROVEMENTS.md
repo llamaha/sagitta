@@ -51,13 +51,17 @@
    - Move deduplication to indexing time for better performance
    - Use content hash + metadata for unique chunk identification during indexing
 
-### **Phase 3: Investigate Chunking Overlaps** 🔄 **IN PROGRESS**
-1. **Audit language parsers**:
-   - Check if language-specific parsers create overlapping chunks
-   - Ensure semantic element boundaries don't cause duplicates
+### **Phase 3: Investigate Chunking Overlaps** 🔄 **STARTED - ISSUES FOUND**
+1. **✅ Audit language parsers**:
+   - **FOUND**: Python and JavaScript parsers create overlapping chunks (confirmed by existing test files)
+   - **Rust parser**: Well-designed to prevent overlaps - uses semantic boundaries correctly
+   - **Fallback parser**: Creates non-overlapping 500-line chunks correctly
+   - **Issue confirmed in**: `tests/data/test_overlap_detection_comprehensive.rs` shows Python and JavaScript overlap problems
 
-2. **Add chunk debugging**:
-   - Add logging to show chunk boundaries during indexing
+2. **🔄 Next steps for Phase 3**:
+   - Fix Python parser overlap issues in `crates/code-parsers/src/python.rs`
+   - Fix JavaScript parser overlap issues in `crates/code-parsers/src/javascript.rs`  
+   - Add chunk debugging/validation during indexing
    - Create tool to visualize chunk overlaps for debugging
 
 ### **Phase 4: Output Quality Improvements** 🔄 **PENDING**
