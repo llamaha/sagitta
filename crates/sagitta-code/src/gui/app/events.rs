@@ -49,6 +49,7 @@ pub enum AppEvent {
     },
     SaveClaudeMdTemplate,
     ApplyClaudeMdToAllRepos,
+    ShowNewConversationConfirmation,
     CreateNewConversation,
     // Sync status notifications
     ShowSyncNotification {
@@ -316,6 +317,21 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                     // Refresh conversation list to show updated status
                     force_refresh_conversation_data(app);
                 },
+                AgentEvent::Cancelled => {
+                    log::info!("SagittaCodeApp: Agent operation cancelled");
+                    // Reset UI state
+                    app.state.is_waiting_for_response = false;
+                    app.state.is_thinking = false;
+                    app.state.is_responding = false;
+                    app.state.is_streaming_response = false;
+                    app.state.thinking_message = None;
+                    app.state.current_response_id = None;
+                    
+                    app.panels.events_panel.add_event(
+                        super::SystemEventType::Info,
+                        "Operation cancelled".to_string()
+                    );
+                },
                 _ => {
                     // Optionally log unhandled events: log::debug!("Unhandled AgentEvent: {:?}", event);
                 }
@@ -417,6 +433,10 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
             AppEvent::UpdateConversationTitle { conversation_id } => {
                 log::info!("Received UpdateConversationTitle event for conversation {conversation_id}");
                 handle_update_conversation_title(app, conversation_id);
+            },
+            AppEvent::ShowNewConversationConfirmation => {
+                log::info!("Received ShowNewConversationConfirmation event");
+                handle_show_new_conversation_confirmation(app);
             },
             AppEvent::CreateNewConversation => {
                 log::info!("Received CreateNewConversation event");
@@ -1466,6 +1486,12 @@ pub fn handle_update_conversation_title(app: &mut SagittaCodeApp, conversation_i
     }
 }
 
+/// Handle show new conversation confirmation event
+pub fn handle_show_new_conversation_confirmation(app: &mut SagittaCodeApp) {
+    log::info!("Showing new conversation confirmation dialog");
+    app.state.show_new_conversation_confirmation = true;
+}
+
 /// Handle create new conversation event
 pub fn handle_create_new_conversation(app: &mut SagittaCodeApp) {
     log::info!("Creating new conversation - clearing current state");
@@ -1486,6 +1512,9 @@ pub fn handle_create_new_conversation(app: &mut SagittaCodeApp) {
     app.state.current_response_id = None;
     app.state.tool_results.clear();
     app.state.pending_tool_calls.clear();
+    
+    // Clear token usage counter
+    app.state.current_token_usage = None;
     
     // Update sidebar selection
     app.conversation_sidebar.select_conversation(None);
@@ -1825,6 +1854,7 @@ mod tests {
             AppEvent::RepositoryAdded(_) => assert!(true),
             AppEvent::RepositorySwitched(_) => assert!(true),
             AppEvent::ShowSyncNotification { .. } => assert!(true),
+            AppEvent::ShowNewConversationConfirmation => assert!(true),
         }
         
         // Test the other variant too
@@ -1847,6 +1877,7 @@ mod tests {
             AppEvent::RepositoryAdded(_) => assert!(true),
             AppEvent::RepositorySwitched(_) => assert!(true),
             AppEvent::ShowSyncNotification { .. } => assert!(true),
+            AppEvent::ShowNewConversationConfirmation => assert!(true),
         }
     }
 

@@ -324,11 +324,13 @@ pub struct QueryParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "branchName")]
     pub branch_name: Option<String>,
-    /// Optional: Filter by code element type (e.g., "function", "struct", "enum", etc.)
+    /// RECOMMENDED: Filter by code element type for more precise results (e.g., "function", "struct", "class", "method", "enum", "interface", "trait", "type")
+    /// Using this parameter significantly improves search precision when looking for specific code constructs.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "elementType")]
     pub element_type: Option<String>,
-    /// Optional: Filter by specific programming language (e.g., "rust", "python", "go"). This significantly improves relevance for code-related queries.
+    /// RECOMMENDED: Filter by programming language for better precision (e.g., "rust", "python", "javascript", "go", "java")
+    /// This is especially valuable in multi-language repositories to reduce cross-language noise.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "lang")] // Match CLI argument
     pub lang: Option<String>,

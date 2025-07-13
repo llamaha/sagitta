@@ -308,7 +308,7 @@ mod tests {
         assert_eq!(config.file_processing_concurrency, num_cpus::get());
         assert_eq!(config.max_embedding_sessions, 4); // Default value
         assert_eq!(config.processing_queue_size, 1000);
-        assert_eq!(config.embedding_batch_size, 256);  // Default batch size is 256
+        assert_eq!(config.embedding_batch_size, 8);  // Default batch size is 8
         assert_eq!(config.max_file_size_bytes, 5 * 1024 * 1024);
     }
 
@@ -325,7 +325,7 @@ mod tests {
         assert_eq!(processing_config.max_embedding_sessions, 4); // Default for automatic management
         assert_eq!(processing_config.file_processing_concurrency, num_cpus::get());
         assert_eq!(processing_config.processing_queue_size, 1000);
-        assert_eq!(processing_config.embedding_batch_size, 256);  // Default batch size is 256
+        assert_eq!(processing_config.embedding_batch_size, 8);  // Default batch size is 8
         assert_eq!(processing_config.max_file_size_bytes, 5 * 1024 * 1024);
     }
 

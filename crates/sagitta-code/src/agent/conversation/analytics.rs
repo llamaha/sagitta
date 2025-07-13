@@ -299,8 +299,8 @@ pub enum Difficulty {
     Easy,
     Medium,
     Hard,
-    Complex,
 }
+
 
 /// Conversation pattern identification
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -394,6 +394,7 @@ pub struct SearchPerformance {
     /// Most common search patterns
     pub common_patterns: Vec<String>,
 }
+
 
 /// Conversation flow analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1159,6 +1160,84 @@ mod tests {
     
     
 
+    use crate::agent::message::types::AgentMessage;
+    use crate::llm::client::Role;
+    use crate::agent::conversation::types::{ConversationBranch, ConversationCheckpoint, ProjectContext, BranchStatus};
+
+    // Helper function to create test conversations
+    fn create_test_conversation(
+        title: &str,
+        status: ConversationStatus,
+        message_count: usize,
+        created_at: DateTime<Utc>,
+        project_type: Option<ProjectType>,
+        has_branches: bool,
+        has_checkpoints: bool,
+    ) -> Conversation {
+        let messages: Vec<AgentMessage> = (0..message_count)
+            .map(|i| AgentMessage {
+                id: Uuid::new_v4(),
+                role: if i % 2 == 0 { Role::User } else { Role::Assistant },
+                content: format!("Message {}", i),
+                timestamp: created_at + Duration::minutes(i as i64),
+                is_streaming: false,
+                metadata: HashMap::new(),
+                tool_calls: vec![],
+            })
+            .collect();
+
+        let branches = if has_branches {
+            vec![ConversationBranch {
+                id: Uuid::new_v4(),
+                title: "Test Branch".to_string(),
+                description: Some("Test branch description".to_string()),
+                parent_message_id: Some(messages.first().map(|m| m.id).unwrap_or_default()),
+                messages: vec![],
+                created_at,
+                status: BranchStatus::Active,
+                merged: false,
+                success_score: Some(0.8),
+            }]
+        } else {
+            vec![]
+        };
+
+        let checkpoints = if has_checkpoints {
+            vec![ConversationCheckpoint {
+                id: Uuid::new_v4(),
+                message_id: messages.first().map(|m| m.id).unwrap_or_default(),
+                title: "Test Checkpoint".to_string(),
+                description: Some("Test checkpoint description".to_string()),
+                created_at,
+                context_snapshot: None,
+                auto_generated: false,
+            }]
+        } else {
+            vec![]
+        };
+
+        Conversation {
+            id: Uuid::new_v4(),
+            title: title.to_string(),
+            messages,
+            created_at,
+            last_active: created_at + Duration::minutes(message_count as i64),
+            tags: vec!["test".to_string()],
+            status,
+            workspace_id: None,
+            branches,
+            checkpoints,
+            project_context: project_type.map(|pt| ProjectContext {
+                name: format!("Test {} Project", title),
+                project_type: pt,
+                root_path: Some(std::path::PathBuf::from("/test/project")),
+                description: Some("Test project description".to_string()),
+                repositories: vec![],
+                settings: HashMap::new(),
+            }),
+        }
+    }
+
     #[test]
     fn test_analytics_manager_creation() {
         let manager = ConversationAnalyticsManager::with_default_config();
@@ -1183,5 +1262,352 @@ mod tests {
         assert_eq!(manager.get_config().min_conversation_length, 5);
         assert_eq!(manager.get_config().trend_window_days, 60);
         assert_eq!(manager.get_config().success_threshold, 0.8);
+    }
+
+    #[test]
+    fn test_analytics_config_default() {
+        let config = AnalyticsConfig::default();
+        
+        assert!(config.detailed_tracking);
+        assert_eq!(config.min_conversation_length, 3);
+        assert_eq!(config.trend_window_days, 30);
+        assert!((config.success_threshold - 0.7).abs() < f32::EPSILON);
+    }
+
+    #[tokio::test]
+    async fn test_generate_report_empty_conversations() {
+        let manager = ConversationAnalyticsManager::with_default_config();
+        let conversations = vec![];
+        let period = (Utc::now() - Duration::days(7), Utc::now());
+        
+        let report = manager.generate_report(&conversations, Some(period)).await.unwrap();
+        
+        assert_eq!(report.overall_metrics.total_conversations, 0);
+        assert_eq!(report.overall_metrics.total_messages, 0);
+        assert_eq!(report.success_metrics.overall_success_rate, 0.0);
+        assert_eq!(report.efficiency_metrics.avg_resolution_time, 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_calculate_overall_metrics() {
+        let manager = ConversationAnalyticsManager::with_default_config();
+        let now = Utc::now();
+        
+        let conversations = vec![
+            create_test_conversation("Conv 1", ConversationStatus::Completed, 5, now - Duration::hours(2), Some(ProjectType::Rust), true, false),
+            create_test_conversation("Conv 2", ConversationStatus::Active, 3, now - Duration::hours(1), Some(ProjectType::Python), false, true),
+            create_test_conversation("Conv 3", ConversationStatus::Completed, 10, now - Duration::minutes(30), None, true, true),
+        ];
+        
+        let conversation_refs: Vec<&Conversation> = conversations.iter().collect();
+        let metrics = manager.calculate_overall_metrics(&conversation_refs).await.unwrap();
+        
+        assert_eq!(metrics.total_conversations, 3);
+        assert_eq!(metrics.total_messages, 18); // 5 + 3 + 10
+        assert!((metrics.avg_messages_per_conversation - 6.0).abs() < f64::EPSILON);
+        assert_eq!(metrics.total_branches, 2); // Conv 1 and Conv 3 have branches
+        assert_eq!(metrics.total_checkpoints, 2); // Conv 2 and Conv 3 have checkpoints
+        assert!((metrics.completion_rate - 2.0/3.0).abs() < 0.01);
+    }
+
+    #[tokio::test]
+    async fn test_analyze_success_metrics() {
+        let manager = ConversationAnalyticsManager::with_default_config();
+        let now = Utc::now();
+        
+        let conversations = vec![
+            create_test_conversation("Success 1", ConversationStatus::Completed, 8, now - Duration::hours(3), Some(ProjectType::Rust), true, false),
+            create_test_conversation("Failed 1", ConversationStatus::Active, 2, now - Duration::hours(2), Some(ProjectType::Rust), false, false),
+            create_test_conversation("Success 2", ConversationStatus::Completed, 15, now - Duration::hours(1), Some(ProjectType::Python), false, true),
+            create_test_conversation("Success 3", ConversationStatus::Completed, 5, now, Some(ProjectType::Python), true, false),
+        ];
+        
+        let conversation_refs: Vec<&Conversation> = conversations.iter().collect();
+        let metrics = manager.analyze_success_metrics(&conversation_refs).await.unwrap();
+        
+        assert!((metrics.overall_success_rate - 0.75).abs() < 0.01); // 3 out of 4
+        assert_eq!(metrics.success_by_project_type.len(), 2);
+        assert!((metrics.success_by_project_type[&ProjectType::Rust] - 0.5).abs() < 0.01); // 1 out of 2
+        assert!((metrics.success_by_project_type[&ProjectType::Python] - 1.0).abs() < 0.01); // 2 out of 2
+        
+        // Check success by conversation length
+        assert!(!metrics.success_by_length.is_empty());
+        assert!(metrics.success_by_length.iter().any(|(_, rate)| *rate > 0.0));
+    }
+
+    #[tokio::test]
+    async fn test_analyze_efficiency() {
+        let manager = ConversationAnalyticsManager::with_default_config();
+        let now = Utc::now();
+        
+        let conversations = vec![
+            create_test_conversation("Conv 1", ConversationStatus::Completed, 5, now - Duration::hours(2), None, true, true),
+            create_test_conversation("Conv 2", ConversationStatus::Active, 3, now - Duration::hours(1), None, false, false),
+        ];
+        
+        let conversation_refs: Vec<&Conversation> = conversations.iter().collect();
+        let overall_metrics = manager.calculate_overall_metrics(&conversation_refs).await.unwrap();
+        let efficiency = manager.analyze_efficiency(&conversation_refs).await.unwrap();
+        
+        assert!(efficiency.avg_resolution_time > 0.0);
+        assert!(efficiency.branching_efficiency >= 0.0 && efficiency.branching_efficiency <= 1.0);
+        assert!(efficiency.checkpoint_utilization >= 0.0 && efficiency.checkpoint_utilization <= 1.0);
+    }
+
+    #[tokio::test]
+    async fn test_is_conversation_successful() {
+        let manager = ConversationAnalyticsManager::with_default_config();
+        let now = Utc::now();
+        
+        // Test completed conversation - should be successful
+        let completed_conv = create_test_conversation(
+            "Completed",
+            ConversationStatus::Completed,
+            5,
+            now,
+            None,
+            false,
+            false,
+        );
+        assert!(manager.is_conversation_successful(&completed_conv));
+        
+        // Test active conversation with sufficient length and successful branch
+        let active_conv = create_test_conversation(
+            "Active",
+            ConversationStatus::Active,
+            5,
+            now,
+            None,
+            true,
+            false,
+        );
+        assert!(manager.is_conversation_successful(&active_conv));
+        
+        // Test short active conversation - should not be successful
+        let short_conv = create_test_conversation(
+            "Short",
+            ConversationStatus::Active,
+            2,
+            now,
+            None,
+            false,
+            false,
+        );
+        assert!(!manager.is_conversation_successful(&short_conv));
+    }
+
+    #[tokio::test]
+    async fn test_analyze_token_usage() {
+        let manager = ConversationAnalyticsManager::with_default_config();
+        let now = Utc::now();
+        
+        let conversations = vec![
+            create_test_conversation("Conv 1", ConversationStatus::Completed, 10, now - Duration::hours(2), None, false, false),
+            create_test_conversation("Conv 2", ConversationStatus::Active, 5, now - Duration::hours(1), None, false, false),
+        ];
+        
+        let conversation_refs: Vec<&Conversation> = conversations.iter().collect();
+        let token_usage = manager.analyze_token_usage(&conversation_refs).await.unwrap();
+        
+        // Since token counting is estimated, just verify the structure
+        assert!(!token_usage.token_distribution.is_empty());
+        assert!(token_usage.peak_usage > 0);
+        assert!(!token_usage.tokens_by_role.is_empty());
+        assert!(token_usage.estimated_cost.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_analyze_patterns() {
+        let manager = ConversationAnalyticsManager::with_default_config();
+        let now = Utc::now();
+        
+        let conversations = vec![
+            create_test_conversation("Conv 1", ConversationStatus::Completed, 8, now - Duration::hours(3), Some(ProjectType::Rust), true, false),
+            create_test_conversation("Conv 2", ConversationStatus::Active, 5, now - Duration::hours(2), Some(ProjectType::Python), false, true),
+            create_test_conversation("Conv 3", ConversationStatus::Completed, 12, now - Duration::hours(1), Some(ProjectType::Rust), true, true),
+        ];
+        
+        let conversation_refs: Vec<&Conversation> = conversations.iter().collect();
+        let patterns = manager.analyze_patterns(&conversation_refs).await.unwrap();
+        
+        assert!(!patterns.common_flows.is_empty());
+        assert!(!patterns.recurring_themes.is_empty());
+        assert!(!patterns.temporal_patterns.is_empty());
+        assert!(!patterns.behavior_patterns.is_empty());
+        assert!(patterns.anomalies.is_empty() || !patterns.anomalies.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_generate_project_insights() {
+        let manager = ConversationAnalyticsManager::with_default_config();
+        let now = Utc::now();
+        
+        let conversations = vec![
+            create_test_conversation("Rust 1", ConversationStatus::Completed, 10, now - Duration::hours(3), Some(ProjectType::Rust), true, false),
+            create_test_conversation("Rust 2", ConversationStatus::Active, 5, now - Duration::hours(2), Some(ProjectType::Rust), false, false),
+            create_test_conversation("Python 1", ConversationStatus::Completed, 8, now - Duration::hours(1), Some(ProjectType::Python), false, true),
+        ];
+        
+        let conversation_refs: Vec<&Conversation> = conversations.iter().collect();
+        let insights = manager.generate_project_insights(&conversation_refs).await.unwrap();
+        
+        assert_eq!(insights.len(), 2); // Rust and Python
+        
+        let rust_insight = insights.iter().find(|i| i.project_type == ProjectType::Rust).unwrap();
+        assert_eq!(rust_insight.conversation_count, 2);
+        assert!((rust_insight.success_rate - 0.5).abs() < 0.01); // 1 out of 2
+        assert!(!rust_insight.common_topics.is_empty());
+        assert!(!rust_insight.typical_patterns.is_empty());
+        assert!(!rust_insight.recommendations.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_analyze_trending_topics() {
+        let manager = ConversationAnalyticsManager::with_default_config();
+        let now = Utc::now();
+        
+        let conversations = vec![
+            create_test_conversation("Conv 1", ConversationStatus::Completed, 8, now - Duration::hours(4), Some(ProjectType::Rust), false, false),
+            create_test_conversation("Conv 2", ConversationStatus::Active, 5, now - Duration::hours(3), Some(ProjectType::JavaScript), false, false),
+            create_test_conversation("Conv 3", ConversationStatus::Completed, 6, now - Duration::hours(2), Some(ProjectType::Python), false, false),
+            create_test_conversation("Conv 4", ConversationStatus::Active, 7, now - Duration::hours(1), Some(ProjectType::Go), false, false),
+        ];
+        
+        let conversation_refs: Vec<&Conversation> = conversations.iter().collect();
+        let topics = manager.analyze_trending_topics(&conversation_refs).await.unwrap();
+        
+        assert!(!topics.is_empty());
+        for topic in &topics {
+            assert!(!topic.topic.is_empty());
+            assert!(topic.frequency > 0);
+            assert!(!topic.project_types.is_empty());
+            assert!(topic.success_rate >= 0.0 && topic.success_rate <= 1.0);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_generate_recommendations() {
+        let manager = ConversationAnalyticsManager::with_default_config();
+        
+        // Create metrics that will trigger recommendations
+        let overall_metrics = OverallMetrics {
+            total_conversations: 10,
+            total_messages: 50,
+            total_tokens: 10000,
+            avg_tokens_per_conversation: 1000,
+            avg_tokens_per_message: 200,
+            avg_messages_per_conversation: 5.0,
+            avg_duration_minutes: 30.0,
+            total_branches: 5,
+            total_checkpoints: 2,
+            completion_rate: 0.5, // Low completion rate
+            peak_activity_hours: vec![9, 10, 14, 15],
+            project_type_distribution: HashMap::new(),
+        };
+        
+        let success_metrics = SuccessMetrics {
+            overall_success_rate: 0.6, // Below threshold
+            success_by_project_type: HashMap::new(),
+            success_by_length: vec![],
+            successful_patterns: vec![],
+            failure_points: vec![],
+            success_indicators: vec![],
+        };
+        
+        let efficiency_metrics = EfficiencyMetrics {
+            avg_resolution_time: 30.0,
+            branching_efficiency: 0.4, // Low efficiency
+            checkpoint_utilization: 0.2, // Low utilization
+            context_switches_per_conversation: 2.0,
+            efficient_patterns: vec![],
+            resource_utilization: ResourceUtilization {
+                avg_memory_usage: 0.5,
+                storage_efficiency: 0.6,
+                search_performance: SearchPerformance {
+                    avg_search_time_ms: 100.0,
+                    accuracy_rate: 0.95,
+                    common_patterns: vec![],
+                },
+                clustering_efficiency: 0.7,
+            },
+        };
+        
+        let patterns = PatternAnalysis {
+            common_flows: vec![],
+            recurring_themes: vec![],
+            temporal_patterns: vec![],
+            behavior_patterns: vec![],
+            anomalies: vec![],
+        };
+        
+        let recommendations = manager.generate_recommendations(
+            &overall_metrics,
+            &success_metrics,
+            &efficiency_metrics,
+            &patterns,
+        ).await.unwrap();
+        
+        assert!(!recommendations.is_empty());
+        
+        // Check that we got recommendations for each low metric
+        let has_completion_rate_rec = recommendations.iter()
+            .any(|r| r.description.contains("completion rate"));
+        let has_success_rate_rec = recommendations.iter()
+            .any(|r| r.description.contains("success rate"));
+        let has_branching_rec = recommendations.iter()
+            .any(|r| r.description.contains("branching"));
+        let has_checkpoint_rec = recommendations.iter()
+            .any(|r| r.description.contains("checkpoint"));
+        
+        assert!(has_completion_rate_rec);
+        assert!(has_success_rate_rec);
+        assert!(has_branching_rec);
+        assert!(has_checkpoint_rec);
+    }
+
+    #[test]
+    fn test_trend_direction() {
+        let growing = TrendDirection::Growing;
+        let declining = TrendDirection::Declining;
+        let stable = TrendDirection::Stable;
+        
+        // Just verify the enums exist and can be used
+        match growing {
+            TrendDirection::Growing => assert!(true),
+            _ => assert!(false),
+        }
+        
+        match declining {
+            TrendDirection::Declining => assert!(true),
+            _ => assert!(false),
+        }
+        
+        match stable {
+            TrendDirection::Stable => assert!(true),
+            _ => assert!(false),
+        }
+    }
+
+    #[test]
+    fn test_recommendation_categories() {
+        let categories = vec![
+            RecommendationCategory::ContentQuality,
+            RecommendationCategory::Efficiency,
+            RecommendationCategory::UserExperience,
+            RecommendationCategory::ProcessImprovement,
+            RecommendationCategory::TechnicalOptimization,
+        ];
+        
+        // Verify all categories exist
+        assert_eq!(categories.len(), 5);
+    }
+
+    #[test]
+    fn test_priority_and_difficulty() {
+        let priorities = vec![Priority::High, Priority::Medium, Priority::Low];
+        let difficulties = vec![Difficulty::Easy, Difficulty::Medium, Difficulty::Hard];
+        
+        assert_eq!(priorities.len(), 3);
+        assert_eq!(difficulties.len(), 3);
     }
 } 

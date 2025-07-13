@@ -51,6 +51,7 @@ pub enum ActivePanel {
     Repository,
     Preview,
     Settings,
+    Task,
     Conversation,
     Events,
     Analytics,
@@ -587,6 +588,15 @@ impl PanelManager {
                 } else {
                     self.close_all_panels();
                     self.active_panel = ActivePanel::Settings;
+                }
+            },
+            ActivePanel::Task => {
+                // Task panel is handled by the main app
+                if matches!(self.active_panel, ActivePanel::Task) {
+                    self.active_panel = ActivePanel::None;
+                } else {
+                    self.close_all_panels();
+                    self.active_panel = ActivePanel::Task;
                 }
             },
             ActivePanel::Conversation => {

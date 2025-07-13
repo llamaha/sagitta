@@ -10,6 +10,7 @@ use std::ops::{Deref, DerefMut};
 use super::repository::manager::RepositoryManager;
 use super::repository::RepoPanel;
 use super::repository::git_controls::GitControls;
+use super::task::TaskPanel;
 use crate::services::{SyncOrchestrator, FileWatcherService, AutoCommitter, CommitMessageGenerator};
 use crate::services::file_watcher::FileWatcherConfig as ServiceFileWatcherConfig;
 use super::settings::SettingsPanel;
@@ -81,6 +82,7 @@ pub struct SagittaCodeApp {
     pub git_controls: GitControls,
     pub chat_manager: Arc<StreamingChatManager>,
     pub settings_panel: SettingsPanel,
+    pub task_panel: TaskPanel,
     conversation_sidebar: ConversationSidebar,
     claude_md_modal: ClaudeMdModal,
     config: Arc<Mutex<SagittaCodeConfig>>,
@@ -117,8 +119,8 @@ pub struct SagittaCodeApp {
     sync_orchestrator: Option<Arc<SyncOrchestrator>>,
     file_watcher: Option<Arc<FileWatcherService>>,
     auto_committer: Option<Arc<AutoCommitter>>,
-    auto_title_updater: Option<Arc<crate::services::AutoTitleUpdater>>,
-    auto_title_sender: Option<mpsc::UnboundedSender<crate::services::ConversationUpdateEvent>>,
+    auto_title_updater: Option<Arc<crate::services::auto_title_updater::AutoTitleUpdater>>,
+    auto_title_sender: Option<mpsc::UnboundedSender<crate::services::auto_title_updater::ConversationUpdateEvent>>,
 }
 
 impl SagittaCodeApp {
@@ -164,6 +166,7 @@ impl SagittaCodeApp {
             git_controls: GitControls::new(repo_manager.clone()),
             chat_manager: Arc::new(StreamingChatManager::new()),
             settings_panel,
+            task_panel: TaskPanel::new(None, None, sagitta_code_config_arc.clone()),
             conversation_sidebar: ConversationSidebar::with_default_config(),
             claude_md_modal: ClaudeMdModal::new(sagitta_code_config_arc.clone()),
             config: sagitta_code_config_arc.clone(),

@@ -4,8 +4,15 @@ This file contains important guidelines for working with this codebase. Please f
 
 ## Code Understanding and Navigation
 
-- **Always use the code search/query MCP tool** to understand the codebase before making changes
-- Use semantic search to find relevant functions, components, and patterns
+- **Always use the code search/query MCP tool** to understand the codebase at the beginning.
+- **IMPORTANT: Use the `elementType` and `lang` parameters** to get more precise search results:
+  - `elementType`: Filter by code constructs (function, class, struct, method, interface, etc.)
+  - `lang`: Filter by programming language (rust, python, javascript, go, etc.)
+  - These parameters dramatically improve search precision and reduce noise
+- Examples of effective queries:
+  - Finding auth functions: `query="authentication", elementType="function", lang="rust"`
+  - Finding Python classes: `query="database model", elementType="class", lang="python"`
+  - Finding Go interfaces: `query="handler interface", elementType="interface", lang="go"`
 - Query for similar implementations when adding new features
 - Search for existing patterns before creating new ones
 
@@ -50,6 +57,11 @@ After making changes:
 - Test changes thoroughly before committing
 - Document complex implementations for future reference
 - Keep the codebase consistent with established patterns
+
+## Tests
+
+- To test everything use `cargo test --release --all --features cuda`.  
+- You can use variations of this with `cargo clippy`, `cargo check`, `cargo build` etc.
 
 ---
 

@@ -40,6 +40,8 @@ pub fn chat_input_ui(
     should_focus_input: &mut bool,
     // Token usage
     current_token_usage: &Option<crate::llm::client::TokenUsage>,
+    // Stop/Cancel callback
+    stop_requested: &mut bool,
 ) -> Option<egui::Id> {
     // Handle key events before the text edit widget to manually process Ctrl+Enter
     let mut new_line_added = false;
@@ -459,7 +461,7 @@ pub fn chat_input_ui(
                         if is_in_loop {
                             *loop_break_requested = true;
                         } else {
-                            // TODO: Implement stop functionality for regular operations
+                            *stop_requested = true;
                             log::info!("Stop button clicked during waiting state");
                         }
                     }

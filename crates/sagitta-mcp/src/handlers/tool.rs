@@ -335,15 +335,24 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         ToolDefinition {
             name: "query".to_string(),
             description: Some(
-                "Performs semantic search on an indexed repository.\n\
-\n**Best Practices for Effective Queries:**\n\
-- This system uses hybrid (dense + sparse vector) search. Combine natural language and code terms for best results (e.g., `jwt middleware function`, `How is authentication handled?`).\n\
-- Use the `elementType` argument (e.g., `function`, `struct`, `enum`) to restrict results to specific code elements.\n\
-- For API/code navigation, use `elementType` and include function/struct names or signatures in your query.\n\
-- For conceptual, documentation, or workflow/config queries, *omit* `elementType` to surface doc comments, config files, and broader context.\n\
-- For maximum recall, start broad (no `elementType`), then narrow with `elementType` if needed.\n\
-- For conceptual/documentation queries, omitting `elementType` or using a more targeted query may be necessary.\n\
-- For code block and workflow/config queries, omitting `elementType` surfaces relevant results.\n\
+                "Performs semantic search on an indexed repository. The search uses hybrid (dense + sparse vector) technology for best results.\n\
+\n**RECOMMENDED PARAMETERS for Better Results:**\n\
+• **elementType** - Filter by code element type (e.g., `function`, `struct`, `enum`, `class`, `method`, `interface`)\n\
+  - Use this when looking for specific code constructs\n\
+  - Example: Finding all authentication functions → elementType=\"function\"\n\
+• **lang** - Filter by programming language (e.g., `rust`, `python`, `javascript`, `go`, `java`)\n\
+  - Use this to avoid cross-language noise in polyglot repositories\n\
+  - Example: Finding Python tests → lang=\"python\"\n\
+\n**Examples of Effective Queries:**\n\
+1. `query=\"authentication middleware\", elementType=\"function\", lang=\"rust\"` → Finds Rust auth functions\n\
+2. `query=\"database connection\", elementType=\"class\", lang=\"python\"` → Finds Python DB classes\n\
+3. `query=\"error handling patterns\"` → Broad search across all code and docs (no filters)\n\
+4. `query=\"config parsing\", lang=\"go\"` → Finds Go config code (any element type)\n\
+\n**When to Use Filters:**\n\
+- Use `elementType` when you know what code construct you're looking for\n\
+- Use `lang` in multi-language repositories to improve precision\n\
+- Omit both for documentation, comments, or broad conceptual searches\n\
+- Start broad, then narrow with filters if you get too many irrelevant results\n\
 ".to_string()
             ),
             input_schema: json!({
@@ -352,9 +361,17 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                     "repositoryName": { "type": "string", "description": "Name of the repository to query" },
                     "queryText": { "type": "string", "description": "The natural language query text" },
                     "limit": { "type": "integer", "description": "Maximum number of results to return" },
-                    "branchName": { "type": "string", "description": "Optional branch to query (defaults to active)" },
-                    "elementType": { "type": "string", "description": "Optional: Filter by code element type (e.g., function, struct, enum, etc.). For conceptual/documentation queries, omitting this or using a more targeted query may be necessary. For code block and workflow/config queries, omitting this surfaces relevant results." },
-                    "lang": { "type": "string", "description": "Optional: Filter by programming language (e.g., \"rust\", \"python\"). **Highly recommended** for code queries to improve relevance." }
+                    "elementType": { 
+                        "type": "string", 
+                        "description": "🎯 HIGHLY RECOMMENDED: Filter by code element type for much more precise results. Common values: \"function\", \"struct\", \"class\", \"method\", \"enum\", \"interface\", \"trait\", \"type\". Omit for documentation/comment searches.",
+                        "examples": ["function", "class", "struct", "method", "interface"]
+                    },
+                    "lang": { 
+                        "type": "string", 
+                        "description": "🎯 HIGHLY RECOMMENDED: Filter by programming language for much better precision in multi-language repos. Common values: \"rust\", \"python\", \"javascript\", \"typescript\", \"go\", \"java\", \"c++\", \"c#\".",
+                        "examples": ["rust", "python", "javascript", "go", "java"]
+                    },
+                    "branchName": { "type": "string", "description": "Optional branch to query (defaults to active)" }
                 },
                 "required": ["repositoryName", "queryText", "limit"]
             }),

@@ -1011,7 +1011,7 @@ dependencies = [
 
 [[package]]
 name = "code-parsers"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "env_logger 0.11.8",
@@ -2236,7 +2236,7 @@ checksum = "07e28edb80900c19c28f1072f2e8aeca7fa06b23cd4169cefe1af5aa3260783f"
 
 [[package]]
 name = "git-manager"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3665,6 +3665,17 @@ dependencies = [
 
 [[package]]
 name = "nix"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2eb04e9c688eff1c89d72b407f168cf79bb9e867a9d3323ed6c01519eb9cc053"
+dependencies = [
+ "bitflags 2.9.1",
+ "cfg-if",
+ "libc",
+]
+
+[[package]]
+name = "nix"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
@@ -4927,7 +4938,7 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "repo-mapper"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "grep-matcher",
@@ -5204,7 +5215,7 @@ checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
 
 [[package]]
 name = "sagitta-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -5260,7 +5271,7 @@ dependencies = [
 
 [[package]]
 name = "sagitta-code"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -5288,6 +5299,7 @@ dependencies = [
  "lazy_static",
  "log",
  "mockall",
+ "nix 0.27.1",
  "notify",
  "once_cell",
  "petgraph",
@@ -5320,7 +5332,7 @@ dependencies = [
 
 [[package]]
 name = "sagitta-embed"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5346,7 +5358,7 @@ dependencies = [
 
 [[package]]
 name = "sagitta-mcp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -5389,7 +5401,7 @@ dependencies = [
 
 [[package]]
 name = "sagitta-search"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "assert_cmd",

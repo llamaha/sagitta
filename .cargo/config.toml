@@ -1,4 +1,0 @@
-[build]
-jobs = 10
-[test]
-jobs = 10

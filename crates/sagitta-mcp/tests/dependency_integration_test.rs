@@ -8,62 +8,62 @@ use tempfile::TempDir;
 
 async fn create_test_config_with_repos() -> (Arc<RwLock<AppConfig>>, TempDir) {
     let temp_dir = TempDir::new().unwrap();
-    let mut config = AppConfig::default();
     
-    // Override the default paths to use temp directory
-    config.repositories_base_path = Some(temp_dir.path().to_string_lossy().to_string());
-    
-    // Add test repositories
-    config.repositories = vec![
-        RepositoryConfig {
-            name: "main-app".to_string(),
-            url: "https://github.com/test/main-app.git".to_string(),
-            local_path: temp_dir.path().join("main-app"),
-            default_branch: "main".to_string(),
-            tracked_branches: vec!["main".to_string()],
-            remote_name: Some("origin".to_string()),
-            active_branch: Some("main".to_string()),
-            ssh_key_path: None,
-            ssh_key_passphrase: None,
-            last_synced_commits: Default::default(),
-            indexed_languages: None,
-            added_as_local_path: false,
-            target_ref: None,
-            dependencies: vec![],
-        },
-        RepositoryConfig {
-            name: "lib-a".to_string(),
-            url: "https://github.com/test/lib-a.git".to_string(),
-            local_path: temp_dir.path().join("lib-a"),
-            default_branch: "main".to_string(),
-            tracked_branches: vec!["main".to_string()],
-            remote_name: Some("origin".to_string()),
-            active_branch: Some("main".to_string()),
-            ssh_key_path: None,
-            ssh_key_passphrase: None,
-            last_synced_commits: Default::default(),
-            indexed_languages: None,
-            added_as_local_path: false,
-            target_ref: Some("v1.2.3".to_string()),
-            dependencies: vec![],
-        },
-        RepositoryConfig {
-            name: "lib-b".to_string(),
-            url: "https://github.com/test/lib-b.git".to_string(),
-            local_path: temp_dir.path().join("lib-b"),
-            default_branch: "main".to_string(),
-            tracked_branches: vec!["main".to_string()],
-            remote_name: Some("origin".to_string()),
-            active_branch: Some("develop".to_string()),
-            ssh_key_path: None,
-            ssh_key_passphrase: None,
-            last_synced_commits: Default::default(),
-            indexed_languages: None,
-            added_as_local_path: false,
-            target_ref: None,
-            dependencies: vec![],
-        },
-    ];
+    // Create a completely isolated config that doesn't touch real paths
+    let config = AppConfig {
+        repositories_base_path: Some(temp_dir.path().to_string_lossy().to_string()),
+        repositories: vec![
+            RepositoryConfig {
+                name: "test-main-app".to_string(),
+                url: "https://github.com/test/main-app.git".to_string(),
+                local_path: temp_dir.path().join("test-main-app"),
+                default_branch: "main".to_string(),
+                tracked_branches: vec!["main".to_string()],
+                remote_name: Some("origin".to_string()),
+                active_branch: Some("main".to_string()),
+                ssh_key_path: None,
+                ssh_key_passphrase: None,
+                last_synced_commits: Default::default(),
+                indexed_languages: None,
+                added_as_local_path: false,
+                target_ref: None,
+                dependencies: vec![],
+            },
+            RepositoryConfig {
+                name: "test-lib-a".to_string(),
+                url: "https://github.com/test/lib-a.git".to_string(),
+                local_path: temp_dir.path().join("test-lib-a"),
+                default_branch: "main".to_string(),
+                tracked_branches: vec!["main".to_string()],
+                remote_name: Some("origin".to_string()),
+                active_branch: Some("main".to_string()),
+                ssh_key_path: None,
+                ssh_key_passphrase: None,
+                last_synced_commits: Default::default(),
+                indexed_languages: None,
+                added_as_local_path: false,
+                target_ref: Some("v1.2.3".to_string()),
+                dependencies: vec![],
+            },
+            RepositoryConfig {
+                name: "test-lib-b".to_string(),
+                url: "https://github.com/test/lib-b.git".to_string(),
+                local_path: temp_dir.path().join("test-lib-b"),
+                default_branch: "main".to_string(),
+                tracked_branches: vec!["main".to_string()],
+                remote_name: Some("origin".to_string()),
+                active_branch: Some("develop".to_string()),
+                ssh_key_path: None,
+                ssh_key_passphrase: None,
+                last_synced_commits: Default::default(),
+                indexed_languages: None,
+                added_as_local_path: false,
+                target_ref: None,
+                dependencies: vec![],
+            },
+        ],
+        ..Default::default()
+    };
     
     (Arc::new(RwLock::new(config)), temp_dir)
 }
@@ -82,8 +82,8 @@ mod tests {
         let (config, _temp_dir) = create_test_config_with_repos().await;
         
         let params = RepositoryDependencyParams {
-            repository_name: "main-app".to_string(),
-            dependency_name: "lib-a".to_string(),
+            repository_name: "test-main-app".to_string(),
+            dependency_name: "test-lib-a".to_string(),
             target_ref: Some("v1.0.0".to_string()),
             purpose: Some("Core utility library".to_string()),
         };
@@ -95,10 +95,10 @@ mod tests {
         // Verify the dependency was added
         let config_read = config.read().await;
         let main_app = config_read.repositories.iter()
-            .find(|r| r.name == "main-app")
+            .find(|r| r.name == "test-main-app")
             .unwrap();
         assert_eq!(main_app.dependencies.len(), 1);
-        assert_eq!(main_app.dependencies[0].repository_name, "lib-a");
+        assert_eq!(main_app.dependencies[0].repository_name, "test-lib-a");
         assert_eq!(main_app.dependencies[0].target_ref, Some("v1.0.0".to_string()));
         assert_eq!(main_app.dependencies[0].purpose, Some("Core utility library".to_string()));
     }
@@ -109,7 +109,7 @@ mod tests {
         
         let params = RepositoryDependencyParams {
             repository_name: "nonexistent".to_string(),
-            dependency_name: "lib-a".to_string(),
+            dependency_name: "test-lib-a".to_string(),
             target_ref: None,
             purpose: None,
         };
@@ -124,7 +124,7 @@ mod tests {
         let (config, _temp_dir) = create_test_config_with_repos().await;
         
         let params = RepositoryDependencyParams {
-            repository_name: "main-app".to_string(),
+            repository_name: "test-main-app".to_string(),
             dependency_name: "nonexistent-lib".to_string(),
             target_ref: None,
             purpose: None,
@@ -141,8 +141,8 @@ mod tests {
         
         // First add a dependency
         let params1 = RepositoryDependencyParams {
-            repository_name: "main-app".to_string(),
-            dependency_name: "lib-a".to_string(),
+            repository_name: "test-main-app".to_string(),
+            dependency_name: "test-lib-a".to_string(),
             target_ref: Some("v1.0.0".to_string()),
             purpose: Some("Initial purpose".to_string()),
         };
@@ -150,8 +150,8 @@ mod tests {
         
         // Update the same dependency
         let params2 = RepositoryDependencyParams {
-            repository_name: "main-app".to_string(),
-            dependency_name: "lib-a".to_string(),
+            repository_name: "test-main-app".to_string(),
+            dependency_name: "test-lib-a".to_string(),
             target_ref: Some("v2.0.0".to_string()),
             purpose: Some("Updated purpose".to_string()),
         };
@@ -161,7 +161,7 @@ mod tests {
         // Verify the update
         let config_read = config.read().await;
         let main_app = config_read.repositories.iter()
-            .find(|r| r.name == "main-app")
+            .find(|r| r.name == "test-main-app")
             .unwrap();
         assert_eq!(main_app.dependencies.len(), 1); // Still only one dependency
         assert_eq!(main_app.dependencies[0].target_ref, Some("v2.0.0".to_string()));
@@ -174,8 +174,8 @@ mod tests {
         
         // First add a dependency
         let add_params = RepositoryDependencyParams {
-            repository_name: "main-app".to_string(),
-            dependency_name: "lib-a".to_string(),
+            repository_name: "test-main-app".to_string(),
+            dependency_name: "test-lib-a".to_string(),
             target_ref: Some("v1.0.0".to_string()),
             purpose: None,
         };
@@ -183,8 +183,8 @@ mod tests {
         
         // Remove it
         let remove_params = RepositoryDependencyParams {
-            repository_name: "main-app".to_string(),
-            dependency_name: "lib-a".to_string(),
+            repository_name: "test-main-app".to_string(),
+            dependency_name: "test-lib-a".to_string(),
             target_ref: None,
             purpose: None,
         };
@@ -194,7 +194,7 @@ mod tests {
         // Verify removal
         let config_read = config.read().await;
         let main_app = config_read.repositories.iter()
-            .find(|r| r.name == "main-app")
+            .find(|r| r.name == "test-main-app")
             .unwrap();
         assert_eq!(main_app.dependencies.len(), 0);
     }
@@ -204,8 +204,8 @@ mod tests {
         let (config, _temp_dir) = create_test_config_with_repos().await;
         
         let params = RepositoryDependencyParams {
-            repository_name: "main-app".to_string(),
-            dependency_name: "lib-a".to_string(),
+            repository_name: "test-main-app".to_string(),
+            dependency_name: "test-lib-a".to_string(),
             target_ref: None,
             purpose: None,
         };
@@ -221,16 +221,16 @@ mod tests {
         
         // Add multiple dependencies
         let params1 = RepositoryDependencyParams {
-            repository_name: "main-app".to_string(),
-            dependency_name: "lib-a".to_string(),
+            repository_name: "test-main-app".to_string(),
+            dependency_name: "test-lib-a".to_string(),
             target_ref: Some("v1.0.0".to_string()),
             purpose: Some("Authentication library".to_string()),
         };
         handle_repository_add_dependency(params1, config.clone()).await.unwrap();
         
         let params2 = RepositoryDependencyParams {
-            repository_name: "main-app".to_string(),
-            dependency_name: "lib-b".to_string(),
+            repository_name: "test-main-app".to_string(),
+            dependency_name: "test-lib-b".to_string(),
             target_ref: None,
             purpose: Some("Database connector".to_string()),
         };
@@ -238,16 +238,16 @@ mod tests {
         
         // List dependencies
         let list_params = RepositoryListDependenciesParams {
-            repository_name: "main-app".to_string(),
+            repository_name: "test-main-app".to_string(),
         };
         let result = handle_repository_list_dependencies(list_params, config).await.unwrap();
         
-        assert_eq!(result.repository_name, "main-app");
+        assert_eq!(result.repository_name, "test-main-app");
         assert_eq!(result.dependencies.len(), 2);
         
         // Check first dependency
         let dep_a = result.dependencies.iter()
-            .find(|d| d.repository_name == "lib-a")
+            .find(|d| d.repository_name == "test-lib-a")
             .unwrap();
         assert_eq!(dep_a.target_ref, Some("v1.0.0".to_string()));
         assert_eq!(dep_a.purpose, Some("Authentication library".to_string()));
@@ -256,7 +256,7 @@ mod tests {
         
         // Check second dependency
         let dep_b = result.dependencies.iter()
-            .find(|d| d.repository_name == "lib-b")
+            .find(|d| d.repository_name == "test-lib-b")
             .unwrap();
         assert_eq!(dep_b.target_ref, None);
         assert_eq!(dep_b.purpose, Some("Database connector".to_string()));
@@ -269,11 +269,11 @@ mod tests {
         let (config, _temp_dir) = create_test_config_with_repos().await;
         
         let params = RepositoryListDependenciesParams {
-            repository_name: "main-app".to_string(),
+            repository_name: "test-main-app".to_string(),
         };
         
         let result = handle_repository_list_dependencies(params, config).await.unwrap();
-        assert_eq!(result.repository_name, "main-app");
+        assert_eq!(result.repository_name, "test-main-app");
         assert_eq!(result.dependencies.len(), 0);
     }
 
@@ -283,8 +283,8 @@ mod tests {
         
         // Test that a repository can depend on itself (though unusual)
         let params = RepositoryDependencyParams {
-            repository_name: "lib-a".to_string(),
-            dependency_name: "lib-a".to_string(),
+            repository_name: "test-lib-a".to_string(),
+            dependency_name: "test-lib-a".to_string(),
             target_ref: Some("v0.9.0".to_string()),
             purpose: Some("Self reference for testing".to_string()),
         };
@@ -294,11 +294,11 @@ mod tests {
         
         // Verify it was added
         let list_params = RepositoryListDependenciesParams {
-            repository_name: "lib-a".to_string(),
+            repository_name: "test-lib-a".to_string(),
         };
         let list_result = handle_repository_list_dependencies(list_params, config).await.unwrap();
         assert_eq!(list_result.dependencies.len(), 1);
-        assert_eq!(list_result.dependencies[0].repository_name, "lib-a");
+        assert_eq!(list_result.dependencies[0].repository_name, "test-lib-a");
     }
 
     #[tokio::test]
@@ -307,16 +307,16 @@ mod tests {
         
         // main-app depends on lib-a and lib-b
         let params1 = RepositoryDependencyParams {
-            repository_name: "main-app".to_string(),
-            dependency_name: "lib-a".to_string(),
+            repository_name: "test-main-app".to_string(),
+            dependency_name: "test-lib-a".to_string(),
             target_ref: Some("v1.0.0".to_string()),
             purpose: None,
         };
         handle_repository_add_dependency(params1, config.clone()).await.unwrap();
         
         let params2 = RepositoryDependencyParams {
-            repository_name: "main-app".to_string(),
-            dependency_name: "lib-b".to_string(),
+            repository_name: "test-main-app".to_string(),
+            dependency_name: "test-lib-b".to_string(),
             target_ref: None,
             purpose: None,
         };
@@ -324,8 +324,8 @@ mod tests {
         
         // lib-b depends on lib-a (transitive dependency)
         let params3 = RepositoryDependencyParams {
-            repository_name: "lib-b".to_string(),
-            dependency_name: "lib-a".to_string(),
+            repository_name: "test-lib-b".to_string(),
+            dependency_name: "test-lib-a".to_string(),
             target_ref: Some("v0.9.0".to_string()),
             purpose: Some("Shared utilities".to_string()),
         };
@@ -333,18 +333,18 @@ mod tests {
         
         // Verify main-app dependencies
         let list_main = RepositoryListDependenciesParams {
-            repository_name: "main-app".to_string(),
+            repository_name: "test-main-app".to_string(),
         };
         let result_main = handle_repository_list_dependencies(list_main, config.clone()).await.unwrap();
         assert_eq!(result_main.dependencies.len(), 2);
         
         // Verify lib-b dependencies
         let list_lib_b = RepositoryListDependenciesParams {
-            repository_name: "lib-b".to_string(),
+            repository_name: "test-lib-b".to_string(),
         };
         let result_lib_b = handle_repository_list_dependencies(list_lib_b, config).await.unwrap();
         assert_eq!(result_lib_b.dependencies.len(), 1);
-        assert_eq!(result_lib_b.dependencies[0].repository_name, "lib-a");
+        assert_eq!(result_lib_b.dependencies[0].repository_name, "test-lib-a");
         assert_eq!(result_lib_b.dependencies[0].target_ref, Some("v0.9.0".to_string()));
     }
 }

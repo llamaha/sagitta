@@ -1,0 +1,192 @@
+{
+  "panel_background": {
+    "r": 16,
+    "g": 15,
+    "b": 24,
+    "a": 255
+  },
+  "input_background": {
+    "r": 4,
+    "g": 1,
+    "b": 1,
+    "a": 255
+  },
+  "button_background": {
+    "r": 36,
+    "g": 54,
+    "b": 38,
+    "a": 255
+  },
+  "code_background": {
+    "r": 23,
+    "g": 21,
+    "b": 33,
+    "a": 255
+  },
+  "thinking_background": {
+    "r": 45,
+    "g": 31,
+    "b": 29,
+    "a": 255
+  },
+  "text_color": {
+    "r": 229,
+    "g": 235,
+    "b": 229,
+    "a": 255
+  },
+  "hint_text_color": {
+    "r": 145,
+    "g": 142,
+    "b": 169,
+    "a": 255
+  },
+  "code_text_color": {
+    "r": 213,
+    "g": 201,
+    "b": 200,
+    "a": 255
+  },
+  "thinking_text_color": {
+    "r": 171,
+    "g": 191,
+    "b": 173,
+    "a": 255
+  },
+  "timestamp_color": {
+    "r": 117,
+    "g": 112,
+    "b": 147,
+    "a": 255
+  },
+  "accent_color": {
+    "r": 145,
+    "g": 132,
+    "b": 231,
+    "a": 255
+  },
+  "success_color": {
+    "r": 82,
+    "g": 223,
+    "b": 82,
+    "a": 255
+  },
+  "warning_color": {
+    "r": 237,
+    "g": 147,
+    "b": 0,
+    "a": 255
+  },
+  "error_color": {
+    "r": 185,
+    "g": 39,
+    "b": 65,
+    "a": 255
+  },
+  "border_color": {
+    "r": 46,
+    "g": 70,
+    "b": 49,
+    "a": 255
+  },
+  "focus_border_color": {
+    "r": 223,
+    "g": 99,
+    "b": 82,
+    "a": 255
+  },
+  "button_hover_color": {
+    "r": 49,
+    "g": 46,
+    "b": 70,
+    "a": 255
+  },
+  "button_disabled_color": {
+    "r": 36,
+    "g": 30,
+    "b": 29,
+    "a": 255
+  },
+  "button_text_color": {
+    "r": 229,
+    "g": 235,
+    "b": 229,
+    "a": 255
+  },
+  "button_disabled_text_color": {
+    "r": 145,
+    "g": 142,
+    "b": 169,
+    "a": 255
+  },
+  "base_font_size": 14.0,
+  "header_font_size": 16.0,
+  "code_font_size": 13.0,
+  "small_font_size": 11.0,
+  "user_color": {
+    "r": 96,
+    "g": 209,
+    "b": 110,
+    "a": 255
+  },
+  "agent_color": {
+    "r": 110,
+    "g": 96,
+    "b": 209,
+    "a": 255
+  },
+  "system_color": {
+    "r": 209,
+    "g": 110,
+    "b": 96,
+    "a": 255
+  },
+  "tool_color": {
+    "r": 96,
+    "g": 209,
+    "b": 110,
+    "a": 255
+  },
+  "streaming_color": {
+    "r": 99,
+    "g": 82,
+    "b": 223,
+    "a": 255
+  },
+  "thinking_indicator_color": {
+    "r": 223,
+    "g": 99,
+    "b": 82,
+    "a": 255
+  },
+  "complete_color": {
+    "r": 82,
+    "g": 223,
+    "b": 99,
+    "a": 255
+  },
+  "diff_added_bg": {
+    "r": 22,
+    "g": 79,
+    "b": 22,
+    "a": 255
+  },
+  "diff_removed_bg": {
+    "r": 79,
+    "g": 22,
+    "b": 22,
+    "a": 255
+  },
+  "diff_added_text": {
+    "r": 136,
+    "g": 220,
+    "b": 136,
+    "a": 255
+  },
+  "diff_removed_text": {
+    "r": 220,
+    "g": 136,
+    "b": 136,
+    "a": 255
+  }
+}

@@ -400,4 +400,90 @@ mod tests {
         let line_count = content.lines().count();
         line_count as f32 * 15.0
     }
+    
+    #[test]
+    fn test_format_tool_parameters_for_semantic_search() {
+        use crate::gui::chat::view::format_tool_parameters;
+        
+        // Test semantic search tool with snake_case parameters
+        let semantic_search_params = json!({
+            "query": "format_tool_parameters function",
+            "repository": "sagitta-code",
+            "limit": 10
+        });
+        
+        let params = format_tool_parameters("mcp__query", &semantic_search_params);
+        assert!(!params.is_empty(), "Semantic search parameters should not be empty");
+        
+        // Check that all parameters are captured
+        let param_map: std::collections::HashMap<_, _> = params.into_iter().collect();
+        assert_eq!(param_map.get("Query"), Some(&"format_tool_parameters function".to_string()));
+        assert_eq!(param_map.get("Repository"), Some(&"sagitta-code".to_string()));
+        assert_eq!(param_map.get("Limit"), Some(&"10".to_string()));
+    }
+    
+    #[test]
+    fn test_format_tool_parameters_for_mcp_semantic_search_camelcase() {
+        use crate::gui::chat::view::format_tool_parameters;
+        
+        // Test semantic search tool with camelCase parameters (MCP style)
+        let semantic_search_params = json!({
+            "queryText": "find main function",
+            "repository": "my-project",
+            "limit": 5
+        });
+        
+        let params = format_tool_parameters("mcp__sagitta-internal-uuid__query", &semantic_search_params);
+        assert!(!params.is_empty(), "MCP semantic search parameters should not be empty");
+        
+        // Check that camelCase parameters are captured
+        let param_map: std::collections::HashMap<_, _> = params.into_iter().collect();
+        assert_eq!(param_map.get("Query"), Some(&"find main function".to_string()));
+        assert_eq!(param_map.get("Repository"), Some(&"my-project".to_string()));
+        assert_eq!(param_map.get("Limit"), Some(&"5".to_string()));
+    }
+    
+    #[test]
+    fn test_format_tool_parameters_for_other_tools() {
+        use crate::gui::chat::view::format_tool_parameters;
+        
+        // Test Read tool with snake_case
+        let read_params = json!({
+            "file_path": "/home/user/test.rs"
+        });
+        let params = format_tool_parameters("Read", &read_params);
+        let param_map: std::collections::HashMap<_, _> = params.into_iter().collect();
+        assert_eq!(param_map.get("File"), Some(&"/home/user/test.rs".to_string()));
+        
+        // Test MCP file tool with camelCase
+        let mcp_read_params = json!({
+            "filePath": "/home/user/mcp_file.js"
+        });
+        let params = format_tool_parameters("mcp__some-server__read_file", &mcp_read_params);
+        let param_map: std::collections::HashMap<_, _> = params.into_iter().collect();
+        assert_eq!(param_map.get("File"), Some(&"/home/user/mcp_file.js".to_string()));
+        
+        // Test Bash tool
+        let bash_params = json!({
+            "command": "ls -la"
+        });
+        let params = format_tool_parameters("Bash", &bash_params);
+        let param_map: std::collections::HashMap<_, _> = params.into_iter().collect();
+        assert_eq!(param_map.get("Command"), Some(&"ls -la".to_string()));
+        
+        // Test generic tool with various parameter types
+        let generic_params = json!({
+            "search_term": "test",
+            "case_sensitive": true,
+            "max_results": 50
+        });
+        let params = format_tool_parameters("GenericTool", &generic_params);
+        assert_eq!(params.len(), 3);
+        
+        // Check that keys are properly formatted
+        let param_map: std::collections::HashMap<_, _> = params.into_iter().collect();
+        assert!(param_map.contains_key("Search Term"));
+        assert!(param_map.contains_key("Case Sensitive"));
+        assert!(param_map.contains_key("Max Results"));
+    }
 }

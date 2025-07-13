@@ -183,7 +183,7 @@ pub struct AppConfig {
     /// Path to the ONNX tokenizer configuration directory or file.
     pub onnx_tokenizer_path: Option<String>,
     /// Embedding model to download and use (alternative to onnx_model_path/onnx_tokenizer_path).
-    /// Options: "bge-small-fast" (INT8), "bge-small-fp32" (standard precision), or any HuggingFace model ID.
+    /// Options: "bge-small-fast" (INT8), "bge-small-fp32", "bge-medium", "bge-large", or any HuggingFace model ID.
     /// Cannot be used together with onnx_model_path/onnx_tokenizer_path.
     pub embed_model: Option<String>,
     /// Optional path to a file containing the server API key.
@@ -440,6 +440,8 @@ pub fn save_config(config: &AppConfig, override_path: Option<&PathBuf>) -> Resul
         onnx_comments.push_str("\n# The model will be downloaded to ~/.cache/huggingface/hub/");
         onnx_comments.push_str("\n#embed_model = \"bge-small-fast\"  # BGE Small v1.5 with INT8 quantization (fast)");
         onnx_comments.push_str("\n#embed_model = \"bge-small-fp32\"  # BGE Small v1.5 with FP32 (standard precision)");
+        onnx_comments.push_str("\n#embed_model = \"bge-medium\"      # BGE Base v1.5 with FP32 (medium size)");
+        onnx_comments.push_str("\n#embed_model = \"bge-large\"       # BGE Large v1.5 with FP32 (large size)");
         onnx_comments.push_str("\n# Or use any HuggingFace model ID:");
         onnx_comments.push_str("\n#embed_model = \"BAAI/bge-base-en-v1.5\"");
         onnx_comments.push('\n');
@@ -464,7 +466,7 @@ pub fn save_config(config: &AppConfig, override_path: Option<&PathBuf>) -> Resul
         if !onnx_comments.is_empty() {
             onnx_comments.push('\n');
             onnx_comments.push_str("\n# Alternative: Use automatic model downloading instead");
-            onnx_comments.push_str("\n#embed_model = \"bge-small-fast\"  # or \"bge-small-fp32\"");
+            onnx_comments.push_str("\n#embed_model = \"bge-small-fast\"  # or \"bge-small-fp32\", \"bge-medium\", \"bge-large\"");
         }
     }
 

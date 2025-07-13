@@ -183,7 +183,7 @@ pub async fn handle_simple_command(
 
 async fn handle_simple_index(
     cmd_args: &SimpleIndexArgs,
-    cli_args: &CliArgs,
+    _cli_args: &CliArgs,
     config: &AppConfig,
     client: Arc<Qdrant>,
 ) -> Result<()> {
@@ -192,13 +192,7 @@ async fn handle_simple_index(
     let collection_name = LEGACY_INDEX_COLLECTION;
     log::info!("Using default collection: '{collection_name}'");
 
-    // --- Validate Config for ONNX paths for simple index FIRST ---
-    if cli_args.onnx_model_path_arg.is_some() || std::env::var("SAGITTA_ONNX_MODEL").is_ok() {
-        return Err(anyhow!("For 'simple index', ONNX model path must be provided solely via the configuration file, not CLI arguments or environment variables."));
-    }
-    if cli_args.onnx_tokenizer_dir_arg.is_some() || std::env::var("SAGITTA_ONNX_TOKENIZER_DIR").is_ok() {
-         return Err(anyhow!("For 'simple index', ONNX tokenizer path must be provided solely via the configuration file, not CLI arguments or environment variables."));
-    }
+    // ONNX validation is now handled in main.rs before this function is called
     // Check if either embed_model or ONNX paths are configured
     let has_embed_model = config.embed_model.is_some();
     let has_onnx_paths = config.onnx_model_path.is_some() && config.onnx_tokenizer_path.is_some();

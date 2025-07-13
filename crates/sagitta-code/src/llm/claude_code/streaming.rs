@@ -9,16 +9,27 @@ use crate::llm::client::{StreamChunk, MessagePart, TokenUsage};
 use crate::utils::errors::SagittaCodeError;
 use super::message_converter::{ClaudeChunk, ContentBlock};
 use serde_json::Deserializer;
+use tokio_util::sync::CancellationToken;
+use std::sync::Arc;
 
 /// Stream implementation for Claude Code output
 pub struct ClaudeCodeStream {
     receiver: mpsc::UnboundedReceiver<Result<StreamChunk, SagittaCodeError>>,
+    process_id: Option<u32>,
+    cancellation_token: Arc<CancellationToken>,
 }
 
 impl ClaudeCodeStream {
     /// Create a new stream from a Claude process
-    pub fn new(mut child: Child) -> Self {
+    pub fn new(child: Child) -> Self {
+        Self::new_with_cancellation(child, Arc::new(CancellationToken::new()))
+    }
+    
+    /// Create a new stream with a cancellation token
+    pub fn new_with_cancellation(mut child: Child, cancellation_token: Arc<CancellationToken>) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
+        let process_id = child.id();
+        let token_clone = cancellation_token.clone();
         
         // Spawn a task to read from the process
         task::spawn_blocking(move || {
@@ -81,6 +92,16 @@ impl ClaudeCodeStream {
                 
                 // Process bytes as they arrive for real-time streaming
                 loop {
+                    // Check if cancellation was requested
+                    if token_clone.is_cancelled() {
+                        log::info!("CLAUDE_CODE: Stream cancelled, killing process");
+                        let _ = child.kill();
+                        let _ = sender.send(Err(SagittaCodeError::LlmError(
+                            "Stream cancelled by user".to_string()
+                        )));
+                        return;
+                    }
+                    
                     match stdout.read(&mut buffer) {
                         Ok(0) => {
                             // EOF reached
@@ -354,7 +375,40 @@ impl ClaudeCodeStream {
             }
         });
         
-        Self { receiver }
+        Self { 
+            receiver,
+            process_id: Some(process_id),
+            cancellation_token,
+        }
+    }
+    
+    /// Cancel the stream and kill the process
+    pub fn cancel(&self) {
+        log::info!("CLAUDE_CODE: Cancelling stream");
+        self.cancellation_token.cancel();
+        
+        // Also try to kill the process directly if we have the ID
+        if let Some(pid) = self.process_id {
+            log::info!("CLAUDE_CODE: Attempting to kill process with PID: {}", pid);
+            #[cfg(unix)]
+            {
+                use nix::sys::signal::{kill, Signal};
+                use nix::unistd::Pid;
+                
+                if let Err(e) = kill(Pid::from_raw(pid as i32), Signal::SIGTERM) {
+                    log::error!("CLAUDE_CODE: Failed to send SIGTERM to process {}: {}", pid, e);
+                    // Try SIGKILL as fallback
+                    if let Err(e) = kill(Pid::from_raw(pid as i32), Signal::SIGKILL) {
+                        log::error!("CLAUDE_CODE: Failed to send SIGKILL to process {}: {}", pid, e);
+                    }
+                }
+            }
+            #[cfg(windows)]
+            {
+                // On Windows, we would use TerminateProcess, but for now just log
+                log::warn!("CLAUDE_CODE: Process termination not implemented for Windows");
+            }
+        }
     }
 }
 

@@ -273,7 +273,7 @@ fn test_processing_config_defaults() {
     assert!(config.file_processing_concurrency > 0);
     assert_eq!(config.max_embedding_sessions, 4);
     assert_eq!(config.processing_queue_size, 1000);
-    assert_eq!(config.embedding_batch_size, 256);
+    assert_eq!(config.embedding_batch_size, 8);
     assert_eq!(config.max_file_size_bytes, 5 * 1024 * 1024);
 }
 

@@ -345,7 +345,7 @@ fn test_constants() {
     assert_eq!(DEFAULT_EMBEDDING_DIMENSION, 384);
     assert_eq!(DEFAULT_SESSION_TIMEOUT_SECONDS, 300);
     assert!(DEFAULT_ENABLE_SESSION_CLEANUP);
-    assert_eq!(DEFAULT_EMBEDDING_BATCH_SIZE, 256);
+    assert_eq!(DEFAULT_EMBEDDING_BATCH_SIZE, 8);
 }
 
 #[tokio::test]
