@@ -361,6 +361,8 @@ pub struct SearchResultItem {
     pub content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview: Option<String>,
+    pub element_type: String,
+    pub language: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]

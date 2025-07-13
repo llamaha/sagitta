@@ -9,6 +9,7 @@ use sagitta_search::{
     config::AppConfig,
     constants::{
         FIELD_BRANCH, FIELD_CHUNK_CONTENT, FIELD_END_LINE, FIELD_FILE_PATH, FIELD_START_LINE,
+        FIELD_ELEMENT_TYPE, FIELD_LANGUAGE,
     },
     EmbeddingPool,
     error::SagittaError,
@@ -147,6 +148,16 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
             .and_then(|k| if let Kind::StringValue(s) = k { Some(s.clone()) } else { None })
             .unwrap_or_else(|| { warn!(point_id=?scored_point.id, "Missing or invalid content in payload"); "<content missing>".to_string() });
 
+        let element_type = payload.get(FIELD_ELEMENT_TYPE)
+            .and_then(|v| v.kind.as_ref())
+            .and_then(|k| if let Kind::StringValue(s) = k { Some(s.clone()) } else { None })
+            .unwrap_or_else(|| { warn!(point_id=?scored_point.id, "Missing element_type in payload"); "unknown".to_string() });
+
+        let language = payload.get(FIELD_LANGUAGE)
+            .and_then(|v| v.kind.as_ref())
+            .and_then(|k| if let Kind::StringValue(s) = k { Some(s.clone()) } else { None })
+            .unwrap_or_else(|| { warn!(point_id=?scored_point.id, "Missing language in payload"); "unknown".to_string() });
+
         // Extract first line for preview (truncate at 120 chars if too long)
         let preview = chunk_content.lines()
             .next()
@@ -172,6 +183,8 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
             score: scored_point.score,
             content,
             preview,
+            element_type,
+            language,
         });
     }
 
@@ -682,6 +695,8 @@ mod tests {
             payload.insert(FIELD_START_LINE.to_string(), Value::from(10i64));
             payload.insert(FIELD_END_LINE.to_string(), Value::from(20i64));
             payload.insert(FIELD_CHUNK_CONTENT.to_string(), Value::from("fn test_function() {\n    println!(\"Test content\");\n}"));
+            payload.insert(FIELD_ELEMENT_TYPE.to_string(), Value::from("function"));
+            payload.insert(FIELD_LANGUAGE.to_string(), Value::from("rust"));
             
             let scored_point = ScoredPoint {
                 id: Some(PointId { point_id_options: Some(qdrant_client::qdrant::point_id::PointIdOptions::Num(1)) }),
@@ -755,6 +770,8 @@ mod tests {
             payload.insert(FIELD_START_LINE.to_string(), Value::from(10i64));
             payload.insert(FIELD_END_LINE.to_string(), Value::from(20i64));
             payload.insert(FIELD_CHUNK_CONTENT.to_string(), Value::from("fn test_function() {\n    println!(\"Test content\");\n}"));
+            payload.insert(FIELD_ELEMENT_TYPE.to_string(), Value::from("function"));
+            payload.insert(FIELD_LANGUAGE.to_string(), Value::from("rust"));
             
             let scored_point = ScoredPoint {
                 id: Some(PointId { point_id_options: Some(qdrant_client::qdrant::point_id::PointIdOptions::Num(1)) }),
