@@ -392,7 +392,7 @@ fn deduplicate_search_results(results: Vec<ScoredPoint>) -> Vec<ScoredPoint> {
     let mut deduplicated = Vec::new();
     
     for result in results {
-        // Extract file_path, start_line, and end_line from the payload
+        // Extract file_path, start_line, end_line, and element_type from the payload
         let key = if !result.payload.is_empty() {
             let file_path = result.payload.get("file_path")
                 .and_then(|v| v.as_str())
@@ -404,7 +404,13 @@ fn deduplicate_search_results(results: Vec<ScoredPoint>) -> Vec<ScoredPoint> {
             let end_line = result.payload.get("end_line")
                 .and_then(|v| v.as_integer())
                 .unwrap_or(0);
-            format!("{}:{}:{}", file_path, start_line, end_line)
+            let element_type = result.payload.get("element_type")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            
+            // Include element_type in deduplication key to allow same location with different element types
+            format!("{}:{}:{}:{}", file_path, start_line, end_line, element_type)
         } else {
             // Fallback to using the point ID if payload is missing
             format!("id:{:?}", result.id)
