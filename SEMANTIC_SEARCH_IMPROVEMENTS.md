@@ -41,18 +41,15 @@
    - Verified precise filtering with `elementType="function"` and `lang="rust"` parameters
    - Successfully demonstrated improved search precision in "Tell me how sagitta-cli works" test query
 
-### **Phase 2: Fix Deduplication Strategy** 🔄 **IN PROGRESS**
-1. **Move deduplication to indexing time**:
-   - Assign unique IDs to chunks during parsing/indexing
-   - Prevent duplicate chunks from being indexed in the first place
+### **Phase 2: Fix Deduplication Strategy** ✅ **COMPLETED**
+1. **✅ Improved runtime deduplication**:
+   - Include `element_type` in deduplication key to allow same location with different element types
+   - Implemented score-based deduplication to keep highest-scoring result for each unique key
+   - Replaced HashSet with HashMap for more sophisticated deduplication logic
    
-2. **Improve chunk ID strategy**:
-   - Use content hash + metadata for unique chunk identification
-   - Consider semantic boundaries when creating chunk IDs
-
-3. **Fix runtime deduplication**:
-   - If keeping runtime deduplication, include `elementType` in the deduplication key
-   - Consider score-based deduplication (keep highest scoring result for same location)
+2. **🔄 Future improvements (optional)**:
+   - Move deduplication to indexing time for better performance
+   - Use content hash + metadata for unique chunk identification during indexing
 
 ### **Phase 3: Investigate Chunking Overlaps** 🔄 **PENDING**
 1. **Audit language parsers**:
