@@ -172,4 +172,76 @@ package main // Need package for it to be valid Go
 
         Ok(())
     }
+
+    #[test]
+    fn test_no_overlapping_chunks() -> Result<()> {
+        let code = r#"
+package main
+
+import (
+    "fmt"
+    "math"
+)
+
+type Point struct {
+    X int
+    Y int
+}
+
+func (p Point) Distance() float64 {
+    return math.Sqrt(float64(p.X*p.X + p.Y*p.Y))
+}
+
+func (p *Point) SetX(x int) {
+    p.X = x
+}
+
+type Shape interface {
+    Area() float64
+}
+
+type Circle struct {
+    Point
+    Radius float64
+}
+
+func (c Circle) Area() float64 {
+    return math.Pi * c.Radius * c.Radius
+}
+
+func main() {
+    p := Point{X: 3, Y: 4}
+    fmt.Printf("Distance: %f\n", p.Distance())
+    
+    // Nested function
+    helper := func() float64 {
+        return p.Distance() * 2
+    }
+    
+    fmt.Printf("Double: %f\n", helper())
+}
+"#;
+        
+        let mut parser = create_parser();
+        let chunks = parser.parse(code, "test.go")?;
+        
+        // Check for overlaps
+        let mut overlaps = Vec::new();
+        for (i, chunk1) in chunks.iter().enumerate() {
+            for (j, chunk2) in chunks.iter().enumerate().skip(i + 1) {
+                // Check if chunks overlap (overlapping line ranges)
+                if chunk1.start_line <= chunk2.end_line && chunk2.start_line <= chunk1.end_line {
+                    overlaps.push((i, j));
+                    println!("OVERLAP FOUND in Go:");
+                    println!("  Chunk {}: lines {}-{} ({})", i, chunk1.start_line, chunk1.end_line, chunk1.element_type);
+                    println!("  Chunk {}: lines {}-{} ({})", j, chunk2.start_line, chunk2.end_line, chunk2.element_type);
+                    println!("  Chunk {} content preview: {}", i, chunk1.content.lines().next().unwrap_or(""));
+                    println!("  Chunk {} content preview: {}", j, chunk2.content.lines().next().unwrap_or(""));
+                }
+            }
+        }
+        
+        assert!(overlaps.is_empty(), "Found {} overlapping chunks in Go parser", overlaps.len());
+        Ok(())
+    }
 } 
