@@ -74,7 +74,20 @@
 - 🔄 `crates/sagitta-search/src/indexing.rs` - Add chunk uniqueness validation (Phase 2)
 - 🔄 `crates/code-parsers/src/*.rs` - Audit for overlapping chunks (Phase 3)
 
+## **Testing & Validation:**
+- ✅ MCP tests pass (84 tests passed, 0 failed)
+- ✅ Full compilation successful
+- ✅ Git commit created: `0df3bb2` 
+- ✅ Repository synced with updated indexing
+
 ## **Next Steps:**
-- Test Phase 1 changes after restart
-- Proceed with Phase 2 if Phase 1 works correctly
-- Continue with remaining phases based on testing results
+- 🎯 **Ready for testing**: Restart sagitta-code to test Phase 1 elementType/language fields
+- 🎯 **Phase 2**: Once validated, proceed with deduplication logic improvements
+- 🎯 **Phase 3**: Investigate chunking overlaps
+- 🎯 **Phase 4**: Output quality improvements
+
+## **Expected User Impact:**
+After restart, MCP search results will include:
+- `elementType`: Shows code construct type (function, class, struct, etc.)
+- `language`: Shows programming language (rust, python, javascript, etc.)
+This provides the same rich information available in CLI to MCP users.
