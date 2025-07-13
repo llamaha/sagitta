@@ -26,7 +26,7 @@
 
 ## **Implementation Progress:**
 
-### **Phase 1: Fix MCP Output Format** ✅ **COMPLETED**
+### **Phase 1: Fix MCP Output Format** ✅ **COMPLETED & TESTED**
 1. **Add missing fields to `SearchResultItem`**: ✅
    - Add `elementType: String` field  
    - Add `language: String` field
@@ -36,7 +36,12 @@
    - Create shared preview generation logic
    - Ensure consistent truncation behavior across CLI and MCP
 
-### **Phase 2: Fix Deduplication Strategy** 🔄 **PENDING**
+3. **Testing Validation**: ✅
+   - Confirmed both `elementType` and `language` fields are populated correctly
+   - Verified precise filtering with `elementType="function"` and `lang="rust"` parameters
+   - Successfully demonstrated improved search precision in "Tell me how sagitta-cli works" test query
+
+### **Phase 2: Fix Deduplication Strategy** 🔄 **IN PROGRESS**
 1. **Move deduplication to indexing time**:
    - Assign unique IDs to chunks during parsing/indexing
    - Prevent duplicate chunks from being indexed in the first place
