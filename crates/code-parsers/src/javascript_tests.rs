@@ -170,4 +170,73 @@ Another comment
         Ok(())
     }
 
+    #[test]
+    fn test_no_overlapping_chunks() -> Result<()> {
+        let code = r#"
+// Test for overlapping chunks
+import { Something } from './module';
+
+class Point {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+    }
+    
+    distance() {
+        return Math.sqrt(this.x ** 2 + this.y ** 2);
+    }
+    
+    static fromOrigin() {
+        return new Point(0, 0);
+    }
+}
+
+function main() {
+    const p = new Point(3, 4);
+    console.log(`Distance: ${p.distance()}`);
+    
+    // Nested function
+    function helper() {
+        return p.distance() * 2;
+    }
+    
+    return helper();
+}
+
+// Arrow function
+const calculate = (a, b) => {
+    const sum = a + b;
+    const product = a * b;
+    return { sum, product };
+};
+
+// Function expression
+const process = function(data) {
+    return data.map(item => item * 2);
+};
+"#;
+        
+        let mut parser = create_parser();
+        let chunks = parser.parse(code, "test.js")?;
+        
+        // Check for overlaps
+        let mut overlaps = Vec::new();
+        for (i, chunk1) in chunks.iter().enumerate() {
+            for (j, chunk2) in chunks.iter().enumerate().skip(i + 1) {
+                // Check if chunks overlap (overlapping line ranges)
+                if chunk1.start_line <= chunk2.end_line && chunk2.start_line <= chunk1.end_line {
+                    overlaps.push((i, j));
+                    println!("OVERLAP FOUND in JavaScript:");
+                    println!("  Chunk {}: lines {}-{} ({})", i, chunk1.start_line, chunk1.end_line, chunk1.element_type);
+                    println!("  Chunk {}: lines {}-{} ({})", j, chunk2.start_line, chunk2.end_line, chunk2.element_type);
+                    println!("  Chunk {} content preview: {}", i, chunk1.content.lines().next().unwrap_or(""));
+                    println!("  Chunk {} content preview: {}", j, chunk2.content.lines().next().unwrap_or(""));
+                }
+            }
+        }
+        
+        assert!(overlaps.is_empty(), "Found {} overlapping chunks in JavaScript parser", overlaps.len());
+        Ok(())
+    }
+
 } 
