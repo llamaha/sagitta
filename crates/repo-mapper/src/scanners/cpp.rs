@@ -1,6 +1,6 @@
-use crate::types::{CodeMethod, MethodType, MethodInfo};
+use crate::types::{MethodType, MethodInfo};
 use regex::Regex;
-use std::collections::HashMap;
+
 
 /// Line-by-line C++ scanner for compatibility with the main mapper
 pub fn scan_line(
@@ -138,6 +138,8 @@ fn extract_method_calls(context: &str, max_calls: usize) -> Vec<String> {
     calls
 }
 
+/*
+// Full content-based scanner (for future use)
 pub fn scan_cpp_methods(content: &str) -> Vec<CodeMethod> {
     let mut methods = Vec::new();
     let lines: Vec<&str> = content.lines().collect();
