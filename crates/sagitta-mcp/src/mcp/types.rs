@@ -363,6 +363,26 @@ pub struct SearchResultItem {
     pub preview: Option<String>,
     pub element_type: String,
     pub language: String,
+    /// Rich code context information for better understanding
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_info: Option<CodeContextInfo>,
+}
+
+/// Rich code context information for search results
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CodeContextInfo {
+    /// Function or method signature if applicable
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+    /// Parent class or module name
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_name: Option<String>,
+    /// Brief description extracted from comments
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Key identifiers in this code chunk
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub identifiers: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
