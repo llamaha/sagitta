@@ -68,6 +68,18 @@ pub enum MethodType {
     PythonClassMethod,
     PythonClass,
     
+    // C++
+    CppFunction,
+    CppMethod,
+    CppStaticMethod,
+    CppVirtualMethod,
+    CppConstructor,
+    CppDestructor,
+    CppClass,
+    CppStruct,
+    CppNamespace,
+    CppTemplate,
+    
     // YAML
     YamlDef,
     YamlValue,
