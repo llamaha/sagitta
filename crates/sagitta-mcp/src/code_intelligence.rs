@@ -302,7 +302,7 @@ fn extract_identifiers(content: &str, language: &str) -> Vec<String> {
 }
 
 fn is_common_keyword(word: &str, language: &str) -> bool {
-    let keywords = match language {
+    let keywords: &[&str] = match language {
         "rust" => &["let", "mut", "fn", "pub", "use", "mod", "impl", "for", "if", "else", "match"],
         "python" => &["def", "class", "if", "else", "for", "while", "try", "except", "import", "from"],
         "javascript" | "typescript" => &["function", "var", "let", "const", "if", "else", "for", "while", "class"],
@@ -311,7 +311,7 @@ fn is_common_keyword(word: &str, language: &str) -> bool {
     keywords.contains(&word)
 }
 
-fn find_function_signature_line(lines: &[&str], language: &str) -> Option<&str> {
+fn find_function_signature_line<'a>(lines: &'a [&str], language: &str) -> Option<&'a str> {
     for line in lines {
         let trimmed = line.trim();
         match language {
@@ -340,7 +340,7 @@ fn find_function_signature_line(lines: &[&str], language: &str) -> Option<&str> 
     None
 }
 
-fn find_class_declaration_line(lines: &[&str], language: &str) -> Option<&str> {
+fn find_class_declaration_line<'a>(lines: &'a [&str], language: &str) -> Option<&'a str> {
     for line in lines {
         let trimmed = line.trim();
         if trimmed.starts_with("class ") || trimmed.starts_with("struct ") || trimmed.starts_with("pub struct ") {

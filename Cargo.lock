@@ -5379,6 +5379,7 @@ dependencies = [
  "mockall",
  "qdrant-client",
  "rand 0.8.5",
+ "regex",
  "repo-mapper",
  "reqwest 0.11.27",
  "sagitta-embed",

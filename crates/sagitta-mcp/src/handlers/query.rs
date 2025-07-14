@@ -164,10 +164,13 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
 
         let content = if params.show_code.unwrap_or(false) {
             // Only include full content if show_code is explicitly true
-            Some(chunk_content)
+            Some(chunk_content.clone())
         } else {
             None
         };
+
+        // Extract rich code context information for Phase 4
+        let context_info = extract_code_context(&chunk_content, &element_type, &language);
 
         results.push(SearchResultItem {
             file_path,
@@ -178,6 +181,7 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
             preview,
             element_type,
             language,
+            context_info,
         });
     }
 
