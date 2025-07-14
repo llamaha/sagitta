@@ -383,6 +383,12 @@ pub struct CodeContextInfo {
     /// Key identifiers in this code chunk
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub identifiers: Vec<String>,
+    /// Functions/methods that this code calls (outgoing calls)
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub outgoing_calls: Vec<String>,
+    /// Functions/methods that call this code (incoming calls)
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub incoming_calls: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
