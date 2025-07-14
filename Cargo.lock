@@ -1020,6 +1020,7 @@ dependencies = [
  "regex",
  "tempfile",
  "tree-sitter 0.22.6",
+ "tree-sitter-cpp",
  "tree-sitter-go",
  "tree-sitter-html",
  "tree-sitter-javascript",
@@ -5379,6 +5380,7 @@ dependencies = [
  "mockall",
  "qdrant-client",
  "rand 0.8.5",
+ "regex",
  "repo-mapper",
  "reqwest 0.11.27",
  "sagitta-embed",
@@ -6468,6 +6470,16 @@ checksum = "df7cc499ceadd4dcdf7ec6d4cbc34ece92c3fa07821e287aedecd4416c516dca"
 dependencies = [
  "cc",
  "regex",
+]
+
+[[package]]
+name = "tree-sitter-cpp"
+version = "0.22.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d509a22a992790d38f2c291961ff8a1ff016c437c7ec6befc9220b8eec8918c"
+dependencies = [
+ "cc",
+ "tree-sitter 0.22.6",
 ]
 
 [[package]]

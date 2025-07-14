@@ -132,6 +132,8 @@ impl SyntaxParser for PythonParser {
             false
         };
 
+
+
         let matches = cursor.matches(&self.query, root_node, code_bytes);
 
         for mat in matches {
@@ -139,14 +141,35 @@ impl SyntaxParser for PythonParser {
                 let node = capture.node;
                 let capture_name = self.query.capture_names()[capture.index as usize];
 
-                // ** REMOVED Filter: Ensure the node's parent is the module **
-                // if node.parent().map_or(true, |p| p.kind() != "module") {
-                //     continue; // Skip nodes not directly under the module
-                // }
+                // Filter: Only capture top-level items or methods within classes
+                let parent_kind = node.parent().map(|p| p.kind()).unwrap_or("");
+                
+                // Allow top-level items and methods within classes
+                if parent_kind != "module" && parent_kind != "class_definition" {
+                    continue; // Skip deeply nested items
+                }
+
+                // Skip functions that are nested inside other functions (but allow class methods)
+                if capture_name == "func" {
+                    let mut current = node.parent();
+                    let mut nested_in_function = false;
+                    while let Some(parent) = current {
+                        if parent.kind() == "module" || parent.kind() == "class_definition" {
+                            break; // reached acceptable level
+                        }
+                        if parent.kind() == "function_definition" {
+                            nested_in_function = true;
+                            break;
+                        }
+                        current = parent.parent();
+                    }
+                    if nested_in_function {
+                        continue;
+                    }
+                }
 
                 // Apply filters based on node type and content (e.g., for top-level items)
-                if node.parent().is_some_and(|p| p.kind() == "module") 
-                    && capture_name == "expr_stmt" 
+                if capture_name == "expr_stmt" 
                     && (is_docstring(node) || is_pass_stmt(node, code_bytes)) {
                     continue; // Skip docstrings and top-level 'pass'
                 }

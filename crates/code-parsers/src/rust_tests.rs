@@ -214,4 +214,85 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn test_no_overlapping_chunks() -> Result<()> {
+        let code = r#"
+        // Test for overlapping chunks
+        use std::collections::HashMap;
+
+        /// A struct with documentation
+        struct Point {
+            x: i32,
+            y: i32,
+        }
+
+        /// Implementation with methods
+        impl Point {
+            /// Constructor
+            fn new(x: i32, y: i32) -> Self {
+                Point { x, y }
+            }
+            
+            /// Calculate distance
+            fn distance(&self) -> f64 {
+                ((self.x * self.x + self.y * self.y) as f64).sqrt()
+            }
+        }
+
+        /// A trait definition
+        trait Drawable {
+            fn draw(&self);
+        }
+
+        /// Implementation of trait
+        impl Drawable for Point {
+            fn draw(&self) {
+                println!("Point at ({}, {})", self.x, self.y);
+            }
+        }
+
+        /// Module with nested items
+        mod geometry {
+            /// Nested struct
+            struct Circle {
+                radius: f64,
+            }
+            
+            impl Circle {
+                fn area(&self) -> f64 {
+                    std::f64::consts::PI * self.radius * self.radius
+                }
+            }
+        }
+
+        /// Main function
+        fn main() {
+            let p = Point::new(3, 4);
+            println!("Distance: {}", p.distance());
+        }
+        "#;
+        
+        let mut parser = create_parser();
+        let chunks = parser.parse(code, "test.rs")?;
+        
+        // Check for overlaps
+        let mut overlaps = Vec::new();
+        for (i, chunk1) in chunks.iter().enumerate() {
+            for (j, chunk2) in chunks.iter().enumerate().skip(i + 1) {
+                // Check if chunks overlap (overlapping line ranges)
+                if chunk1.start_line <= chunk2.end_line && chunk2.start_line <= chunk1.end_line {
+                    overlaps.push((i, j));
+                    println!("OVERLAP FOUND:");
+                    println!("  Chunk {}: lines {}-{} ({})", i, chunk1.start_line, chunk1.end_line, chunk1.element_type);
+                    println!("  Chunk {}: lines {}-{} ({})", j, chunk2.start_line, chunk2.end_line, chunk2.element_type);
+                    println!("  Chunk {} content preview: {}", i, chunk1.content.lines().next().unwrap_or(""));
+                    println!("  Chunk {} content preview: {}", j, chunk2.content.lines().next().unwrap_or(""));
+                }
+            }
+        }
+        
+        assert!(overlaps.is_empty(), "Found {} overlapping chunks in Rust parser", overlaps.len());
+        Ok(())
+    }
+
 } 

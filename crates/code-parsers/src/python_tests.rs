@@ -186,4 +186,89 @@ pass # A simple pass statement
         assert_eq!(chunks[0].element_type, "fallback_chunk_0", "Should be a fallback chunk");
         Ok(())
     }
+
+    #[test]
+    fn test_no_overlapping_chunks() -> Result<()> {
+        let code = r#"
+# Test for overlapping chunks
+import os
+from typing import List, Dict
+
+class Point:
+    """A point in 2D space"""
+    
+    def __init__(self, x: int, y: int):
+        """Initialize the point"""
+        self.x = x
+        self.y = y
+    
+    def distance(self) -> float:
+        """Calculate distance from origin"""
+        return (self.x ** 2 + self.y ** 2) ** 0.5
+    
+    @property
+    def magnitude(self) -> float:
+        """Alias for distance"""
+        return self.distance()
+
+class Circle(Point):
+    """A circle with center and radius"""
+    
+    def __init__(self, x: int, y: int, radius: float):
+        super().__init__(x, y)
+        self.radius = radius
+    
+    def area(self) -> float:
+        """Calculate area"""
+        import math
+        return math.pi * self.radius ** 2
+
+def main():
+    """Main function"""
+    p = Point(3, 4)
+    print(f"Distance: {p.distance()}")
+    
+    c = Circle(0, 0, 5)
+    print(f"Area: {c.area()}")
+
+# Decorators and nested functions
+@decorator
+def decorated_function():
+    """A decorated function"""
+    def inner():
+        return 42
+    return inner()
+
+if __name__ == "__main__":
+    main()
+"#;
+        
+        let mut parser = create_parser();
+        let chunks = parser.parse(code, "test.py")?;
+        
+        // Check for problematic overlaps (allow class-method overlaps, but prevent function-function overlaps)
+        let mut problematic_overlaps = Vec::new();
+        for (i, chunk1) in chunks.iter().enumerate() {
+            for (j, chunk2) in chunks.iter().enumerate().skip(i + 1) {
+                // Check if chunks overlap (overlapping line ranges)
+                if chunk1.start_line <= chunk2.end_line && chunk2.start_line <= chunk1.end_line {
+                    // Allow class-method overlaps as they're semantically useful
+                    let is_class_method_overlap = (chunk1.element_type == "class" && chunk2.element_type == "function") ||
+                                                  (chunk1.element_type == "function" && chunk2.element_type == "class");
+                    
+                    if !is_class_method_overlap {
+                        problematic_overlaps.push((i, j));
+                        println!("PROBLEMATIC OVERLAP FOUND in Python:");
+                        println!("  Chunk {}: lines {}-{} ({})", i, chunk1.start_line, chunk1.end_line, chunk1.element_type);
+                        println!("  Chunk {}: lines {}-{} ({})", j, chunk2.start_line, chunk2.end_line, chunk2.element_type);
+                        println!("  Chunk {} content preview: {}", i, chunk1.content.lines().next().unwrap_or(""));
+                        println!("  Chunk {} content preview: {}", j, chunk2.content.lines().next().unwrap_or(""));
+                    }
+                }
+            }
+        }
+        
+        assert!(problematic_overlaps.is_empty(), "Found {} problematic overlapping chunks in Python parser", problematic_overlaps.len());
+        Ok(())
+    }
 } 

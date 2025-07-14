@@ -110,18 +110,51 @@ impl SyntaxParser for JavaScriptParser {
         let mut chunks = Vec::new();
         let mut cursor = QueryCursor::new();
         let code_bytes = code.as_bytes();
+        
+        // Helper to check if a node is nested inside a function (but not class methods)
+        let is_nested_in_function = |node: tree_sitter::Node| -> bool {
+            let mut current = node.parent();
+            while let Some(parent) = current {
+                if parent.kind() == "program" {
+                    break; // reached top level
+                }
+                // Allow methods in classes, but prevent nested functions within functions
+                if matches!(parent.kind(), "function_declaration" | "function_expression" | "arrow_function") {
+                    return true;
+                }
+                // Skip checking inside method_definition as we want to allow methods
+                if parent.kind() == "method_definition" {
+                    current = parent.parent();
+                    continue;
+                }
+                current = parent.parent();
+            }
+            false
+        };
+
         let matches = cursor.matches(&self.query, root_node, code_bytes);
 
         for mat in matches {
             for capture in mat.captures {
-                 if let Some(chunk) = self.node_to_chunk(capture.node, code, file_path) {
-                     // Only add chunks for core element types
-                     if is_core_element_type(&chunk.element_type, Some("javascript")) {
-                         chunks.push(chunk);
-                     }
-                 }
+                let node = capture.node;
+                
+                // Skip functions that are nested inside other functions (but allow class methods)
+                if matches!(node.kind(), "function_declaration" | "function_expression") 
+                    && is_nested_in_function(node) {
+                    continue;
+                }
+
+                if let Some(chunk) = self.node_to_chunk(node, code, file_path) {
+                    // Only add chunks for core element types
+                    if is_core_element_type(&chunk.element_type, Some("javascript")) {
+                        chunks.push(chunk);
+                    }
+                }
             }
         }
+
+        // Sort chunks by start line
+        chunks.sort_by_key(|c| c.start_line);
 
         // Fallback: If no chunks found in non-empty file, split into smaller chunks
         if chunks.is_empty() && !code.trim().is_empty() {

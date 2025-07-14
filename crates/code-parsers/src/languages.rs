@@ -15,6 +15,13 @@ lazy_static::lazy_static! {
         s.insert("yml");
         s.insert("rb");
         s.insert("py");
+        s.insert("cpp");
+        s.insert("cc");
+        s.insert("cxx");
+        s.insert("c++");
+        s.insert("h");
+        s.insert("hpp");
+        s.insert("hxx");
         s
     };
 }
@@ -31,6 +38,7 @@ pub fn get_language_from_extension(extension: &str) -> String {
         "md" => "markdown".to_string(),
         "yaml" | "yml" => "yaml".to_string(),
         "html" | "htm" => "html".to_string(),
+        "cpp" | "cc" | "cxx" | "c++" | "h" | "hpp" | "hxx" => "cpp".to_string(),
         _ => "fallback".to_string(),
     }
 } 

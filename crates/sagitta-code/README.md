@@ -14,6 +14,7 @@ Installation is currently a manual process, with future improvements to the inst
 - TypeScript
 - Go
 - Ruby
+- C++
 - Markdown
 - YAML
 - HTML

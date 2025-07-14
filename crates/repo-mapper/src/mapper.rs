@@ -339,6 +339,16 @@ impl RepoMapper {
                             self.options.max_calls_per_method,
                         );
                     }
+                    "cpp" | "cc" | "cxx" | "c++" | "hpp" | "hxx" | "h" => {
+                        scanners::cpp::scan_line(
+                            line,
+                            &context,
+                            current_docstring.clone(),
+                            &mut methods,
+                            i + 1,
+                            self.options.max_calls_per_method,
+                        );
+                    }
                     "yaml" | "yml" => {
                         scanners::yaml::scan_line(
                             line,

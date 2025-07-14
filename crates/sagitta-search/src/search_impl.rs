@@ -9,7 +9,7 @@ use qdrant_client::qdrant::{
 use std::sync::Arc;
 use crate::tokenizer::{self, TokenizerConfig}; // Import TokenizerConfig
 use crate::vocabulary::VocabularyManager; // Import vocabulary manager
-use std::collections::{HashMap, HashSet}; // Add HashMap and HashSet
+use std::collections::HashMap; // For deduplication mapping
 use log;
 use crate::config::AppConfig; // Import AppConfig
 use crate::config; // Import config module
@@ -384,15 +384,19 @@ where
 //     // Calls search_collection internally
 // }
 
-/// Deduplicates search results based on file_path, start_line, and end_line.
+/// Deduplicates search results based on file_path, start_line, end_line, and element_type.
 /// This prevents duplicate results that can occur when the same code chunk
 /// is found by both dense and sparse search methods during hybrid search.
+/// Including element_type allows the same location to return different element types
+/// (e.g., a function that's also part of a class can appear as both).
+/// Uses score-based deduplication to keep the highest-scoring result for each unique key.
 fn deduplicate_search_results(results: Vec<ScoredPoint>) -> Vec<ScoredPoint> {
-    let mut seen = HashSet::new();
-    let mut deduplicated = Vec::new();
+    use std::collections::HashMap;
+    
+    let mut seen_map: HashMap<String, ScoredPoint> = HashMap::new();
     
     for result in results {
-        // Extract file_path, start_line, and end_line from the payload
+        // Extract file_path, start_line, end_line, and element_type from the payload
         let key = if !result.payload.is_empty() {
             let file_path = result.payload.get("file_path")
                 .and_then(|v| v.as_str())
@@ -404,18 +408,33 @@ fn deduplicate_search_results(results: Vec<ScoredPoint>) -> Vec<ScoredPoint> {
             let end_line = result.payload.get("end_line")
                 .and_then(|v| v.as_integer())
                 .unwrap_or(0);
-            format!("{}:{}:{}", file_path, start_line, end_line)
+            let element_type = result.payload.get("element_type")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            
+            // Include element_type in deduplication key to allow same location with different element types
+            format!("{}:{}:{}:{}", file_path, start_line, end_line, element_type)
         } else {
             // Fallback to using the point ID if payload is missing
             format!("id:{:?}", result.id)
         };
         
-        if seen.insert(key) {
-            deduplicated.push(result);
+        // Use score-based deduplication: keep the highest scoring result for each unique key
+        match seen_map.get(&key) {
+            Some(existing) if existing.score >= result.score => {
+                // Keep the existing result (higher or equal score)
+                continue;
+            }
+            _ => {
+                // Either new key or current result has higher score
+                seen_map.insert(key, result);
+            }
         }
     }
     
-    deduplicated
+    // Collect results and maintain original order by score (they should already be sorted)
+    seen_map.into_values().collect()
 }
 
 #[cfg(test)]
