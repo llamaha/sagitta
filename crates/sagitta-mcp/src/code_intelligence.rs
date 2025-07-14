@@ -264,6 +264,22 @@ fn extract_parent_name(content: &str, language: &str) -> Option<String> {
                 }
             }
         }
+        "cpp" | "c++" => {
+            // Look for class, struct, or namespace context
+            let patterns = [
+                r"class\s+(\w+)",
+                r"struct\s+(\w+)",
+                r"namespace\s+(\w+)",
+            ];
+            
+            for pattern in &patterns {
+                if let Ok(re) = Regex::new(pattern) {
+                    if let Some(cap) = re.captures(content) {
+                        return Some(cap[1].to_string());
+                    }
+                }
+            }
+        }
         _ => {}
     }
     None
@@ -373,6 +389,16 @@ fn extract_identifiers(content: &str, language: &str) -> Vec<String> {
             r"\bconst\s+(\w+)",
             r"\blet\s+(\w+)",
             r"\bvar\s+(\w+)",
+        ],
+        "cpp" | "c++" => vec![
+            r"\bclass\s+(\w+)",
+            r"\bstruct\s+(\w+)",
+            r"\bnamespace\s+(\w+)",
+            r"\benum\s+(?:class\s+)?(\w+)",
+            r"\btypedef\s+\w+\s+(\w+)",
+            r"\btemplate\s*<[^>]*>\s*(?:class|typename)\s+(\w+)",
+            r"(?:int|double|float|char|bool|void|auto|string)\s+(\w+)",
+            r"(\w+)\s*\([^)]*\)\s*[{;]", // Function declarations
         ],
         _ => vec![r"\b([a-zA-Z_]\w+)\b"],
     };

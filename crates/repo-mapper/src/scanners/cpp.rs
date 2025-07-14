@@ -1,6 +1,142 @@
-use crate::types::{CodeMethod, MethodType};
+use crate::types::{CodeMethod, MethodType, MethodInfo};
 use regex::Regex;
 use std::collections::HashMap;
+
+/// Line-by-line C++ scanner for compatibility with the main mapper
+pub fn scan_line(
+    line: &str,
+    context: &str,
+    docstring: Option<String>,
+    methods: &mut Vec<MethodInfo>,
+    line_number: usize,
+    max_calls: usize,
+) {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with("/*") {
+        return;
+    }
+    
+    // Patterns for C++ constructs
+    let function_pattern = Regex::new(r"^(?:(?:inline|static|virtual|explicit|constexpr|template\s*<[^>]*>)\s+)*(?:[a-zA-Z_][a-zA-Z0-9_]*(?:\s*<[^>]*>)?\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*\([^)]*\)\s*(?:const\s*)?(?:override\s*)?(?:final\s*)?[{;]").unwrap();
+    let class_pattern = Regex::new(r"^(?:template\s*<[^>]*>\s+)?class\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*[:{]").unwrap();
+    let struct_pattern = Regex::new(r"^(?:template\s*<[^>]*>\s+)?struct\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*[:{]").unwrap();
+    let namespace_pattern = Regex::new(r"^namespace\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\{").unwrap();
+    
+    // Check for namespace
+    if let Some(captures) = namespace_pattern.captures(trimmed) {
+        let params = extract_params(line);
+        let method_calls = extract_method_calls(context, max_calls);
+        methods.push(MethodInfo {
+            name: captures[1].to_string(),
+            method_type: MethodType::CppNamespace,
+            params,
+            context: context.to_string(),
+            docstring: docstring.clone(),
+            calls: method_calls,
+            line_number: Some(line_number),
+        });
+        return;
+    }
+    
+    // Check for class
+    if let Some(captures) = class_pattern.captures(trimmed) {
+        let params = extract_params(line);
+        let method_calls = extract_method_calls(context, max_calls);
+        methods.push(MethodInfo {
+            name: captures[1].to_string(),
+            method_type: MethodType::CppClass,
+            params,
+            context: context.to_string(),
+            docstring: docstring.clone(),
+            calls: method_calls,
+            line_number: Some(line_number),
+        });
+        return;
+    }
+    
+    // Check for struct
+    if let Some(captures) = struct_pattern.captures(trimmed) {
+        let params = extract_params(line);
+        let method_calls = extract_method_calls(context, max_calls);
+        methods.push(MethodInfo {
+            name: captures[1].to_string(),
+            method_type: MethodType::CppStruct,
+            params,
+            context: context.to_string(),
+            docstring: docstring.clone(),
+            calls: method_calls,
+            line_number: Some(line_number),
+        });
+        return;
+    }
+    
+    // Check for functions/methods
+    if let Some(captures) = function_pattern.captures(trimmed) {
+        let function_name = captures[1].to_string();
+        
+        // Skip common non-function patterns
+        if ["if", "while", "for", "switch", "catch"].contains(&function_name.as_str()) {
+            return;
+        }
+        
+        let method_type = if trimmed.contains("static") {
+            MethodType::CppStaticMethod
+        } else if trimmed.contains("virtual") {
+            MethodType::CppVirtualMethod
+        } else if function_name.starts_with('~') {
+            MethodType::CppDestructor
+        } else {
+            // Could be constructor, method, or function - would need more context to distinguish
+            MethodType::CppFunction
+        };
+        
+        let params = extract_params(line);
+        let method_calls = extract_method_calls(context, max_calls);
+        methods.push(MethodInfo {
+            name: function_name,
+            method_type,
+            params,
+            context: context.to_string(),
+            docstring: docstring.clone(),
+            calls: method_calls,
+            line_number: Some(line_number),
+        });
+    }
+}
+
+fn extract_params(line: &str) -> String {
+    if let Some(start) = line.find('(') {
+        if let Some(end) = line.rfind(')') {
+            if end > start {
+                let params = &line[start + 1..end];
+                return params.trim().to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+fn extract_method_calls(context: &str, max_calls: usize) -> Vec<String> {
+    let mut calls = Vec::new();
+    
+    // Simple regex to find function calls (name followed by parentheses)
+    let call_regex = Regex::new(r"([a-zA-Z_][a-zA-Z0-9_]*)\s*\(").unwrap();
+    
+    for captures in call_regex.captures_iter(context) {
+        if let Some(name) = captures.get(1) {
+            let call_name = name.as_str().to_string();
+            // Filter out keywords and common patterns
+            if !["if", "while", "for", "switch", "catch", "return", "sizeof", "static_cast", "dynamic_cast", "const_cast", "reinterpret_cast"].contains(&call_name.as_str()) {
+                calls.push(call_name);
+            }
+        }
+    }
+    
+    calls.sort();
+    calls.dedup();
+    calls.truncate(max_calls);
+    calls
+}
 
 pub fn scan_cpp_methods(content: &str) -> Vec<CodeMethod> {
     let mut methods = Vec::new();

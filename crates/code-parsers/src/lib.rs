@@ -9,6 +9,7 @@ use std::path::Path;
 // Language-specific parsers
 pub mod rust;
 pub mod python;
+pub mod cpp_tests;
 pub mod javascript;
 pub mod typescript;
 pub mod golang;
