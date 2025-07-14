@@ -165,7 +165,7 @@ impl SyntaxParser for CppParser {
                 let end_point = node.end_position();
                 
                 // Extract element name based on type
-                let element_name = match capture_name {
+                let _element_name = match capture_name {
                     "func" => self.extract_function_name(&node, content),
                     "class" | "struct" | "namespace" | "enum" => self.extract_type_name(&node, content),
                     "template" => {
