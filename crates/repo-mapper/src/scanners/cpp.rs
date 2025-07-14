@@ -413,7 +413,6 @@ fn extract_method_calls(line: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::*;
 
     #[test]
     fn test_cpp_line_scanning() {
@@ -529,4 +528,5 @@ namespace math {
         let square_func = methods.iter().find(|m| m.name == "square").unwrap();
         assert_eq!(square_func.parent_name, Some("math".to_string()));
     }
+    */
 }
