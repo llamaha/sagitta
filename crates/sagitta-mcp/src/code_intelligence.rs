@@ -181,6 +181,65 @@ fn extract_java_signature(content: &str, element_type: &str) -> Option<String> {
     None
 }
 
+fn extract_cpp_signature(content: &str, element_type: &str) -> Option<String> {
+    match element_type {
+        "function" | "method" => {
+            // Match C++ function/method signatures
+            let patterns = [
+                // Template functions: template<...> return_type function_name(...)
+                r"(?m)^[\s]*template\s*<[^>]*>\s*(?:[a-zA-Z_][a-zA-Z0-9_]*(?:\s*<[^>]*>)?\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*\([^)]*\)(?:\s*const)?(?:\s*override)?(?:\s*final)?",
+                // Regular functions: [modifiers] return_type function_name(...)
+                r"(?m)^[\s]*(?:(?:inline|static|virtual|explicit|constexpr)\s+)*(?:[a-zA-Z_][a-zA-Z0-9_]*(?:\s*<[^>]*>)?\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*\([^)]*\)(?:\s*const)?(?:\s*override)?(?:\s*final)?",
+                // Constructors/destructors: ClassName(...) or ~ClassName(...)
+                r"(?m)^[\s]*(?:(?:inline|explicit|virtual)\s+)*~?([a-zA-Z_][a-zA-Z0-9_]*)\s*\([^)]*\)",
+            ];
+            
+            for pattern in &patterns {
+                if let Ok(re) = Regex::new(pattern) {
+                    if let Some(m) = re.find(content) {
+                        let mut signature = m.as_str().trim().to_string();
+                        
+                        // Clean up signature for better readability
+                        // Remove template declarations for cleaner display
+                        if signature.starts_with("template") {
+                            if let Some(pos) = signature.find('>') {
+                                signature = signature[pos+1..].trim().to_string();
+                            }
+                        }
+                        
+                        // Remove body if present
+                        if let Some(pos) = signature.find('{') {
+                            signature = signature[..pos].trim().to_string();
+                        }
+                        
+                        return Some(signature);
+                    }
+                }
+            }
+        }
+        "class" => {
+            let re = Regex::new(r"(?m)^[\s]*(?:template\s*<[^>]*>\s+)?class\s+([a-zA-Z_][a-zA-Z0-9_]*)").ok()?;
+            if let Some(m) = re.find(content) {
+                return Some(m.as_str().trim().to_string());
+            }
+        }
+        "struct" => {
+            let re = Regex::new(r"(?m)^[\s]*(?:template\s*<[^>]*>\s+)?struct\s+([a-zA-Z_][a-zA-Z0-9_]*)").ok()?;
+            if let Some(m) = re.find(content) {
+                return Some(m.as_str().trim().to_string());
+            }
+        }
+        "namespace" => {
+            let re = Regex::new(r"(?m)^[\s]*namespace\s+([a-zA-Z_][a-zA-Z0-9_]*)").ok()?;
+            if let Some(m) = re.find(content) {
+                return Some(m.as_str().trim().to_string());
+            }
+        }
+        _ => {}
+    }
+    None
+}
+
 fn extract_parent_name(content: &str, language: &str) -> Option<String> {
     // Look for class or module context clues in the content
     match language {
@@ -245,6 +304,30 @@ fn extract_description(content: &str, language: &str) -> Option<String> {
             for line in &lines {
                 let trimmed = line.trim();
                 if trimmed.starts_with("* ") && !trimmed.starts_with("* @") {
+                    let desc = trimmed.trim_start_matches("* ").trim();
+                    if !desc.is_empty() && desc.len() > 10 {
+                        return Some(desc.to_string());
+                    }
+                }
+            }
+        }
+        "cpp" | "c++" => {
+            // Look for Doxygen-style comments
+            for line in &lines {
+                let trimmed = line.trim();
+                if trimmed.starts_with("///") {
+                    let desc = trimmed.trim_start_matches("///").trim();
+                    if !desc.is_empty() && desc.len() > 10 {
+                        return Some(desc.to_string());
+                    }
+                } else if trimmed.starts_with("/**") && trimmed.ends_with("*/") {
+                    // Single line /** comment */
+                    let desc = trimmed.trim_start_matches("/**").trim_end_matches("*/").trim();
+                    if !desc.is_empty() && desc.len() > 10 {
+                        return Some(desc.to_string());
+                    }
+                } else if trimmed.starts_with("* ") && !trimmed.starts_with("* @") {
+                    // Multi-line /** comment continuation
                     let desc = trimmed.trim_start_matches("* ").trim();
                     if !desc.is_empty() && desc.len() > 10 {
                         return Some(desc.to_string());
