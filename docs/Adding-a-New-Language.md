@@ -599,9 +599,26 @@ query="TestClass" lang="your_language"
 ### 8.1 Update main documentation
 
 Add your language to:
-- Main README.md supported languages list
+- **Main README.md supported languages list** in `crates/sagitta-code/README.md`
 - Configuration examples
 - Query examples
+
+**Important:** Update the supported languages list in the README:
+
+```markdown
+## Supported Languages
+
+- Rust
+- Python
+- JavaScript
+- TypeScript
+- Go
+- Ruby
+- C++        # <-- Add your new language here
+- Markdown
+- YAML
+- HTML
+```
 
 ### 8.2 Create language-specific examples
 
