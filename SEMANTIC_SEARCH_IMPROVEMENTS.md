@@ -127,11 +127,12 @@
    - Better formatting for different element types
 
 ## **Specific Files Modified:**
-- ✅ `crates/sagitta-mcp/src/mcp/types.rs` - Added elementType and language fields to SearchResultItem
-- ✅ `crates/sagitta-mcp/src/handlers/query.rs` - Updated to populate new fields from payload data  
-- ✅ `crates/sagitta-search/src/search_impl.rs` - Improved deduplication logic with element_type and score-based selection
-- 🔄 `crates/sagitta-search/src/indexing.rs` - Add chunk uniqueness validation (Phase 2)
-- 🔄 `crates/code-parsers/src/*.rs` - Audit for overlapping chunks (Phase 3)
+- ✅ `crates/sagitta-mcp/src/mcp/types.rs` - Added elementType, language fields + CodeContextInfo structure (Phases 1 & 4A)
+- ✅ `crates/sagitta-mcp/src/handlers/query.rs` - Updated to populate new fields + intelligent preview generation (Phases 1 & 4A)
+- ✅ `crates/sagitta-mcp/src/code_intelligence.rs` - NEW: Rich code context extraction and intelligent previews (Phase 4A)
+- ✅ `crates/sagitta-search/src/search_impl.rs` - Improved deduplication logic with element_type and score-based selection (Phase 2)
+- ✅ `crates/code-parsers/src/*.rs` - Fixed overlapping chunks in Python & JavaScript parsers (Phase 3)
+- ✅ `crates/sagitta-mcp/Cargo.toml` - Added regex dependency for pattern matching (Phase 4A)
 
 ## **Testing & Validation:**
 - ✅ MCP tests pass (84 tests passed, 0 failed)
