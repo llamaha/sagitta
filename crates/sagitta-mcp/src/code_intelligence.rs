@@ -586,7 +586,7 @@ fn is_common_false_positive(name: &str) -> bool {
     // Common control structures, operators, and built-ins that aren't meaningful function calls
     let false_positives = [
         "if", "else", "for", "while", "do", "switch", "case", "try", "catch", "finally",
-        "return", "break", "continue", "throw", "new", "delete", "sizeof", "typeof",
+        "return", "break", "continue", "throw", "delete", "sizeof", "typeof",
         "instanceof", "in", "of", "as", "is", "not", "and", "or",
         "true", "false", "null", "undefined", "nil", "None", "void",
         "int", "float", "double", "char", "bool", "string", "str", "list", "dict",
@@ -1041,6 +1041,7 @@ export class DatabaseManager {
         assert!(!context.outgoing_calls.is_empty());
         
         let calls = &context.outgoing_calls;
+        println!("DEBUG: TypeScript calls: {:?}", calls);
         assert!(calls.contains(&"validateQuery".to_string()));
         assert!(calls.contains(&"getConnection".to_string()));
         assert!(calls.contains(&"getCurrentTimestamp".to_string()));
