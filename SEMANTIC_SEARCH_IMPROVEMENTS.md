@@ -104,13 +104,11 @@
 "/// Formats search results for display, handling both JSON and human-readable output."
 ```
 
-**After** (Phase 4 complete):
+**After** (Phase 4A & 4B complete):
 ```
 🔧 format_search_results(results: Vec<SearchResult>, format: OutputFormat) → Result<String, Error>
    📞 Calls: write_json, format_human_readable, truncate_preview
    📞 Called by: main, handle_query, display_results  
-   📦 Uses: serde_json, anyhow, clap
-   🏷️  Tags: [formatting, output, serialization, error-handling]
    📝 Formats search results for display, handling both JSON and human-readable output
 ```
 
@@ -130,9 +128,9 @@
    - Better formatting for different element types
 
 ## **Specific Files Modified:**
-- ✅ `crates/sagitta-mcp/src/mcp/types.rs` - Added elementType, language fields + CodeContextInfo structure (Phases 1 & 4A)
+- ✅ `crates/sagitta-mcp/src/mcp/types.rs` - Added elementType, language fields + CodeContextInfo structure with call graph fields (Phases 1, 4A & 4B)
 - ✅ `crates/sagitta-mcp/src/handlers/query.rs` - Updated to populate new fields + intelligent preview generation (Phases 1 & 4A)
-- ✅ `crates/sagitta-mcp/src/code_intelligence.rs` - NEW: Rich code context extraction and intelligent previews (Phase 4A)
+- ✅ `crates/sagitta-mcp/src/code_intelligence.rs` - Rich code context extraction, intelligent previews, and multi-language call extraction (Phases 4A & 4B)
 - ✅ `crates/sagitta-search/src/search_impl.rs` - Improved deduplication logic with element_type and score-based selection (Phase 2)
 - ✅ `crates/code-parsers/src/*.rs` - Fixed overlapping chunks in Python & JavaScript parsers (Phase 3)
 - ✅ `crates/sagitta-mcp/Cargo.toml` - Added regex dependency for pattern matching (Phase 4A)
@@ -148,8 +146,10 @@
 - ✅ **Phase 2**: COMPLETED - deduplication logic improved
 - ✅ **Phase 3**: COMPLETED - Fixed Python & JavaScript parser overlap issues 
 - ✅ **Phase 4A**: COMPLETED - Basic code intelligence with signatures, previews, context info (11 tests)
-- 🆕 **Phase 4B**: Future - Advanced repo-mapper integration for call graphs & type flow
-- 🔄 **Phase 5**: Output quality improvements (enhanced with Phase 4A context)
+- ✅ **Phase 4B**: COMPLETED - Bidirectional call graph integration with multi-language support (21 tests)
+- 🔄 **Phase 4C**: Future - Type flow & import analysis 
+- 🔄 **Phase 4D**: Future - Pattern recognition & classification
+- 🔄 **Phase 5**: Output quality improvements (enhanced with Phase 4A & 4B context)
 
 ## **Expected User Impact:**
 After restart, MCP search results will include:
@@ -157,4 +157,6 @@ After restart, MCP search results will include:
 - `language`: Shows programming language (rust, python, javascript, etc.)
 - `preview`: Intelligent code previews showing function signatures or meaningful lines
 - `context_info`: Rich metadata with signatures, parent classes, descriptions, identifiers
-This provides comprehensive code intelligence and context for enhanced developer productivity.
+- `outgoing_calls`: Functions/methods this code calls (Phase 4B)
+- `incoming_calls`: Functions/methods that call this code (Phase 4B)
+This provides comprehensive code intelligence and bidirectional call graph analysis for enhanced developer productivity and codebase navigation.
