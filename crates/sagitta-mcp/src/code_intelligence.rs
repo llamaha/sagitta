@@ -404,12 +404,12 @@ fn extract_rust_function_calls(content: &str) -> Vec<String> {
     let mut calls = HashSet::new();
     
     let patterns = [
-        // Function calls: func_name() or func_name(args)
-        r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
-        // Method calls: obj.method() or self.method()
-        r"\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
-        // Static method calls: Type::method()
-        r"::([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+        // Function calls: func_name() or func_name(args), with optional generics
+        r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:<[^>]*>)?\s*\(",
+        // Method calls: obj.method() or self.method(), with optional generics
+        r"\.([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:<[^>]*>)?\s*\(",
+        // Static method calls: Type::method(), with optional generics
+        r"::([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:<[^>]*>)?\s*\(",
         // Macro calls: macro!()
         r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*!",
     ];
@@ -463,11 +463,11 @@ fn extract_js_function_calls(content: &str) -> Vec<String> {
     
     let patterns = [
         // Function calls: func_name() or func_name(args)
-        r"\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(",
-        // Method calls: obj.method()
-        r"\.([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(",
-        // Arrow function calls in method chains
-        r"\.([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(",
+        r"\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*(?:<[^>]*>)?\s*\(",
+        // Method calls: obj.method() or obj.method<T>()
+        r"\.([a-zA-Z_$][a-zA-Z0-9_$]*)\s*(?:<[^>]*>)?\s*\(",
+        // Static method calls: Class.method()
+        r"::([a-zA-Z_$][a-zA-Z0-9_$]*)\s*(?:<[^>]*>)?\s*\(",
     ];
     
     for pattern in &patterns {
@@ -1041,7 +1041,6 @@ export class DatabaseManager {
         assert!(!context.outgoing_calls.is_empty());
         
         let calls = &context.outgoing_calls;
-        println!("DEBUG: TypeScript calls: {:?}", calls);
         assert!(calls.contains(&"validateQuery".to_string()));
         assert!(calls.contains(&"getConnection".to_string()));
         assert!(calls.contains(&"getCurrentTimestamp".to_string()));
@@ -1129,7 +1128,6 @@ async fn advanced_user_processing(user_id: u64) -> Result<UserProfile> {
         assert!(!context.outgoing_calls.is_empty());
         
         let calls = &context.outgoing_calls;
-        println!("DEBUG: Extracted calls: {:?}", calls);
         assert!(calls.contains(&"load_from_file".to_string()));
         assert!(calls.contains(&"fetch_by_id".to_string()));
         assert!(calls.contains(&"new".to_string()));
