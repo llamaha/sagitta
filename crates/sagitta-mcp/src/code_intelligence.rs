@@ -11,6 +11,8 @@ pub fn extract_code_context(content: &str, element_type: &str, language: &str) -
         parent_name: None,
         description: None,
         identifiers: Vec::new(),
+        outgoing_calls: Vec::new(),
+        incoming_calls: Vec::new(),
     };
 
     let mut has_any_info = false;
@@ -39,6 +41,16 @@ pub fn extract_code_context(content: &str, element_type: &str, language: &str) -
         context.identifiers = identifiers;
         has_any_info = true;
     }
+
+    // Extract function calls
+    let outgoing_calls = extract_function_calls(content, language);
+    if !outgoing_calls.is_empty() {
+        context.outgoing_calls = outgoing_calls;
+        has_any_info = true;
+    }
+
+    // Note: incoming_calls will be populated during indexing phase
+    // when we build the bidirectional call graph
 
     if has_any_info {
         Some(context)
@@ -547,5 +559,354 @@ func (s *UserService) AuthenticateUser(username, password string) (*User, error)
         assert!(context.signature.is_some());
         let signature = context.signature.unwrap();
         assert!(signature.contains("func (s *UserService) AuthenticateUser"));
+    }
+
+    // === PHASE 4B: Call Graph Tests ===
+
+    #[test]
+    fn test_rust_function_call_extraction() {
+        let content = r#"
+pub fn authenticate_user(username: &str, password: &str) -> Result<User, AuthError> {
+    let validator = create_validator();
+    let user = find_user_by_username(username)?;
+    let hash_result = hash_password(password);
+    
+    validator.validate_credentials(&user, &hash_result)?;
+    log_authentication_attempt(username, true);
+    
+    Ok(user)
+}
+"#;
+        
+        let context = extract_code_context(content, "function", "rust").unwrap();
+        assert!(!context.outgoing_calls.is_empty());
+        
+        let calls = &context.outgoing_calls;
+        assert!(calls.contains(&"create_validator".to_string()));
+        assert!(calls.contains(&"find_user_by_username".to_string()));
+        assert!(calls.contains(&"hash_password".to_string()));
+        assert!(calls.contains(&"validate_credentials".to_string()));
+        assert!(calls.contains(&"log_authentication_attempt".to_string()));
+    }
+
+    #[test]
+    fn test_python_function_call_extraction() {
+        let content = r#"
+def process_user_data(user_id, data):
+    """Process user data with validation and storage."""
+    validator = create_data_validator()
+    cleaned_data = sanitize_input(data)
+    
+    if validate_user_permissions(user_id):
+        result = store_user_data(user_id, cleaned_data)
+        send_notification_email(user_id, "Data processed")
+        log_user_activity(user_id, "data_processed")
+        return result
+    else:
+        raise PermissionError("Insufficient permissions")
+"#;
+        
+        let context = extract_code_context(content, "function", "python").unwrap();
+        assert!(!context.outgoing_calls.is_empty());
+        
+        let calls = &context.outgoing_calls;
+        assert!(calls.contains(&"create_data_validator".to_string()));
+        assert!(calls.contains(&"sanitize_input".to_string()));
+        assert!(calls.contains(&"validate_user_permissions".to_string()));
+        assert!(calls.contains(&"store_user_data".to_string()));
+        assert!(calls.contains(&"send_notification_email".to_string()));
+        assert!(calls.contains(&"log_user_activity".to_string()));
+    }
+
+    #[test]
+    fn test_javascript_function_call_extraction() {
+        let content = r#"
+async function authenticateUser(username, password) {
+    const userValidator = createUserValidator();
+    const user = await findUserInDatabase(username);
+    
+    if (!user) {
+        logFailedAttempt(username, "user_not_found");
+        throw new Error("User not found");
+    }
+    
+    const isValid = await validatePassword(password, user.hashedPassword);
+    if (isValid) {
+        updateLastLoginTime(user.id);
+        createUserSession(user.id);
+        return generateAuthToken(user);
+    } else {
+        logFailedAttempt(username, "invalid_password");
+        throw new Error("Invalid credentials");
+    }
+}
+"#;
+        
+        let context = extract_code_context(content, "function", "javascript").unwrap();
+        assert!(!context.outgoing_calls.is_empty());
+        
+        let calls = &context.outgoing_calls;
+        assert!(calls.contains(&"createUserValidator".to_string()));
+        assert!(calls.contains(&"findUserInDatabase".to_string()));
+        assert!(calls.contains(&"logFailedAttempt".to_string()));
+        assert!(calls.contains(&"validatePassword".to_string()));
+        assert!(calls.contains(&"updateLastLoginTime".to_string()));
+        assert!(calls.contains(&"createUserSession".to_string()));
+        assert!(calls.contains(&"generateAuthToken".to_string()));
+    }
+
+    #[test]
+    fn test_go_function_call_extraction() {
+        let content = r#"
+func (s *UserService) ProcessUserRegistration(req *RegistrationRequest) (*User, error) {
+    // Validate input
+    if err := validateRegistrationRequest(req); err != nil {
+        return nil, err
+    }
+    
+    // Check if user exists
+    existing, err := s.userRepo.FindByEmail(req.Email)
+    if err != nil {
+        return nil, err
+    }
+    if existing != nil {
+        return nil, errors.New("user already exists")
+    }
+    
+    // Create new user
+    hashedPassword, err := hashPassword(req.Password)
+    if err != nil {
+        return nil, err
+    }
+    
+    user := createUserFromRequest(req)
+    user.Password = hashedPassword
+    
+    // Save to database
+    savedUser, err := s.userRepo.Create(user)
+    if err != nil {
+        return nil, err
+    }
+    
+    // Send welcome email
+    sendWelcomeEmail(savedUser.Email, savedUser.Name)
+    logUserRegistration(savedUser.ID)
+    
+    return savedUser, nil
+}
+"#;
+        
+        let context = extract_code_context(content, "function", "go").unwrap();
+        assert!(!context.outgoing_calls.is_empty());
+        
+        let calls = &context.outgoing_calls;
+        assert!(calls.contains(&"validateRegistrationRequest".to_string()));
+        assert!(calls.contains(&"FindByEmail".to_string()));
+        assert!(calls.contains(&"hashPassword".to_string()));
+        assert!(calls.contains(&"createUserFromRequest".to_string()));
+        assert!(calls.contains(&"Create".to_string()));
+        assert!(calls.contains(&"sendWelcomeEmail".to_string()));
+        assert!(calls.contains(&"logUserRegistration".to_string()));
+    }
+
+    #[test]
+    fn test_typescript_class_method_call_extraction() {
+        let content = r#"
+export class DatabaseManager {
+    async executeQuery<T>(query: string, params: any[]): Promise<T[]> {
+        this.validateQuery(query);
+        const connection = await this.getConnection();
+        
+        try {
+            const startTime = getCurrentTimestamp();
+            const result = await connection.execute(query, params);
+            const duration = calculateQueryDuration(startTime);
+            
+            this.logQueryExecution(query, duration);
+            await this.updateQueryStats(query, duration);
+            
+            return this.transformResults<T>(result);
+        } catch (error) {
+            this.handleQueryError(error, query);
+            throw error;
+        } finally {
+            await this.releaseConnection(connection);
+        }
+    }
+}
+"#;
+        
+        let context = extract_code_context(content, "method", "typescript").unwrap();
+        assert!(!context.outgoing_calls.is_empty());
+        
+        let calls = &context.outgoing_calls;
+        assert!(calls.contains(&"validateQuery".to_string()));
+        assert!(calls.contains(&"getConnection".to_string()));
+        assert!(calls.contains(&"getCurrentTimestamp".to_string()));
+        assert!(calls.contains(&"execute".to_string()));
+        assert!(calls.contains(&"calculateQueryDuration".to_string()));
+        assert!(calls.contains(&"logQueryExecution".to_string()));
+        assert!(calls.contains(&"updateQueryStats".to_string()));
+        assert!(calls.contains(&"transformResults".to_string()));
+        assert!(calls.contains(&"handleQueryError".to_string()));
+        assert!(calls.contains(&"releaseConnection".to_string()));
+    }
+
+    #[test]
+    fn test_nested_function_calls_extraction() {
+        let content = r#"
+fn complex_processing(data: &ProcessingData) -> Result<ProcessedResult> {
+    let preprocessed = preprocess_data(data)?;
+    
+    // Nested calls within conditional
+    if validate_data_integrity(&preprocessed) {
+        let transformed = transform_data_format(&preprocessed);
+        let analyzed = analyze_data_patterns(&transformed);
+        
+        // Method chains
+        let result = build_result()
+            .with_data(analyzed)
+            .with_metadata(extract_metadata(&preprocessed))
+            .finalize();
+            
+        cache_result(&result);
+        return Ok(result);
+    }
+    
+    Err(ProcessingError::InvalidData)
+}
+"#;
+        
+        let context = extract_code_context(content, "function", "rust").unwrap();
+        assert!(!context.outgoing_calls.is_empty());
+        
+        let calls = &context.outgoing_calls;
+        assert!(calls.contains(&"preprocess_data".to_string()));
+        assert!(calls.contains(&"validate_data_integrity".to_string()));
+        assert!(calls.contains(&"transform_data_format".to_string()));
+        assert!(calls.contains(&"analyze_data_patterns".to_string()));
+        assert!(calls.contains(&"build_result".to_string()));
+        assert!(calls.contains(&"with_data".to_string()));
+        assert!(calls.contains(&"with_metadata".to_string()));
+        assert!(calls.contains(&"extract_metadata".to_string()));
+        assert!(calls.contains(&"finalize".to_string()));
+        assert!(calls.contains(&"cache_result".to_string()));
+    }
+
+    #[test]
+    fn test_call_extraction_with_various_patterns() {
+        let content = r#"
+async fn advanced_user_processing(user_id: u64) -> Result<UserProfile> {
+    // Static function calls
+    let config = Config::load_from_file("config.toml")?;
+    
+    // Module function calls
+    let user_data = database::users::fetch_by_id(user_id).await?;
+    
+    // Trait method calls
+    let validator = UserValidator::new();
+    validator.validate_user_data(&user_data)?;
+    
+    // Closure calls
+    let processor = |data: &UserData| -> ProcessedData {
+        transform_user_data(data)
+    };
+    let processed = processor(&user_data);
+    
+    // Async calls
+    let profile = build_user_profile(&processed).await?;
+    tokio::spawn(async move {
+        update_user_cache(user_id, &profile).await;
+    });
+    
+    Ok(profile)
+}
+"#;
+        
+        let context = extract_code_context(content, "function", "rust").unwrap();
+        assert!(!context.outgoing_calls.is_empty());
+        
+        let calls = &context.outgoing_calls;
+        assert!(calls.contains(&"load_from_file".to_string()));
+        assert!(calls.contains(&"fetch_by_id".to_string()));
+        assert!(calls.contains(&"new".to_string()));
+        assert!(calls.contains(&"validate_user_data".to_string()));
+        assert!(calls.contains(&"transform_user_data".to_string()));
+        assert!(calls.contains(&"build_user_profile".to_string()));
+        assert!(calls.contains(&"spawn".to_string()));
+        assert!(calls.contains(&"update_user_cache".to_string()));
+    }
+
+    #[test]
+    fn test_call_extraction_filters_duplicates() {
+        let content = r#"
+fn process_with_retries(data: &Data) -> Result<ProcessedData> {
+    for attempt in 0..3 {
+        match process_data(data) {
+            Ok(result) => {
+                validate_result(&result);
+                validate_result(&result); // Duplicate call
+                return Ok(result);
+            }
+            Err(e) => {
+                log_error(&e);
+                log_error(&e); // Duplicate call
+                if attempt == 2 {
+                    return Err(e);
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
+    unreachable!()
+}
+"#;
+        
+        let context = extract_code_context(content, "function", "rust").unwrap();
+        assert!(!context.outgoing_calls.is_empty());
+        
+        let calls = &context.outgoing_calls;
+        // Should not contain duplicates
+        assert_eq!(calls.iter().filter(|&x| x == "validate_result").count(), 1);
+        assert_eq!(calls.iter().filter(|&x| x == "log_error").count(), 1);
+        assert!(calls.contains(&"process_data".to_string()));
+        assert!(calls.contains(&"validate_result".to_string()));
+        assert!(calls.contains(&"log_error".to_string()));
+        assert!(calls.contains(&"sleep".to_string()));
+    }
+
+    #[test]
+    fn test_no_function_calls_in_simple_content() {
+        let content = r#"
+let simple_variable = 42;
+const CONSTANT_VALUE = "hello world";
+struct SimpleStruct {
+    field1: String,
+    field2: i32,
+}
+"#;
+        
+        let context = extract_code_context(content, "unknown", "rust");
+        if let Some(ctx) = context {
+            assert!(ctx.outgoing_calls.is_empty());
+        } else {
+            // It's okay if no context is extracted for simple variable declarations
+        }
+    }
+
+    #[test]
+    fn test_incoming_calls_initialization() {
+        let content = r#"
+pub fn sample_function() {
+    println!("Hello world");
+}
+"#;
+        
+        let context = extract_code_context(content, "function", "rust").unwrap();
+        // incoming_calls should be empty initially (populated during indexing)
+        assert!(context.incoming_calls.is_empty());
+        // But outgoing_calls might contain println!
+        assert!(!context.outgoing_calls.is_empty());
+        assert!(context.outgoing_calls.contains(&"println".to_string()));
     }
 }
