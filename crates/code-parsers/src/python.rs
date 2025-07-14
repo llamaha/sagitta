@@ -132,20 +132,7 @@ impl SyntaxParser for PythonParser {
             false
         };
 
-        // Helper to check if a node is nested inside another captured node
-        let is_nested_in_class_or_function = |node: Node| -> bool {
-            let mut current = node.parent();
-            while let Some(parent) = current {
-                if parent.kind() == "module" {
-                    break; // reached module level
-                }
-                if matches!(parent.kind(), "class_definition" | "function_definition" | "decorated_definition") {
-                    return true;
-                }
-                current = parent.parent();
-            }
-            false
-        };
+
 
         let matches = cursor.matches(&self.query, root_node, code_bytes);
 
@@ -154,14 +141,31 @@ impl SyntaxParser for PythonParser {
                 let node = capture.node;
                 let capture_name = self.query.capture_names()[capture.index as usize];
 
-                // Filter: Only capture top-level items (directly under module)
-                if node.parent().map_or(true, |p| p.kind() != "module") {
-                    continue; // Skip nodes not directly under the module
+                // Filter: Only capture top-level items or methods within classes
+                let parent_kind = node.parent().map(|p| p.kind()).unwrap_or("");
+                
+                // Allow top-level items and methods within classes
+                if parent_kind != "module" && parent_kind != "class_definition" {
+                    continue; // Skip deeply nested items
                 }
 
-                // Skip functions/classes that are nested inside other functions/classes
-                if matches!(capture_name, "func" | "class") && is_nested_in_class_or_function(node) {
-                    continue;
+                // Skip functions that are nested inside other functions (but allow class methods)
+                if capture_name == "func" {
+                    let mut current = node.parent();
+                    let mut nested_in_function = false;
+                    while let Some(parent) = current {
+                        if parent.kind() == "module" || parent.kind() == "class_definition" {
+                            break; // reached acceptable level
+                        }
+                        if parent.kind() == "function_definition" {
+                            nested_in_function = true;
+                            break;
+                        }
+                        current = parent.parent();
+                    }
+                    if nested_in_function {
+                        continue;
+                    }
                 }
 
                 // Apply filters based on node type and content (e.g., for top-level items)
