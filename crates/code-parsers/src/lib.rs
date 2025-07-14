@@ -12,6 +12,7 @@ pub mod python;
 pub mod javascript;
 pub mod typescript;
 pub mod golang;
+pub mod cpp;
 pub mod ruby;
 pub mod markdown;
 pub mod yaml;
@@ -62,6 +63,10 @@ pub fn get_chunks(file_path: &Path) -> Result<Vec<CodeChunk>, Box<dyn std::error
         }
         "go" => {
             let mut parser = golang::GolangParser::new();
+            Ok(parser.parse(&content, &file_path_str)?)
+        }
+        "cpp" => {
+            let mut parser = cpp::CppParser::new();
             Ok(parser.parse(&content, &file_path_str)?)
         }
         "ruby" => {
