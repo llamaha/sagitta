@@ -64,7 +64,59 @@
    - Add chunk debugging/validation during indexing
    - Create tool to visualize chunk overlaps for debugging
 
-### **Phase 4: Output Quality Improvements** 🔄 **PENDING**
+### **Phase 4: Rich Code Intelligence Previews** 🔄 **PENDING**
+
+**Vision**: Transform semantic search results from simple text snippets into rich code intelligence previews that provide immediate codebase understanding.
+
+**Key Innovation**: Integrate existing repo-mapper regex parsing capabilities to show function calls, return types, dependencies, and bidirectional call graphs.
+
+#### **Sub-Phases:**
+
+1. **Phase 4.1: Enhanced Preview Generation**
+   - Reactivate repo-mapper functionality for real-time code analysis
+   - Parse function signatures, method calls, and return types for each search result
+   - Replace simple text previews with structured code intelligence displays
+
+2. **Phase 4.2: Bidirectional Call Graph Integration**
+   - Index function call relationships during chunking
+   - Implement reverse lookup: "called by" relationships  
+   - Display both outgoing calls and incoming references
+
+3. **Phase 4.3: Type Flow & Import Analysis**
+   - Extract and display type signatures: `String → Result<Vec<Item>, Error>`
+   - Show import/dependency context for each result
+   - Identify data transformation chains and patterns
+
+4. **Phase 4.4: Pattern Recognition & Classification**
+   - Detect and tag async/await patterns
+   - Identify error handling approaches (Result, Option, exceptions)
+   - Classify database operations, I/O patterns, and architectural patterns
+   - Add semantic tags to results for better categorization
+
+#### **Expected Transformation:**
+
+**Before** (current):
+```
+"/// Formats search results for display, handling both JSON and human-readable output."
+```
+
+**After** (Phase 4 complete):
+```
+🔧 format_search_results(results: Vec<SearchResult>, format: OutputFormat) → Result<String, Error>
+   📞 Calls: write_json, format_human_readable, truncate_preview
+   📞 Called by: main, handle_query, display_results  
+   📦 Uses: serde_json, anyhow, clap
+   🏷️  Tags: [formatting, output, serialization, error-handling]
+   📝 Formats search results for display, handling both JSON and human-readable output
+```
+
+**Benefits**: 
+- Immediate code understanding with minimal additional requests
+- Strong dependency graph visibility
+- Pattern recognition for architectural understanding
+- Rich context that accelerates development
+
+### **Phase 5: Output Quality Improvements** 🔄 **PENDING**
 1. **Add Type information prominently**:
    - Show `Type: function|class|struct|etc.` in human-readable output
    - Consider color-coding different element types
@@ -87,10 +139,10 @@
 - ✅ Repository synced with updated indexing
 
 ## **Next Steps:**
-- 🎯 **Ready for testing**: Restart sagitta-code to test Phase 1 elementType/language fields
-- 🎯 **Phase 2**: Once validated, proceed with deduplication logic improvements
-- 🎯 **Phase 3**: Investigate chunking overlaps
-- 🎯 **Phase 4**: Output quality improvements
+- ✅ **Phase 1**: COMPLETED - elementType/language fields working and tested
+- ✅ **Phase 2**: COMPLETED - deduplication logic improved
+- 🎯 **Phase 3**: Fix Python & JavaScript parser overlap issues - specific files identified 
+- 🔄 **Phase 4**: Output quality improvements (pending completion of Phase 3)
 
 ## **Expected User Impact:**
 After restart, MCP search results will include:
