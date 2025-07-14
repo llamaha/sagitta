@@ -386,6 +386,307 @@ fn truncate_line(line: &str, max_length: usize) -> String {
     }
 }
 
+/// Extracts function calls from code content based on language
+fn extract_function_calls(content: &str, language: &str) -> Vec<String> {
+    match language {
+        "rust" => extract_rust_function_calls(content),
+        "python" => extract_python_function_calls(content),
+        "javascript" | "typescript" => extract_js_function_calls(content),
+        "go" => extract_go_function_calls(content),
+        "java" => extract_java_function_calls(content),
+        "c" | "cpp" | "c++" => extract_c_function_calls(content),
+        _ => Vec::new(),
+    }
+}
+
+/// Extract function calls from Rust code
+fn extract_rust_function_calls(content: &str) -> Vec<String> {
+    let mut calls = HashSet::new();
+    
+    let patterns = [
+        // Function calls: func_name() or func_name(args)
+        r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+        // Method calls: obj.method() or self.method()
+        r"\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+        // Static method calls: Type::method()
+        r"::([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+        // Macro calls: macro!()
+        r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*!",
+    ];
+    
+    for pattern in &patterns {
+        if let Ok(re) = Regex::new(pattern) {
+            for cap in re.captures_iter(content) {
+                if let Some(name) = cap.get(1) {
+                    let name_str = name.as_str();
+                    if !is_rust_keyword(name_str) && name_str.len() > 1 {
+                        calls.insert(name_str.to_string());
+                    }
+                }
+            }
+        }
+    }
+    
+    filter_and_sort_calls(calls)
+}
+
+/// Extract function calls from Python code
+fn extract_python_function_calls(content: &str) -> Vec<String> {
+    let mut calls = HashSet::new();
+    
+    let patterns = [
+        // Function calls: func_name() or func_name(args)
+        r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+        // Method calls: obj.method()
+        r"\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+    ];
+    
+    for pattern in &patterns {
+        if let Ok(re) = Regex::new(pattern) {
+            for cap in re.captures_iter(content) {
+                if let Some(name) = cap.get(1) {
+                    let name_str = name.as_str();
+                    if !is_python_keyword(name_str) && name_str.len() > 1 {
+                        calls.insert(name_str.to_string());
+                    }
+                }
+            }
+        }
+    }
+    
+    filter_and_sort_calls(calls)
+}
+
+/// Extract function calls from JavaScript/TypeScript code
+fn extract_js_function_calls(content: &str) -> Vec<String> {
+    let mut calls = HashSet::new();
+    
+    let patterns = [
+        // Function calls: func_name() or func_name(args)
+        r"\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(",
+        // Method calls: obj.method()
+        r"\.([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(",
+        // Arrow function calls in method chains
+        r"\.([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(",
+    ];
+    
+    for pattern in &patterns {
+        if let Ok(re) = Regex::new(pattern) {
+            for cap in re.captures_iter(content) {
+                if let Some(name) = cap.get(1) {
+                    let name_str = name.as_str();
+                    if !is_js_keyword(name_str) && name_str.len() > 1 {
+                        calls.insert(name_str.to_string());
+                    }
+                }
+            }
+        }
+    }
+    
+    filter_and_sort_calls(calls)
+}
+
+/// Extract function calls from Go code
+fn extract_go_function_calls(content: &str) -> Vec<String> {
+    let mut calls = HashSet::new();
+    
+    let patterns = [
+        // Function calls: func_name() or func_name(args)
+        r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+        // Method calls: obj.method()
+        r"\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+    ];
+    
+    for pattern in &patterns {
+        if let Ok(re) = Regex::new(pattern) {
+            for cap in re.captures_iter(content) {
+                if let Some(name) = cap.get(1) {
+                    let name_str = name.as_str();
+                    if !is_go_keyword(name_str) && name_str.len() > 1 {
+                        calls.insert(name_str.to_string());
+                    }
+                }
+            }
+        }
+    }
+    
+    filter_and_sort_calls(calls)
+}
+
+/// Extract function calls from Java code
+fn extract_java_function_calls(content: &str) -> Vec<String> {
+    let mut calls = HashSet::new();
+    
+    let patterns = [
+        // Method calls: obj.method() or Class.method()
+        r"\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+        // Function calls: func_name()
+        r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+    ];
+    
+    for pattern in &patterns {
+        if let Ok(re) = Regex::new(pattern) {
+            for cap in re.captures_iter(content) {
+                if let Some(name) = cap.get(1) {
+                    let name_str = name.as_str();
+                    if !is_java_keyword(name_str) && name_str.len() > 1 {
+                        calls.insert(name_str.to_string());
+                    }
+                }
+            }
+        }
+    }
+    
+    filter_and_sort_calls(calls)
+}
+
+/// Extract function calls from C/C++ code
+fn extract_c_function_calls(content: &str) -> Vec<String> {
+    let mut calls = HashSet::new();
+    
+    let patterns = [
+        // Function calls: func_name() or func_name(args)
+        r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+        // Method calls in C++: obj.method() or obj->method()
+        r"(?:\.|->)([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+        // Namespace/scope resolution in C++: Namespace::function()
+        r"::([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+    ];
+    
+    for pattern in &patterns {
+        if let Ok(re) = Regex::new(pattern) {
+            for cap in re.captures_iter(content) {
+                if let Some(name) = cap.get(1) {
+                    let name_str = name.as_str();
+                    if !is_c_keyword(name_str) && name_str.len() > 1 {
+                        calls.insert(name_str.to_string());
+                    }
+                }
+            }
+        }
+    }
+    
+    filter_and_sort_calls(calls)
+}
+
+/// Helper function to filter out common false positives and sort calls
+fn filter_and_sort_calls(calls: HashSet<String>) -> Vec<String> {
+    let mut result: Vec<String> = calls
+        .into_iter()
+        .filter(|call| !is_common_false_positive(call))
+        .collect();
+    
+    result.sort();
+    result.truncate(20); // Limit to top 20 calls to avoid overwhelming output
+    result
+}
+
+/// Check if a function name is a common false positive that should be filtered out
+fn is_common_false_positive(name: &str) -> bool {
+    // Common control structures, operators, and built-ins that aren't meaningful function calls
+    let false_positives = [
+        "if", "else", "for", "while", "do", "switch", "case", "try", "catch", "finally",
+        "return", "break", "continue", "throw", "new", "delete", "sizeof", "typeof",
+        "instanceof", "in", "of", "as", "is", "not", "and", "or",
+        "true", "false", "null", "undefined", "nil", "None", "void",
+        "int", "float", "double", "char", "bool", "string", "str", "list", "dict",
+        "var", "let", "const", "def", "fn", "func", "function", "class", "struct",
+        "pub", "private", "protected", "static", "final", "abstract",
+        "include", "import", "from", "use", "mod", "package",
+        "get", "set", // Too generic
+    ];
+    
+    false_positives.contains(&name) || name.len() <= 1
+}
+
+/// Check if a word is a Rust keyword
+fn is_rust_keyword(word: &str) -> bool {
+    let keywords = [
+        "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false",
+        "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut",
+        "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait",
+        "true", "type", "unsafe", "use", "where", "while", "async", "await", "dyn",
+        "abstract", "become", "box", "do", "final", "macro", "override", "priv",
+        "typeof", "unsized", "virtual", "yield", "try", "union",
+    ];
+    keywords.contains(&word)
+}
+
+/// Check if a word is a Python keyword
+fn is_python_keyword(word: &str) -> bool {
+    let keywords = [
+        "False", "None", "True", "and", "as", "assert", "break", "class", "continue",
+        "def", "del", "elif", "else", "except", "finally", "for", "from", "global",
+        "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass",
+        "raise", "return", "try", "while", "with", "yield", "async", "await",
+    ];
+    keywords.contains(&word)
+}
+
+/// Check if a word is a JavaScript/TypeScript keyword
+fn is_js_keyword(word: &str) -> bool {
+    let keywords = [
+        "await", "break", "case", "catch", "class", "const", "continue", "debugger",
+        "default", "delete", "do", "else", "enum", "export", "extends", "false",
+        "finally", "for", "function", "if", "import", "in", "instanceof", "new",
+        "null", "return", "super", "switch", "this", "throw", "true", "try",
+        "typeof", "var", "void", "while", "with", "yield", "let", "static",
+        "implements", "interface", "package", "private", "protected", "public",
+        "abstract", "boolean", "byte", "char", "double", "final", "float", "goto",
+        "int", "long", "native", "short", "synchronized", "throws", "transient",
+        "volatile", "async",
+    ];
+    keywords.contains(&word)
+}
+
+/// Check if a word is a Go keyword
+fn is_go_keyword(word: &str) -> bool {
+    let keywords = [
+        "break", "case", "chan", "const", "continue", "default", "defer", "else",
+        "fallthrough", "for", "func", "go", "goto", "if", "import", "interface",
+        "map", "package", "range", "return", "select", "struct", "switch", "type",
+        "var", "bool", "byte", "complex64", "complex128", "error", "float32",
+        "float64", "int", "int8", "int16", "int32", "int64", "rune", "string",
+        "uint", "uint8", "uint16", "uint32", "uint64", "uintptr", "true", "false",
+        "iota", "nil", "append", "cap", "close", "complex", "copy", "delete",
+        "imag", "len", "make", "new", "panic", "print", "println", "real", "recover",
+    ];
+    keywords.contains(&word)
+}
+
+/// Check if a word is a Java keyword
+fn is_java_keyword(word: &str) -> bool {
+    let keywords = [
+        "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char",
+        "class", "const", "continue", "default", "do", "double", "else", "enum",
+        "extends", "final", "finally", "float", "for", "goto", "if", "implements",
+        "import", "instanceof", "int", "interface", "long", "native", "new", "package",
+        "private", "protected", "public", "return", "short", "static", "strictfp",
+        "super", "switch", "synchronized", "this", "throw", "throws", "transient",
+        "try", "void", "volatile", "while", "true", "false", "null",
+    ];
+    keywords.contains(&word)
+}
+
+/// Check if a word is a C/C++ keyword
+fn is_c_keyword(word: &str) -> bool {
+    let keywords = [
+        "auto", "break", "case", "char", "const", "continue", "default", "do",
+        "double", "else", "enum", "extern", "float", "for", "goto", "if", "int",
+        "long", "register", "return", "short", "signed", "sizeof", "static",
+        "struct", "switch", "typedef", "union", "unsigned", "void", "volatile",
+        "while", "inline", "restrict", "_Bool", "_Complex", "_Imaginary",
+        // C++ keywords
+        "asm", "bool", "catch", "class", "const_cast", "delete", "dynamic_cast",
+        "explicit", "export", "false", "friend", "inline", "mutable", "namespace",
+        "new", "operator", "private", "protected", "public", "reinterpret_cast",
+        "static_cast", "template", "this", "throw", "true", "try", "typeid",
+        "typename", "using", "virtual", "wchar_t", "and", "bitand", "bitor",
+        "compl", "not", "not_eq", "or", "or_eq", "xor", "xor_eq",
+    ];
+    keywords.contains(&word)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
