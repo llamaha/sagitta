@@ -104,6 +104,7 @@ fn extract_signature(content: &str, element_type: &str, language: &str) -> Optio
         "javascript" | "typescript" => extract_js_signature(content, element_type),
         "go" => extract_go_signature(content, element_type),
         "java" => extract_java_signature(content, element_type),
+        "cpp" | "c++" => extract_cpp_signature(content, element_type),
         _ => None,
     }
 }
