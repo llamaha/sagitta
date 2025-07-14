@@ -1128,6 +1128,7 @@ async fn advanced_user_processing(user_id: u64) -> Result<UserProfile> {
         assert!(!context.outgoing_calls.is_empty());
         
         let calls = &context.outgoing_calls;
+        println!("DEBUG: Extracted calls: {:?}", calls);
         assert!(calls.contains(&"load_from_file".to_string()));
         assert!(calls.contains(&"fetch_by_id".to_string()));
         assert!(calls.contains(&"new".to_string()));
