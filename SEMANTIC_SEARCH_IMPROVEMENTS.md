@@ -143,12 +143,15 @@
 ## **Next Steps:**
 - ✅ **Phase 1**: COMPLETED - elementType/language fields working and tested
 - ✅ **Phase 2**: COMPLETED - deduplication logic improved
-- 🎯 **Phase 3**: Fix Python & JavaScript parser overlap issues - specific files identified 
-- 🆕 **Phase 4**: Rich Code Intelligence Previews - integrate repo-mapper for enhanced previews
-- 🔄 **Phase 5**: Output quality improvements (pending completion of Phase 3 & 4)
+- ✅ **Phase 3**: COMPLETED - Fixed Python & JavaScript parser overlap issues 
+- ✅ **Phase 4A**: COMPLETED - Basic code intelligence with signatures, previews, context info (11 tests)
+- 🆕 **Phase 4B**: Future - Advanced repo-mapper integration for call graphs & type flow
+- 🔄 **Phase 5**: Output quality improvements (enhanced with Phase 4A context)
 
 ## **Expected User Impact:**
 After restart, MCP search results will include:
 - `elementType`: Shows code construct type (function, class, struct, etc.)
 - `language`: Shows programming language (rust, python, javascript, etc.)
-This provides the same rich information available in CLI to MCP users.
+- `preview`: Intelligent code previews showing function signatures or meaningful lines
+- `context_info`: Rich metadata with signatures, parent classes, descriptions, identifiers
+This provides comprehensive code intelligence and context for enhanced developer productivity.
