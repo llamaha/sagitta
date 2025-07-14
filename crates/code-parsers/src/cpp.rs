@@ -119,7 +119,7 @@ impl CppParser {
     }
 
     /// Helper function to find a child node by type.
-    fn find_child_by_type(&self, node: &Node, type_name: &str) -> Option<Node> {
+    fn find_child_by_type<'a>(&self, node: &Node<'a>, type_name: &str) -> Option<Node<'a>> {
         for i in 0..node.child_count() {
             if let Some(child) = node.child(i) {
                 if child.kind() == type_name {
@@ -152,8 +152,8 @@ impl SyntaxParser for CppParser {
                 let node = capture.node;
                 let capture_name = self.query.capture_names()[capture.index as usize];
                 
-                // Skip if node doesn't have a parent (top-level) or if it's not a core element
-                if node.parent().is_some() && !is_core_element_type(&node, content.as_bytes()) {
+                // Skip if not a core element type
+                if !is_core_element_type(capture_name, Some("cpp")) {
                     continue;
                 }
                 
@@ -202,10 +202,7 @@ impl SyntaxParser for CppParser {
                     file_path: file_path.to_string(),
                     start_line: start_point.row + 1,
                     end_line: end_point.row + 1,
-                    start_byte,
-                    end_byte,
                     element_type: capture_name.to_string(),
-                    element_name,
                     language: "cpp".to_string(),
                 };
                 
