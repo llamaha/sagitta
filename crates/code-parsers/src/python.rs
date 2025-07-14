@@ -132,6 +132,21 @@ impl SyntaxParser for PythonParser {
             false
         };
 
+        // Helper to check if a node is nested inside another captured node
+        let is_nested_in_class_or_function = |node: Node| -> bool {
+            let mut current = node.parent();
+            while let Some(parent) = current {
+                if parent.kind() == "module" {
+                    break; // reached module level
+                }
+                if matches!(parent.kind(), "class_definition" | "function_definition" | "decorated_definition") {
+                    return true;
+                }
+                current = parent.parent();
+            }
+            false
+        };
+
         let matches = cursor.matches(&self.query, root_node, code_bytes);
 
         for mat in matches {
@@ -139,14 +154,18 @@ impl SyntaxParser for PythonParser {
                 let node = capture.node;
                 let capture_name = self.query.capture_names()[capture.index as usize];
 
-                // ** REMOVED Filter: Ensure the node's parent is the module **
-                // if node.parent().map_or(true, |p| p.kind() != "module") {
-                //     continue; // Skip nodes not directly under the module
-                // }
+                // Filter: Only capture top-level items (directly under module)
+                if node.parent().map_or(true, |p| p.kind() != "module") {
+                    continue; // Skip nodes not directly under the module
+                }
+
+                // Skip functions/classes that are nested inside other functions/classes
+                if matches!(capture_name, "func" | "class") && is_nested_in_class_or_function(node) {
+                    continue;
+                }
 
                 // Apply filters based on node type and content (e.g., for top-level items)
-                if node.parent().is_some_and(|p| p.kind() == "module") 
-                    && capture_name == "expr_stmt" 
+                if capture_name == "expr_stmt" 
                     && (is_docstring(node) || is_pass_stmt(node, code_bytes)) {
                     continue; // Skip docstrings and top-level 'pass'
                 }
