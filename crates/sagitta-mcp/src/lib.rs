@@ -8,3 +8,4 @@ pub mod http_transport;
 pub mod api_key; // Added new module
 pub mod middleware; // Added new module
 pub mod progress; // Added new module
+pub mod code_intelligence; // Added Phase 4 code intelligence module

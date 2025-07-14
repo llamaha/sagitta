@@ -2,6 +2,7 @@ use crate::mcp::{
     error_codes,
     types::{ErrorObject, QueryParams, QueryResult, SearchResultItem},
 };
+use crate::code_intelligence::{extract_code_context, generate_intelligent_preview};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{error, info, instrument, warn};
@@ -158,16 +159,8 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
             .and_then(|k| if let Kind::StringValue(s) = k { Some(s.clone()) } else { None })
             .unwrap_or_else(|| { warn!(point_id=?scored_point.id, "Missing language in payload"); "unknown".to_string() });
 
-        // Extract first line for preview (truncate at 120 chars if too long)
-        let preview = chunk_content.lines()
-            .next()
-            .map(|line| {
-                if line.len() > 120 {
-                    format!("{}...", &line[..117])
-                } else {
-                    line.to_string()
-                }
-            });
+        // Generate intelligent preview using Phase 4 enhanced logic
+        let preview = Some(generate_intelligent_preview(&chunk_content, &element_type, &language));
 
         let content = if params.show_code.unwrap_or(false) {
             // Only include full content if show_code is explicitly true
