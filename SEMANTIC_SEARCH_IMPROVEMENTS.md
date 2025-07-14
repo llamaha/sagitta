@@ -65,7 +65,7 @@
    - **Validation**: All 76 parser tests passing, including updated overlap detection tests
    - **Result**: Chunk overlap issues resolved, improving search quality and preventing duplicate results
 
-### **Phase 4: Rich Code Intelligence Previews** 🔄 **PENDING**
+### **Phase 4: Rich Code Intelligence Previews** ✅ **PHASES 4A & 4B COMPLETED**
 
 **Vision**: Transform semantic search results from simple text snippets into rich code intelligence previews that provide immediate codebase understanding.
 
@@ -73,15 +73,18 @@
 
 #### **Sub-Phases:**
 
-1. **Phase 4.1: Enhanced Preview Generation**
-   - Reactivate repo-mapper functionality for real-time code analysis
-   - Parse function signatures, method calls, and return types for each search result
-   - Replace simple text previews with structured code intelligence displays
+1. **Phase 4A: Enhanced Preview Generation** ✅ **COMPLETED**
+   - ✅ Added rich code context extraction with function signatures and intelligent previews
+   - ✅ Parse function signatures, method calls, and return types for each search result
+   - ✅ Replace simple text previews with structured code intelligence displays
+   - ✅ Enhanced `CodeContextInfo` with signatures, descriptions, identifiers
 
-2. **Phase 4.2: Bidirectional Call Graph Integration**
-   - Index function call relationships during chunking
-   - Implement reverse lookup: "called by" relationships  
-   - Display both outgoing calls and incoming references
+2. **Phase 4B: Bidirectional Call Graph Integration** ✅ **COMPLETED**
+   - ✅ Implemented comprehensive function call extraction for 6+ languages
+   - ✅ Added `outgoing_calls` and `incoming_calls` fields to search results
+   - ✅ Multi-language support: Rust, Python, JavaScript/TypeScript, Go, Java, C/C++
+   - ✅ Advanced pattern recognition with generic type support (`<T>`)
+   - ✅ TDD approach with 21 comprehensive tests
 
 3. **Phase 4.3: Type Flow & Import Analysis**
    - Extract and display type signatures: `String → Result<Vec<Item>, Error>`
