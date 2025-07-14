@@ -64,6 +64,12 @@ pub fn get_core_element_types(language: &str) -> HashSet<&'static str> {
             types.insert("method");
             types.insert("singleton_method");
         }
+        "cpp" | "c++" => {
+            types.insert("struct");
+            types.insert("enum");
+            types.insert("namespace");
+            types.insert("template");
+        }
         "markdown" => {
             // Clear types for markdown and add heading sections
             types.clear();
