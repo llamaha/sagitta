@@ -142,7 +142,8 @@
 - ✅ **Phase 1**: COMPLETED - elementType/language fields working and tested
 - ✅ **Phase 2**: COMPLETED - deduplication logic improved
 - 🎯 **Phase 3**: Fix Python & JavaScript parser overlap issues - specific files identified 
-- 🔄 **Phase 4**: Output quality improvements (pending completion of Phase 3)
+- 🆕 **Phase 4**: Rich Code Intelligence Previews - integrate repo-mapper for enhanced previews
+- 🔄 **Phase 5**: Output quality improvements (pending completion of Phase 3 & 4)
 
 ## **Expected User Impact:**
 After restart, MCP search results will include:
