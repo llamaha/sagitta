@@ -75,7 +75,7 @@ pub fn generate_intelligent_preview(content: &str, element_type: &str, language:
     }
 
     // Fallback to first non-empty line
-    for line in lines {
+    for line in &lines {
         let trimmed = line.trim();
         if !trimmed.is_empty() && !trimmed.starts_with("//") && !trimmed.starts_with('#') {
             return truncate_line(line, 120);
@@ -340,7 +340,7 @@ fn find_function_signature_line<'a>(lines: &'a [&str], language: &str) -> Option
     None
 }
 
-fn find_class_declaration_line<'a>(lines: &'a [&str], language: &str) -> Option<&'a str> {
+fn find_class_declaration_line<'a>(lines: &'a [&str], _language: &str) -> Option<&'a str> {
     for line in lines {
         let trimmed = line.trim();
         if trimmed.starts_with("class ") || trimmed.starts_with("struct ") || trimmed.starts_with("pub struct ") {
@@ -350,7 +350,7 @@ fn find_class_declaration_line<'a>(lines: &'a [&str], language: &str) -> Option<
     None
 }
 
-fn find_most_meaningful_line(lines: &[&str], _language: &str) -> Option<&str> {
+fn find_most_meaningful_line<'a>(lines: &'a [&str], _language: &str) -> Option<&'a str> {
     // Prefer lines with certain keywords or patterns
     for line in lines {
         let trimmed = line.trim();
@@ -371,5 +371,181 @@ fn truncate_line(line: &str, max_length: usize) -> String {
         format!("{}...", &line[..max_length - 3])
     } else {
         line.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rust_function_signature_extraction() {
+        let content = r#"
+/// This is a test function for authentication
+pub async fn authenticate_user(username: &str, password: &str) -> Result<User, AuthError> {
+    // Implementation here
+    Ok(User::new(username))
+}
+"#;
+        
+        let context = extract_code_context(content, "function", "rust").unwrap();
+        assert!(context.signature.is_some());
+        let signature = context.signature.unwrap();
+        assert!(signature.contains("pub async fn authenticate_user"));
+        assert!(context.description.is_some());
+        assert_eq!(context.description.unwrap(), "This is a test function for authentication");
+    }
+
+    #[test]
+    fn test_python_class_extraction() {
+        let content = r#"
+class DatabaseManager:
+    """
+    A comprehensive database management class for handling connections and queries.
+    """
+    def __init__(self, connection_string):
+        self.connection = None
+    
+    def connect(self):
+        # Implementation here
+        pass
+"#;
+        
+        let context = extract_code_context(content, "class", "python").unwrap();
+        assert!(context.signature.is_some());
+        let signature = context.signature.unwrap();
+        assert!(signature.contains("class DatabaseManager"));
+        assert!(context.description.is_some());
+        assert!(context.description.unwrap().contains("comprehensive database management"));
+    }
+
+    #[test]
+    fn test_javascript_function_extraction() {
+        let content = r#"
+/**
+ * Handles user authentication with advanced security features
+ */
+export async function authenticateUser(username, password) {
+    const user = await findUser(username);
+    const validation = validateCredentials(user, password);
+    return validation;
+}
+"#;
+        
+        let context = extract_code_context(content, "function", "javascript").unwrap();
+        assert!(context.signature.is_some());
+        let signature = context.signature.unwrap();
+        assert!(signature.contains("export async function authenticateUser"));
+        assert!(context.description.is_some());
+        assert!(context.description.unwrap().contains("advanced security features"));
+    }
+
+    #[test]
+    fn test_intelligent_preview_function() {
+        let content = r#"
+// Some comment
+pub fn calculate_user_score(user_id: u64, metrics: &Vec<Metric>) -> f64 {
+    let base_score = 100.0;
+    let mut adjusted_score = base_score;
+    // Complex calculation logic...
+    adjusted_score
+}
+"#;
+        
+        let preview = generate_intelligent_preview(content, "function", "rust");
+        assert!(preview.contains("pub fn calculate_user_score"));
+        assert!(!preview.contains("Some comment"));
+    }
+
+    #[test]
+    fn test_intelligent_preview_struct() {
+        let content = r#"
+/// User configuration structure
+pub struct UserConfig {
+    pub name: String,
+    pub email: String,
+    pub preferences: UserPreferences,
+}
+"#;
+        
+        let preview = generate_intelligent_preview(content, "struct", "rust");
+        assert!(preview.contains("pub struct UserConfig"));
+    }
+
+    #[test]
+    fn test_identifier_extraction() {
+        let content = r#"
+fn process_user_data(user_data: UserData) -> ProcessedResult {
+    let validation_engine = ValidationEngine::new();
+    let processed_metrics = user_data.process();
+    validation_engine.validate(processed_metrics)
+}
+"#;
+        
+        let context = extract_code_context(content, "function", "rust").unwrap();
+        assert!(!context.identifiers.is_empty());
+        assert!(context.identifiers.contains(&"validation_engine".to_string()));
+        assert!(context.identifiers.contains(&"processed_metrics".to_string()));
+    }
+
+    #[test]
+    fn test_parent_name_extraction_rust_impl() {
+        let content = r#"
+impl UserManager {
+    pub fn create_user(&self, name: &str) -> User {
+        User::new(name)
+    }
+}
+"#;
+        
+        let context = extract_code_context(content, "method", "rust").unwrap();
+        assert!(context.parent_name.is_some());
+        assert_eq!(context.parent_name.unwrap(), "UserManager");
+    }
+
+    #[test]
+    fn test_no_context_extraction() {
+        let content = "let x = 5;";
+        let context = extract_code_context(content, "unknown", "rust");
+        assert!(context.is_none());
+    }
+
+    #[test]
+    fn test_preview_fallback_to_meaningful_line() {
+        let content = r#"
+// Just a comment
+/* Another comment */
+const important_config = {
+    database: 'production',
+    timeout: 5000
+};
+"#;
+        
+        let preview = generate_intelligent_preview(content, "unknown", "javascript");
+        assert!(preview.contains("const important_config"));
+        assert!(!preview.contains("Just a comment"));
+    }
+
+    #[test]
+    fn test_truncate_line_functionality() {
+        let long_line = "a".repeat(150);
+        let truncated = truncate_line(&long_line, 120);
+        assert_eq!(truncated.len(), 120);
+        assert!(truncated.ends_with("..."));
+    }
+
+    #[test]
+    fn test_go_function_signature() {
+        let content = r#"
+func (s *UserService) AuthenticateUser(username, password string) (*User, error) {
+    // Implementation
+    return nil, nil
+}
+"#;
+        
+        let context = extract_code_context(content, "function", "go").unwrap();
+        assert!(context.signature.is_some());
+        let signature = context.signature.unwrap();
+        assert!(signature.contains("func (s *UserService) AuthenticateUser"));
     }
 }
