@@ -15,6 +15,13 @@ lazy_static::lazy_static! {
         s.insert("yml");
         s.insert("rb");
         s.insert("py");
+        s.insert("cpp");
+        s.insert("cc");
+        s.insert("cxx");
+        s.insert("c++");
+        s.insert("h");
+        s.insert("hpp");
+        s.insert("hxx");
         s
     };
 }
