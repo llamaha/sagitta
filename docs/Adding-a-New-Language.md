@@ -644,6 +644,7 @@ Document language-specific features and patterns in your implementation.
 - [ ] Semantic search returns relevant results
 - [ ] Performance is acceptable on large files
 - [ ] Edge cases are handled gracefully
+- [ ] **Update supported languages list in `crates/sagitta-code/README.md`**
 
 ## Conclusion
 
