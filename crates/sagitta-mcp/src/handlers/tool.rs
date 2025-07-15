@@ -17,7 +17,8 @@ use crate::handlers::{ping::handle_ping, query::handle_query, repository::*,
                       todo_read::handle_todo_read, todo_write::handle_todo_write,
                       edit_file::handle_edit_file, multi_edit_file::handle_multi_edit_file,
                       shell_execute::handle_shell_execute,
-                      write_file::handle_write_file}; // Import actual handlers
+                      write_file::handle_write_file,
+                      read_file::handle_read_file}; // Import actual handlers
 
 use anyhow::Result;
 use serde_json::json;
@@ -143,6 +144,13 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
         "write_file" => {
             let write_params: WriteFileParams = deserialize_value(arguments, tool_name)?;
             match handle_write_file(write_params, config, qdrant_client, None).await {
+                Ok(res) => result_to_call_result(res),
+                Err(e) => Err(e),
+            }
+        }
+        "read_file" => {
+            let read_params: crate::mcp::types::ReadFileParams = deserialize_value(arguments, tool_name)?;
+            match handle_read_file(read_params, config, qdrant_client, None).await {
                 Ok(res) => result_to_call_result(res),
                 Err(e) => Err(e),
             }
@@ -532,6 +540,28 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         },
         
         
+        // --- Read File ---
+        ToolDefinition {
+            name: "read_file".to_string(),
+            description: Some("Reads content from a file with optional line range support.".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "file_path": { "type": "string", "description": "The absolute path to the file to read" },
+                    "limit": { "type": "integer", "description": "Optional number of lines to read" },
+                    "offset": { "type": "integer", "description": "Optional line number to start reading from" }
+                },
+                "required": ["file_path"]
+            }),
+            annotations: Some(ToolAnnotations {
+                title: Some("Read File".to_string()),
+                read_only_hint: Some(true),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(true),
+                open_world_hint: Some(false),
+            }),
+        },
+        
         // --- Write File ---
         ToolDefinition {
             name: "write_file".to_string(),
@@ -657,6 +687,7 @@ mod tests {
             "edit_file",
             "multi_edit_file",
             "shell_execute",
+            "read_file",
             "write_file",
         ];
         

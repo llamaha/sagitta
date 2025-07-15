@@ -9,6 +9,7 @@ pub mod provider_tests;
 pub mod factory_tests;
 pub mod manager_tests;
 pub mod integration_tests;
+pub mod mcp_integration_test;
 
 // Re-export commonly used test utilities
 pub use mock_provider::*;
