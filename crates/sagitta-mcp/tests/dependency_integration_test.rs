@@ -5,13 +5,25 @@ use sagitta_search::config::{AppConfig, RepositoryConfig};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tempfile::TempDir;
+use std::env;
 
 async fn create_test_config_with_repos() -> (Arc<RwLock<AppConfig>>, TempDir) {
     let temp_dir = TempDir::new().unwrap();
     
+    // IMPORTANT: Set environment variable to ensure we're in test mode
+    // This prevents any real config files from being touched
+    env::set_var("SAGITTA_TEST_MODE", "1");
+    
     // Create a completely isolated config that doesn't touch real paths
+    // Use a subdirectory in temp to ensure complete isolation
+    let test_base_path = temp_dir.path().join("test_repos");
+    std::fs::create_dir_all(&test_base_path).unwrap();
+    
     let config = AppConfig {
-        repositories_base_path: Some(temp_dir.path().to_string_lossy().to_string()),
+        // Use the isolated test directory
+        repositories_base_path: Some(test_base_path.to_string_lossy().to_string()),
+        // Ensure Qdrant URL is also isolated
+        qdrant_url: "http://localhost:6333".to_string(),
         repositories: vec![
             RepositoryConfig {
                 name: "test-main-app".to_string(),
@@ -62,7 +74,16 @@ async fn create_test_config_with_repos() -> (Arc<RwLock<AppConfig>>, TempDir) {
                 dependencies: vec![],
             },
         ],
-        ..Default::default()
+        // Explicitly set model paths to temp directory to prevent any real file access
+        onnx_model_path: Some(temp_dir.path().join("model.onnx").to_string_lossy().to_string()),
+        onnx_tokenizer_path: Some(temp_dir.path().join("tokenizer").to_string_lossy().to_string()),
+        embed_model: None,
+        server_api_key_path: None,
+        vocabulary_base_path: Some(temp_dir.path().join("vocab").to_string_lossy().to_string()),
+        active_repository: None,
+        indexing: Default::default(),
+        performance: Default::default(),
+        embedding: Default::default(),
     };
     
     (Arc::new(RwLock::new(config)), temp_dir)
@@ -76,9 +97,20 @@ mod tests {
         handle_repository_remove_dependency,
         handle_repository_list_dependencies,
     };
+    
+    // Helper to ensure test isolation
+    struct TestGuard;
+    
+    impl Drop for TestGuard {
+        fn drop(&mut self) {
+            // Clean up test environment variable
+            env::remove_var("SAGITTA_TEST_MODE");
+        }
+    }
 
     #[tokio::test]
     async fn test_add_dependency_success() {
+        let _guard = TestGuard; // Ensures cleanup on test exit
         let (config, _temp_dir) = create_test_config_with_repos().await;
         
         let params = RepositoryDependencyParams {
@@ -105,6 +137,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_dependency_nonexistent_main_repo() {
+        let _guard = TestGuard;
         let (config, _temp_dir) = create_test_config_with_repos().await;
         
         let params = RepositoryDependencyParams {
@@ -121,6 +154,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_dependency_nonexistent_dependency() {
+        let _guard = TestGuard;
         let (config, _temp_dir) = create_test_config_with_repos().await;
         
         let params = RepositoryDependencyParams {
@@ -137,6 +171,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_existing_dependency() {
+        let _guard = TestGuard;
         let (config, _temp_dir) = create_test_config_with_repos().await;
         
         // First add a dependency
@@ -170,6 +205,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_dependency_success() {
+        let _guard = TestGuard;
         let (config, _temp_dir) = create_test_config_with_repos().await;
         
         // First add a dependency
@@ -201,6 +237,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_nonexistent_dependency() {
+        let _guard = TestGuard;
         let (config, _temp_dir) = create_test_config_with_repos().await;
         
         let params = RepositoryDependencyParams {
@@ -217,6 +254,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_dependencies() {
+        let _guard = TestGuard;
         let (config, _temp_dir) = create_test_config_with_repos().await;
         
         // Add multiple dependencies
@@ -266,6 +304,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_dependencies_empty() {
+        let _guard = TestGuard;
         let (config, _temp_dir) = create_test_config_with_repos().await;
         
         let params = RepositoryListDependenciesParams {
@@ -279,6 +318,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_self_dependency_allowed() {
+        let _guard = TestGuard;
         let (config, _temp_dir) = create_test_config_with_repos().await;
         
         // Test that a repository can depend on itself (though unusual)
@@ -303,6 +343,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_repositories_with_dependencies() {
+        let _guard = TestGuard;
         let (config, _temp_dir) = create_test_config_with_repos().await;
         
         // main-app depends on lib-a and lib-b

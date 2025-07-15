@@ -57,8 +57,7 @@ pub async fn handle_repository_add_dependency(
         );
     }
     
-    // Save configuration only if not in test mode
-    #[cfg(not(test))]
+    // Save configuration
     save_config(&config, None)?;
     
     Ok(RepositoryDependencyResult {
