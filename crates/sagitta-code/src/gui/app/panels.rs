@@ -1898,6 +1898,8 @@ impl ModelSelectionPanel {
             ui.heading("Claude Model Selection");
             ui.separator();
             
+            // TODO: Re-enable when claude_code module is implemented in Phase 2
+            /*
             egui::ComboBox::from_label("Model")
                 .selected_text(&self.current_model)
                 .show_ui(ui, |ui| {
@@ -1907,6 +1909,9 @@ impl ModelSelectionPanel {
                         }
                     }
                 });
+            */
+            ui.add(egui::TextEdit::singleline(&mut self.current_model)
+                .hint_text("Model name (e.g., claude-3-5-sonnet-latest)"));
             
             ui.separator();
             if ui.button("Close").clicked() {

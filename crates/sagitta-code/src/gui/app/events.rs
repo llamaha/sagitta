@@ -21,7 +21,7 @@ pub enum SyncNotificationType {
 }
 
 /// Application-specific UI events
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum AppEvent {
     ResponseProcessingComplete,
     RefreshConversationList,
@@ -57,7 +57,47 @@ pub enum AppEvent {
         message: String,
         notification_type: SyncNotificationType,
     },
+    // Provider management events
+    ReinitializeProvider {
+        provider_type: crate::providers::types::ProviderType,
+    },
+    AgentReplaced {
+        agent: std::sync::Arc<crate::agent::core::Agent>,
+    },
     // Add other app-level UI events here if needed
+}
+
+impl std::fmt::Debug for AppEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AppEvent::ResponseProcessingComplete => write!(f, "ResponseProcessingComplete"),
+            AppEvent::RefreshConversationList => write!(f, "RefreshConversationList"),
+            AppEvent::SwitchToConversation(id) => write!(f, "SwitchToConversation({})", id),
+            AppEvent::CheckpointSuggestionsReady { conversation_id, suggestions } => 
+                write!(f, "CheckpointSuggestionsReady {{ conversation_id: {}, suggestions: {} items }}", conversation_id, suggestions.len()),
+            AppEvent::BranchSuggestionsReady { conversation_id, suggestions } => 
+                write!(f, "BranchSuggestionsReady {{ conversation_id: {}, suggestions: {} items }}", conversation_id, suggestions.len()),
+            AppEvent::RepositoryListUpdated(repos) => write!(f, "RepositoryListUpdated({:?})", repos),
+            AppEvent::RefreshRepositoryList => write!(f, "RefreshRepositoryList"),
+            AppEvent::UpdateGitHistoryPath(path) => write!(f, "UpdateGitHistoryPath({:?})", path),
+            AppEvent::RepositoryAdded(repo) => write!(f, "RepositoryAdded({})", repo),
+            AppEvent::RepositorySwitched(repo) => write!(f, "RepositorySwitched({})", repo),
+            AppEvent::CancelTool(id) => write!(f, "CancelTool({})", id),
+            AppEvent::RenameConversation { conversation_id, new_title } => 
+                write!(f, "RenameConversation {{ conversation_id: {}, new_title: {} }}", conversation_id, new_title),
+            AppEvent::UpdateConversationTitle { conversation_id } => 
+                write!(f, "UpdateConversationTitle {{ conversation_id: {} }}", conversation_id),
+            AppEvent::SaveClaudeMdTemplate => write!(f, "SaveClaudeMdTemplate"),
+            AppEvent::ApplyClaudeMdToAllRepos => write!(f, "ApplyClaudeMdToAllRepos"),
+            AppEvent::ShowNewConversationConfirmation => write!(f, "ShowNewConversationConfirmation"),
+            AppEvent::CreateNewConversation => write!(f, "CreateNewConversation"),
+            AppEvent::ShowSyncNotification { repository, message, notification_type } => 
+                write!(f, "ShowSyncNotification {{ repository: {}, message: {}, notification_type: {:?} }}", repository, message, notification_type),
+            AppEvent::ReinitializeProvider { provider_type } => 
+                write!(f, "ReinitializeProvider {{ provider_type: {:?} }}", provider_type),
+            AppEvent::AgentReplaced { agent: _ } => write!(f, "AgentReplaced {{ agent: Agent }}"),
+        }
+    }
 }
 
 /// Conversation event types
@@ -453,6 +493,14 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
             AppEvent::ShowSyncNotification { repository, message, notification_type } => {
                 log::info!("Received ShowSyncNotification event for repository: {repository}");
                 handle_sync_notification(app, repository, message, notification_type);
+            },
+            AppEvent::ReinitializeProvider { provider_type } => {
+                log::info!("Received ReinitializeProvider event for provider: {:?}", provider_type);
+                handle_provider_reinitialization(app, provider_type);
+            },
+            AppEvent::AgentReplaced { agent } => {
+                log::info!("Received AgentReplaced event");
+                handle_agent_replaced(app, agent);
             },
         }
     }
@@ -1855,6 +1903,8 @@ mod tests {
             AppEvent::RepositorySwitched(_) => assert!(true),
             AppEvent::ShowSyncNotification { .. } => assert!(true),
             AppEvent::ShowNewConversationConfirmation => assert!(true),
+            AppEvent::ReinitializeProvider { .. } => assert!(true),
+            AppEvent::AgentReplaced { .. } => assert!(true),
         }
         
         // Test the other variant too
@@ -1878,6 +1928,8 @@ mod tests {
             AppEvent::RepositorySwitched(_) => assert!(true),
             AppEvent::ShowSyncNotification { .. } => assert!(true),
             AppEvent::ShowNewConversationConfirmation => assert!(true),
+            AppEvent::ReinitializeProvider { .. } => assert!(true),
+            AppEvent::AgentReplaced { .. } => assert!(true),
         }
     }
 
@@ -2535,4 +2587,144 @@ mod tests {
         assert_eq!(app.chat_manager.get_all_messages().len(), 2);
         assert!(!app.state.conversation_data_loading);
     }
+}
+
+/// Handle provider reinitialization
+fn handle_provider_reinitialization(app: &mut SagittaCodeApp, provider_type: crate::providers::types::ProviderType) {
+    log::info!("Reinitializing provider to: {:?}", provider_type);
+    
+    // Store provider type for the reinitialization
+    app.state.pending_provider_change = Some(provider_type);
+    
+    // Update the current provider in the config (this will be overridden by the async function)
+    if let Ok(mut config) = app.config.try_lock() {
+        config.current_provider = provider_type;
+        log::info!("Updated current provider in config to: {:?}", provider_type);
+    } else {
+        log::error!("Failed to lock config for provider update");
+        return;
+    }
+    
+    // Trigger async reinitialization
+    let config_clone = app.config.clone();
+    let app_event_sender = app.app_event_sender.clone();
+    
+    tokio::spawn(async move {
+        match reinitialize_agent_with_provider(config_clone, provider_type).await {
+            Ok(new_agent) => {
+                log::info!("Successfully reinitialized agent with provider: {:?}", provider_type);
+                // Send success notification
+                if let Err(send_err) = app_event_sender.send(AppEvent::ShowSyncNotification {
+                    repository: "Provider".to_string(),
+                    message: format!("Successfully switched to {:?}", provider_type),
+                    notification_type: SyncNotificationType::Success,
+                }) {
+                    log::error!("Failed to send success notification: {}", send_err);
+                }
+                
+                // Send event to replace the agent
+                if let Err(send_err) = app_event_sender.send(AppEvent::AgentReplaced { agent: new_agent }) {
+                    log::error!("Failed to send AgentReplaced event: {}", send_err);
+                }
+            },
+            Err(e) => {
+                log::warn!("Provider reinitialization requires restart: {}", e);
+                
+                // Check if this is the expected "restart required" message
+                if e.contains("Settings saved successfully") {
+                    // Send info notification for successful save but restart required
+                    if let Err(send_err) = app_event_sender.send(AppEvent::ShowSyncNotification {
+                        repository: "Provider".to_string(),
+                        message: format!("Settings saved! Please restart to switch to {:?}", provider_type),
+                        notification_type: SyncNotificationType::Info,
+                    }) {
+                        log::error!("Failed to send info notification: {}", send_err);
+                    }
+                } else {
+                    // Send error notification for actual failures
+                    if let Err(send_err) = app_event_sender.send(AppEvent::ShowSyncNotification {
+                        repository: "Provider".to_string(),
+                        message: format!("Failed to switch to {:?}: {}", provider_type, e),
+                        notification_type: SyncNotificationType::Error,
+                    }) {
+                        log::error!("Failed to send error notification: {}", send_err);
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// Reinitialize agent with a new provider
+async fn reinitialize_agent_with_provider(
+    config: std::sync::Arc<tokio::sync::Mutex<crate::config::types::SagittaCodeConfig>>,
+    provider_type: crate::providers::types::ProviderType,
+) -> Result<std::sync::Arc<crate::agent::core::Agent>, String> {
+    use crate::gui::app::initialization::create_llm_client;
+    use crate::config::save_config as save_sagitta_code_config;
+    
+    log::info!("Attempting to reinitialize agent with provider: {:?}", provider_type);
+    
+    // Lock the config to read current settings
+    let config_guard = config.lock().await;
+    let mut current_config = config_guard.clone();
+    drop(config_guard);
+    
+    // Update the current provider
+    current_config.current_provider = provider_type;
+    
+    // Save the updated configuration to disk
+    match save_sagitta_code_config(&current_config) {
+        Ok(_) => {
+            log::info!("Successfully saved updated configuration with provider: {:?}", provider_type);
+            
+            // Update the config in memory
+            let mut config_guard = config.lock().await;
+            config_guard.current_provider = provider_type;
+            drop(config_guard);
+        },
+        Err(e) => {
+            log::error!("Failed to save configuration: {}", e);
+            return Err(format!("Failed to save configuration: {}", e));
+        }
+    }
+    
+    // Test the new provider configuration
+    let llm_client_test = create_llm_client(&current_config, None)
+        .await
+        .map_err(|e| format!("Failed to create LLM client with new provider: {}", e))?;
+    
+    log::info!("Successfully validated new LLM client with provider: {:?}", provider_type);
+    
+    // LIMITATION: The current Agent architecture doesn't support hot-swapping the LLM client
+    // The Agent struct stores the LLM client as Arc<dyn LlmClient> and has no methods to update it
+    // This is by design for thread safety, but means full reinitialization is complex
+    
+    // To properly implement hot-reload, we would need to:
+    // 1. Create a new embedding provider adapter
+    // 2. Create new conversation persistence and search engine instances  
+    // 3. Create a completely new Agent with Agent::new()
+    // 4. Re-wire all the event subscriptions and UI connections
+    // 5. Update the RepoPanel, ConversationService, and other components
+    
+    // For now, we'll save the settings and inform the user that restart is needed
+    log::info!("Configuration saved successfully. Agent architecture requires restart for provider switch.");
+    
+    Err("Settings saved successfully! However, the current Agent architecture requires a restart to fully switch providers. This is a known limitation - the Agent is designed to be immutable with respect to its LLM provider for thread safety.".to_string())
+}
+
+/// Handle agent replacement
+fn handle_agent_replaced(app: &mut SagittaCodeApp, new_agent: std::sync::Arc<crate::agent::core::Agent>) {
+    log::info!("Replacing agent with new one");
+    
+    // Replace the agent in the app
+    app.agent = Some(new_agent);
+    
+    // Clear the pending provider change
+    app.state.pending_provider_change = None;
+    
+    // Update the current provider to match the new agent
+    // The provider should already be set in the config from the reinitialization
+    
+    log::info!("Agent replacement completed successfully");
 } 

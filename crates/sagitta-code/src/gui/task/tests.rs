@@ -588,7 +588,7 @@ mod ui_tests {
         
         mock_ctx.with_ui(|ui| {
             let add_task_clicked = render_task_queue(ui, &mut state, &mut show_dialog);
-            assert!(!add_task_clicked); // No interaction yet
+            assert!(!add_task_clicked.0); // No interaction yet
         });
     }
     
@@ -643,7 +643,7 @@ mod ui_tests {
         
         mock_ctx.with_ui(|ui| {
             let add_task_clicked = render_task_queue(ui, &mut state, &mut show_dialog);
-            assert!(!add_task_clicked);
+            assert!(!add_task_clicked.0);
         });
         
         // Verify state is as expected

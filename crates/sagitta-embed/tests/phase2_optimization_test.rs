@@ -5,7 +5,6 @@ use sagitta_embed::{
              DynamicBatchConfig, ExecutionProvider},
     model::EmbeddingModelType,
     provider::onnx::model::OnnxEmbeddingModel,
-    provider::EmbeddingProvider,
 };
 use std::path::PathBuf;
 use tempfile::tempdir;

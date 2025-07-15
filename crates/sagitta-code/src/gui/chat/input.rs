@@ -28,6 +28,10 @@ pub fn chat_input_ui(
     available_repositories: &[String],
     on_repository_context_change: &mut Option<String>,
     on_repository_refresh_requested: &mut bool,
+    // Provider context parameters  
+    current_provider: &crate::providers::types::ProviderType,
+    available_providers: &[crate::providers::types::ProviderType],
+    on_provider_change: &mut Option<crate::providers::types::ProviderType>,
     // Git controls
     git_controls: &mut crate::gui::repository::git_controls::GitControls,
     // Loop control parameters
@@ -91,8 +95,9 @@ pub fn chat_input_ui(
         Vec2::new(available_width, ui.available_height()),
         Layout::top_down(Align::Center),
         |ui| {
-        // Repository context selector
+        // Repository and Provider selector
         ui.horizontal(|ui| {
+            // Repository context selector
             let repo_text = match current_repository_context {
                 Some(repo) => format!("📁 {repo}"),
                 None => "📁 No Repository".to_string(),
@@ -148,6 +153,7 @@ pub fn chat_input_ui(
             if combo_response.response.clicked() {
                 *on_repository_refresh_requested = true;
             }
+
             
             // Show git controls if a repository is selected
             if let Some(repo_name) = current_repository_context {

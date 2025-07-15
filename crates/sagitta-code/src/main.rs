@@ -151,7 +151,8 @@ mod cli_app {
     use qdrant_client::Qdrant;
     // Qdrant collection imports removed - no longer needed after removing analyze_input tool
     use sagitta_code::llm::client::LlmClient; // Corrected path
-    use sagitta_code::llm::claude_code::client::ClaudeCodeClient;
+    // TODO: Phase 2 - Re-enable when claude_code module is implemented
+    // use sagitta_code::llm::claude_code::client::ClaudeCodeClient;
 
     pub async fn run(config: SagittaCodeConfig) -> Result<()> {
         log::info!("Starting Sagitta Code CLI");
@@ -194,8 +195,9 @@ mod cli_app {
         let tool_registry = Arc::new(sagitta_code::tools::registry::ToolRegistry::new());
         
         // Create the Claude Code LLM client (we'll wrap it in Arc later)
-        let mut claude_client = ClaudeCodeClient::new(&config)
-            .map_err(|e| anyhow!("Failed to create ClaudeCodeClient for CLI: {}", e))?;
+        // TODO: Phase 2 - Re-enable when claude_code module is implemented
+        // let mut claude_client = ClaudeCodeClient::new(&config)
+        //     .map_err(|e| anyhow!("Failed to create ClaudeCodeClient for CLI: {}", e))?;
         
 
         // Tools are now provided via MCP, not registered internally
@@ -204,14 +206,21 @@ mod cli_app {
         
         // Initialize MCP integration with the tool registry
         log::info!("CLI: Initializing MCP integration for Claude");
-        if let Err(e) = claude_client.initialize_mcp(None).await {
-            log::warn!("Failed to initialize MCP integration: {e}. Tool calls may not work.");
-        }
+        // TODO: Phase 2 - Re-enable when claude_code module is implemented
+        // if let Err(e) = claude_client.initialize_mcp(None).await {
+        //     log::warn!("Failed to initialize MCP integration: {e}. Tool calls may not work.");
+        // }
         
         // Now wrap the client in Arc for use with the agent
-        let llm_client_cli: Arc<dyn LlmClient> = Arc::new(claude_client);
+        // TODO: Phase 2 - Create proper LLM client when claude_code module is implemented
+        return Err(anyhow::anyhow!("CLI mode not available until Phase 2 - LLM client implementation needed"));
         
-        // Create concrete persistence and search engine for the CLI app
+        // TODO: Phase 2 - Remove this conditional wrapper when claude_code module is implemented
+        #[allow(unreachable_code)]
+        if false {
+            // let llm_client_cli: Arc<dyn LlmClient> = Arc::new(claude_client);
+        
+            // Create concrete persistence and search engine for the CLI app
         let storage_path = if let Some(path) = &config.conversation.storage_path {
             path.clone()
         } else {
@@ -237,7 +246,8 @@ mod cli_app {
             embedding_provider.clone(),
             persistence,
             search_engine,
-            llm_client_cli.clone() // Pass the created LLM client
+            // llm_client_cli.clone() // Pass the created LLM client - TODO: Phase 2
+            panic!("Unreachable - Phase 2 placeholder")
         ).await {
             Ok(agent) => agent,
             Err(e) => {
@@ -351,6 +361,7 @@ mod cli_app {
                 }
             }
         }
+        } // End of if false block - TODO: Phase 2 - Remove this
         
         Ok(())
     }
@@ -359,7 +370,8 @@ mod cli_app {
 // MCP server mode
 mod mcp_app {
     use super::*;
-    use sagitta_code::llm::claude_code::mcp_integration::run_internal_mcp_server;
+    // TODO: Phase 2 - Re-enable when claude_code module is implemented
+    // use sagitta_code::llm::claude_code::mcp_integration::run_internal_mcp_server;
     use sagitta_search::config::AppConfig as SagittaAppConfig;
     use sagitta_search::config::load_config as load_sagitta_config;
     
@@ -371,8 +383,25 @@ mod mcp_app {
             // No need for ToolRegistry or any of that complexity
             let _tool_registry = Arc::new(sagitta_code::tools::registry::ToolRegistry::new()); // Still needed by function signature
             
-            // Run the internal MCP server (which now uses sagitta-mcp Server)
-            run_internal_mcp_server(None).await
+            // Run the internal MCP server using sagitta-mcp directly
+            // Load sagitta-search AppConfig for the MCP server
+            let sagitta_config_path_val = sagitta_code_config.sagitta_config_path();
+            let sagitta_app_config = match load_sagitta_config(Some(&sagitta_config_path_val)) {
+                Ok(config) => config,
+                Err(e) => {
+                    log::warn!("Failed to load sagitta-search config from {}: {}. Using default.", sagitta_config_path_val.display(), e);
+                    SagittaAppConfig::default()
+                }
+            };
+            
+            // Create and run sagitta-mcp server
+            let server = sagitta_mcp::server::Server::new(sagitta_app_config).await
+                .context("Failed to create internal MCP server")?;
+            
+            server.run().await
+                .context("Internal MCP server failed")?;
+            
+            Ok(())
         } else {
             log::info!("Starting Sagitta Code MCP Server");
             

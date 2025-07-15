@@ -53,6 +53,10 @@ mod tests {
                     &repos,
                     &mut repo_change,
                     &mut repo_refresh,
+                    // Provider context parameters
+                    &sagitta_code::providers::types::ProviderType::default(),
+                    &[sagitta_code::providers::types::ProviderType::ClaudeCode],
+                    &mut None,
                     &mut git_controls,
                     is_in_loop,
                     &mut loop_break,

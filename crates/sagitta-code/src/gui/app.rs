@@ -16,6 +16,7 @@ use crate::services::file_watcher::FileWatcherConfig as ServiceFileWatcherConfig
 use super::settings::SettingsPanel;
 // Removed - ConversationSidebar is re-exported from conversation module
 use super::claude_md_modal::ClaudeMdModal;
+use super::dialogs::ProviderSetupDialog;
 use crate::agent::Agent;
 use crate::agent::message::types::{AgentMessage, ToolCall};
 use crate::agent::state::types::{AgentState, AgentStateInfo};
@@ -85,6 +86,7 @@ pub struct SagittaCodeApp {
     pub task_panel: TaskPanel,
     conversation_sidebar: ConversationSidebar,
     claude_md_modal: ClaudeMdModal,
+    provider_setup_dialog: ProviderSetupDialog,
     config: Arc<Mutex<SagittaCodeConfig>>,
     app_core_config: Arc<AppConfig>,
     
@@ -134,12 +136,15 @@ impl SagittaCodeApp {
         let app_core_config_arc = Arc::new(app_core_config.clone());
 
         // Create settings panel
-        let settings_panel = SettingsPanel::new(sagitta_code_config.clone(), app_core_config.clone());
+        let mut settings_panel = SettingsPanel::new(sagitta_code_config.clone(), app_core_config.clone());
 
         // Create conversation event channel
         let (conversation_sender, conversation_receiver) = mpsc::unbounded_channel();
         // Create app event channel
         let (app_event_sender, app_event_receiver) = mpsc::unbounded_channel::<AppEvent>();
+        
+        // Set app event sender on settings panel for provider changes
+        settings_panel.set_app_event_sender(app_event_sender.clone());
 
         // Create initial state and set theme from config
         let mut initial_state = AppState::new();
@@ -154,7 +159,12 @@ impl SagittaCodeApp {
         let mut panels = PanelManager::new();
         
         // Set the current model from config
-        panels.set_current_model(sagitta_code_config.claude_code.model.clone());
+        panels.set_current_model(
+            sagitta_code_config.claude_code
+                .as_ref()
+                .map(|c| c.model.clone())
+                .unwrap_or_else(|| "claude-3-5-sonnet-20241022".to_string())
+        );
 
         Self {
             agent: None,
@@ -169,6 +179,7 @@ impl SagittaCodeApp {
             task_panel: TaskPanel::new(None, None, sagitta_code_config_arc.clone()),
             conversation_sidebar: ConversationSidebar::with_default_config(),
             claude_md_modal: ClaudeMdModal::new(sagitta_code_config_arc.clone()),
+            provider_setup_dialog: ProviderSetupDialog::new(sagitta_code_config_arc.clone()),
             config: sagitta_code_config_arc.clone(),
             app_core_config: app_core_config_arc,
             

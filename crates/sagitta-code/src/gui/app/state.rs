@@ -6,6 +6,7 @@ use crate::agent::events::ToolRunId;
 use crate::gui::conversation::sidebar::SidebarAction;
 use crate::gui::chat::view::CopyButtonState;
 use super::super::theme::AppTheme;
+use crate::providers::types::ProviderType;
 use egui_notify::Toasts;
 use uuid::Uuid;
 use std::collections::{HashMap, VecDeque};
@@ -41,6 +42,14 @@ pub struct AppState {
     pub available_repositories: Vec<String>,
     pub pending_repository_context_change: Option<String>,
     pub pending_git_repository_path: Option<std::path::PathBuf>,
+    
+    // Provider context state
+    pub current_provider: ProviderType,
+    pub available_providers: Vec<ProviderType>,
+    pub pending_provider_change: Option<ProviderType>,
+    pub pending_agent_replacement: Option<std::sync::Arc<crate::agent::core::Agent>>,
+    pub show_provider_quick_switch: bool,
+    pub show_provider_setup_dialog: bool,
     
     // Agent operational state flags for UI
     pub current_agent_state: AgentState,
@@ -128,6 +137,14 @@ impl AppState {
             pending_repository_context_change: None,
             pending_git_repository_path: None,
             
+            // Provider context state
+            current_provider: ProviderType::default(),
+            available_providers: vec![ProviderType::ClaudeCode, ProviderType::MistralRs],
+            pending_provider_change: None,
+            pending_agent_replacement: None,
+            show_provider_quick_switch: false,
+            show_provider_setup_dialog: false,
+            
             // Agent operational state flags for UI
             current_agent_state: AgentState::default(),
             is_thinking: false,
@@ -195,6 +212,14 @@ impl AppState {
     pub fn clear_chat_input(&mut self) {
         self.chat_input_buffer.clear();
         self.chat_on_submit = false;
+    }
+    
+    /// Get display name for a provider type
+    pub fn provider_display_name(provider_type: ProviderType) -> &'static str {
+        match provider_type {
+            ProviderType::ClaudeCode => "Claude Code",
+            ProviderType::MistralRs => "Mistral.rs",
+        }
     }
 
     /// Set agent thinking state

@@ -88,6 +88,9 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
     // Render CLAUDE.md modal
     render_claude_md_modal(app, ctx);
     
+    // Render provider setup dialog
+    render_provider_setup_dialog(app, ctx);
+    
     // Render toast notifications
     app.state.toasts.show(ctx);
 }
@@ -223,6 +226,11 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
     if ctx.input(|i| i.key_pressed(Key::M) && i.modifiers.ctrl) {
         // Ctrl+M: Toggle model selection panel
         app.panels.toggle_panel(ActivePanel::ModelSelection);
+    }
+    
+    if ctx.input(|i| i.key_pressed(Key::P) && i.modifiers.ctrl) {
+        // Ctrl+P: Toggle provider quick switch
+        app.state.show_provider_quick_switch = !app.state.show_provider_quick_switch;
     }
     if ctx.input(|i| i.key_pressed(Key::F1)) {
         // F1: Toggle hotkeys modal
@@ -758,7 +766,9 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                 let model_id = selected_model.clone();
                 tokio::spawn(async move {
                     let mut config_guard = config.lock().await;
-                    config_guard.claude_code.model = model_id.clone();
+                    if let Some(ref mut claude_config) = config_guard.claude_code {
+                        claude_config.model = model_id.clone();
+                    }
                     
                     // Respect test isolation by using save_config which handles test paths
                     if let Err(err) = crate::config::save_config(&config_guard) {
@@ -1016,6 +1026,16 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     });
                 });
                 
+                // Provider Quick Switch
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + P: Provider Quick Switch").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Switch").color(theme.button_text_color())).clicked() {
+                            app.state.show_provider_quick_switch = true;
+                        }
+                    });
+                });
+                
                 // F1 Help
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("F1: Show/Hide This Help").color(theme.text_color()));
@@ -1200,6 +1220,10 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 &app.state.available_repositories,
                 &mut app.state.pending_repository_context_change,
                 &mut repository_refresh_requested,
+                // Provider context parameters
+                &app.state.current_provider,
+                &app.state.available_providers,
+                &mut app.state.pending_provider_change,
                 // Git controls
                 &mut app.git_controls,
                 // Loop control parameters
@@ -1685,6 +1709,41 @@ fn render_claude_md_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     log::error!("Failed to send ApplyClaudeMdToAllRepos event: {e}");
                 }
             },
+        }
+    }
+}
+
+/// Render provider setup dialog
+fn render_provider_setup_dialog(app: &mut SagittaCodeApp, ctx: &Context) {
+    // Check if this is the first run and show dialog if needed
+    if !app.state.show_provider_setup_dialog && !app.provider_setup_dialog.is_open() {
+        // Check first run status from config (non-blocking)
+        if let Ok(config_guard) = app.config.try_lock() {
+            // Show dialog if it's the first run and user hasn't disabled it
+            if !config_guard.ui.first_run_completed && config_guard.ui.dialog_preferences.show_provider_setup {
+                drop(config_guard);
+                app.state.show_provider_setup_dialog = true;
+                app.provider_setup_dialog.open();
+                log::info!("Showing provider setup dialog for first run");
+            }
+        }
+    }
+    
+    // Render the dialog if it should be shown
+    if app.state.show_provider_setup_dialog || app.provider_setup_dialog.is_open() {
+        let keep_open = app.provider_setup_dialog.show(ctx, app.state.current_theme);
+        
+        // If dialog was closed or completed, update state
+        if !keep_open || app.provider_setup_dialog.is_setup_complete() {
+            app.state.show_provider_setup_dialog = false;
+            
+            // If setup was completed, update the current provider in state
+            if app.provider_setup_dialog.is_setup_complete() {
+                let (selected_provider, _) = app.provider_setup_dialog.get_selected_provider();
+                app.state.current_provider = selected_provider;
+                app.state.pending_provider_change = Some(selected_provider);
+                log::info!("Provider setup completed, selected: {:?}", selected_provider);
+            }
         }
     }
 }

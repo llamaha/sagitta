@@ -2,7 +2,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::Arc;
 use crate::config::types::SagittaCodeConfig;
-use crate::llm::claude_code::client::ClaudeCodeClient;
+// TODO: Re-enable when claude_code module is implemented in Phase 2
+// use crate::llm::claude_code::client::ClaudeCodeClient;
 use crate::llm::client::{LlmClient, Message, LlmResponse};
 use crate::agent::message::types::AgentMessage;
 use crate::agent::conversation::types::Conversation;
@@ -45,11 +46,14 @@ impl FastModelProvider {
         if self.config.conversation.enable_fast_model {
             // Create a new config with the fast model
             let mut fast_config = self.config.clone();
-            fast_config.claude_code.model = self.config.conversation.fast_model.clone();
+            if let Some(ref mut claude_config) = fast_config.claude_code {
+                claude_config.model = self.config.conversation.fast_model.clone();
+            }
             
-            // Create the client
-            let client = ClaudeCodeClient::new(&fast_config)?;
-            self.client = Some(Arc::new(client) as Arc<dyn LlmClient>);
+            // TODO: Re-enable when claude_code module is implemented in Phase 2
+            // let client = ClaudeCodeClient::new(&fast_config)?;
+            // self.client = Some(Arc::new(client) as Arc<dyn LlmClient>);
+            return Err(SagittaCodeError::LlmError("Fast model not available until Phase 2".to_string()));
             
             log::info!("FastModelProvider: Initialized with model {}", self.config.conversation.fast_model);
         } else {

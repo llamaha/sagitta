@@ -10,6 +10,7 @@ pub mod symbols;
 pub mod fonts;
 pub mod progress;
 pub mod claude_md_modal;
+pub mod dialogs;
 pub mod git_history;
 
 pub use conversation::*;
