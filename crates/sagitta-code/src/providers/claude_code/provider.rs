@@ -46,8 +46,12 @@ impl ClaudeCodeProvider {
             output_format: "text".to_string(), // Default format
             input_format: "text".to_string(), // Default format
             dangerously_skip_permissions: false,
-            allowed_tools: vec![], // Provider config doesn't have this
-            disallowed_tools: vec![], // Provider config doesn't have this
+            allowed_tools: config.get_option::<Vec<String>>("allowed_tools")
+                .unwrap_or_else(|_| None)
+                .unwrap_or_default(),
+            disallowed_tools: config.get_option::<Vec<String>>("disallowed_tools")
+                .unwrap_or_else(|_| None)
+                .unwrap_or_default(),
             additional_directories: vec![], // Provider config doesn't have this
             mcp_config: None, // Will be set up by client
             auto_ide: false, // Provider config doesn't have this
