@@ -8,7 +8,9 @@ use std::path::PathBuf;
 use sagitta_search::config::{AppConfig, get_repo_base_path};
 
 use crate::config::{SagittaCodeConfig, save_config as save_sagitta_code_config};
-use crate::llm::claude_code::models::CLAUDE_CODE_MODELS;
+use crate::providers::types::{ProviderType, ProviderConfig};
+// TODO: Re-enable when claude_code module is implemented in Phase 2
+// use crate::llm::claude_code::models::CLAUDE_CODE_MODELS;
 
 /// Settings panel for configuring Sagitta core settings
 pub struct SettingsPanel {
@@ -57,6 +59,21 @@ pub struct SettingsPanel {
     pub auto_sync_sync_after_commit: bool,
     pub auto_sync_sync_on_repo_switch: bool,
     pub auto_sync_sync_on_repo_add: bool,
+    
+    // Provider Settings
+    pub current_provider: ProviderType,
+    pub mistral_rs_base_url: String,
+    pub mistral_rs_api_key: String,
+    pub mistral_rs_model: String,
+    
+    // Test connection state
+    pub test_connection_status: Option<String>,
+    pub test_connection_success: Option<bool>,
+    pub test_connection_in_progress: bool,
+    pub test_connection_receiver: Option<tokio::sync::mpsc::UnboundedReceiver<(String, bool)>>,
+    
+    // App event sender for provider changes
+    pub app_event_sender: Option<tokio::sync::mpsc::UnboundedSender<crate::gui::app::events::AppEvent>>,
 }
 
 impl SettingsPanel {
@@ -81,17 +98,28 @@ impl SettingsPanel {
             performance_max_file_size_bytes: initial_app_config.performance.max_file_size_bytes as u32,
             
             // Sagitta Code config fields - Claude Code
-            claude_code_path: initial_sagitta_code_config.claude_code.claude_path.clone(),
-            claude_code_model: initial_sagitta_code_config.claude_code.model.clone(),
-            claude_code_fallback_model: initial_sagitta_code_config.claude_code.fallback_model.clone(),
-            claude_code_max_output_tokens: initial_sagitta_code_config.claude_code.max_output_tokens,
-            claude_code_debug: initial_sagitta_code_config.claude_code.debug,
-            claude_code_verbose: initial_sagitta_code_config.claude_code.verbose,
-            claude_code_timeout: initial_sagitta_code_config.claude_code.timeout,
-            claude_code_max_turns: initial_sagitta_code_config.claude_code.max_turns,
-            claude_code_allowed_tools: initial_sagitta_code_config.claude_code.allowed_tools.join(","),
-            claude_code_disallowed_tools: initial_sagitta_code_config.claude_code.disallowed_tools.join(","),
-            claude_code_auto_ide: initial_sagitta_code_config.claude_code.auto_ide,
+            claude_code_path: initial_sagitta_code_config.claude_code.as_ref()
+                .map(|c| c.claude_path.clone()).unwrap_or_else(|| "claude".to_string()),
+            claude_code_model: initial_sagitta_code_config.claude_code.as_ref()
+                .map(|c| c.model.clone()).unwrap_or_else(|| "claude-3-5-sonnet-20241022".to_string()),
+            claude_code_fallback_model: initial_sagitta_code_config.claude_code.as_ref()
+                .and_then(|c| c.fallback_model.clone()),
+            claude_code_max_output_tokens: initial_sagitta_code_config.claude_code.as_ref()
+                .map(|c| c.max_output_tokens).unwrap_or(4096),
+            claude_code_debug: initial_sagitta_code_config.claude_code.as_ref()
+                .map(|c| c.debug).unwrap_or(false),
+            claude_code_verbose: initial_sagitta_code_config.claude_code.as_ref()
+                .map(|c| c.verbose).unwrap_or(false),
+            claude_code_timeout: initial_sagitta_code_config.claude_code.as_ref()
+                .map(|c| c.timeout).unwrap_or(600),
+            claude_code_max_turns: initial_sagitta_code_config.claude_code.as_ref()
+                .map(|c| c.max_turns).unwrap_or(0),
+            claude_code_allowed_tools: initial_sagitta_code_config.claude_code.as_ref()
+                .map(|c| c.allowed_tools.join(",")).unwrap_or_else(String::new),
+            claude_code_disallowed_tools: initial_sagitta_code_config.claude_code.as_ref()
+                .map(|c| c.disallowed_tools.join(",")).unwrap_or_else(String::new),
+            claude_code_auto_ide: initial_sagitta_code_config.claude_code.as_ref()
+                .map(|c| c.auto_ide).unwrap_or(false),
             
             // Conversation features - Fast model
             conversation_fast_model: initial_sagitta_code_config.conversation.fast_model.clone(),
@@ -106,6 +134,30 @@ impl SettingsPanel {
             auto_sync_sync_after_commit: initial_sagitta_code_config.auto_sync.sync_after_commit,
             auto_sync_sync_on_repo_switch: initial_sagitta_code_config.auto_sync.sync_on_repo_switch,
             auto_sync_sync_on_repo_add: initial_sagitta_code_config.auto_sync.sync_on_repo_add,
+            
+            // Provider Settings
+            current_provider: initial_sagitta_code_config.current_provider,
+            mistral_rs_base_url: initial_sagitta_code_config.provider_configs
+                .get(&ProviderType::MistralRs)
+                .and_then(|config| config.get_option::<String>("base_url").ok().flatten())
+                .unwrap_or_else(|| "http://localhost:1234".to_string()),
+            mistral_rs_api_key: initial_sagitta_code_config.provider_configs
+                .get(&ProviderType::MistralRs)
+                .and_then(|config| config.get_option::<String>("api_token").ok().flatten())
+                .unwrap_or_default(),
+            mistral_rs_model: initial_sagitta_code_config.provider_configs
+                .get(&ProviderType::MistralRs)
+                .and_then(|config| config.get_option::<String>("model").ok().flatten())
+                .unwrap_or_else(|| "default".to_string()),
+            
+            // Test connection state
+            test_connection_status: None,
+            test_connection_success: None,
+            test_connection_in_progress: false,
+            test_connection_receiver: None,
+            
+            // App event sender (will be set later by the main app)
+            app_event_sender: None,
         }
     }
     
@@ -118,6 +170,11 @@ impl SettingsPanel {
     /// Check if the panel is open
     pub fn is_open(&self) -> bool {
         self.is_open
+    }
+    
+    /// Set the app event sender for provider changes
+    pub fn set_app_event_sender(&mut self, sender: tokio::sync::mpsc::UnboundedSender<crate::gui::app::events::AppEvent>) {
+        self.app_event_sender = Some(sender);
     }
     
     /// Get the current sagitta config
@@ -134,6 +191,16 @@ impl SettingsPanel {
     pub fn render(&mut self, ctx: &Context, theme: crate::gui::theme::AppTheme) -> bool {
         if !self.is_open {
             return false;
+        }
+        
+        // Check for test connection results
+        if let Some(ref mut receiver) = self.test_connection_receiver {
+            if let Ok((status, success)) = receiver.try_recv() {
+                self.test_connection_status = Some(status);
+                self.test_connection_success = Some(success);
+                self.test_connection_in_progress = false;
+                self.test_connection_receiver = None;
+            }
         }
         
         let mut should_close = false;
@@ -172,6 +239,8 @@ impl SettingsPanel {
                                         ui.end_row();
                                         
                                         ui.label("Model:");
+                                        // TODO: Re-enable when claude_code module is implemented in Phase 2
+                                        /*
                                         egui::ComboBox::from_id_salt("claude_model_combo")
                                             .selected_text(&self.claude_code_model)
                                             .show_ui(ui, |ui| {
@@ -179,6 +248,9 @@ impl SettingsPanel {
                                                     ui.selectable_value(&mut self.claude_code_model, model.id.to_string(), model.name);
                                                 }
                                             });
+                                        */
+                                        ui.add(TextEdit::singleline(&mut self.claude_code_model)
+                                            .hint_text("Model name (e.g., claude-3-5-sonnet-latest)"));
                                         ui.end_row();
                                         
                                         ui.label("Fallback Model:");
@@ -285,6 +357,8 @@ impl SettingsPanel {
                                         ui.end_row();
                                         
                                         ui.label("Fast Model:");
+                                        // TODO: Re-enable when claude_code module is implemented in Phase 2
+                                        /*
                                         egui::ComboBox::from_id_salt("conversation_fast_model_combo")
                                             .selected_text(&self.conversation_fast_model)
                                             .show_ui(ui, |ui| {
@@ -295,6 +369,9 @@ impl SettingsPanel {
                                                     }
                                                 }
                                             });
+                                        */
+                                        ui.add(TextEdit::singleline(&mut self.conversation_fast_model)
+                                            .hint_text("Fast model name (e.g., claude-3-5-haiku-latest)"));
                                         ui.end_row();
                                     });
                                     
@@ -306,6 +383,97 @@ impl SettingsPanel {
                             ui.add_space(8.0);
                             ui.label("Note: Make sure to authenticate with 'claude auth' before using Claude Code provider.");
                             
+                            ui.separator();
+                            ui.add_space(8.0);
+                            
+                            // Provider Settings
+                            ui.heading("Provider Settings");
+                            ui.label("Configure AI providers and their settings");
+                            ui.add_space(4.0);
+
+                            // Current Provider Selection
+                            ui.horizontal(|ui| {
+                                ui.label("Current Provider:");
+                                egui::ComboBox::from_id_salt("current_provider_combo")
+                                    .selected_text(match self.current_provider {
+                                        ProviderType::ClaudeCode => "Claude Code",
+                                        ProviderType::MistralRs => "Mistral.rs",
+                                    })
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(&mut self.current_provider, ProviderType::ClaudeCode, "Claude Code");
+                                        ui.selectable_value(&mut self.current_provider, ProviderType::MistralRs, "Mistral.rs");
+                                    });
+                            });
+                            
+                            ui.add_space(4.0);
+
+                            // Test and Apply buttons for provider changes
+                            ui.horizontal(|ui| {
+                                let test_button_text = if self.test_connection_in_progress {
+                                    "Testing..."
+                                } else {
+                                    "Test Connection"
+                                };
+                                
+                                if ui.add_enabled(!self.test_connection_in_progress, egui::Button::new(test_button_text)).clicked() {
+                                    // Test connection to the selected provider
+                                    self.test_provider_connection();
+                                }
+                                
+                                ui.add_space(8.0);
+                                
+                                if ui.button("Apply & Restart").clicked() {
+                                    // Apply provider changes and restart the app
+                                    self.apply_provider_changes();
+                                }
+                            });
+                            
+                            // Show test connection status
+                            if let Some(ref status) = self.test_connection_status {
+                                ui.add_space(4.0);
+                                let color = match self.test_connection_success {
+                                    Some(true) => theme.success_color(),
+                                    Some(false) => theme.error_color(),
+                                    None => theme.text_color(),
+                                };
+                                ui.colored_label(color, format!("Test Status: {}", status));
+                            }
+                            
+                            ui.add_space(8.0);
+
+                            // Provider-specific settings based on current selection
+                            match self.current_provider {
+                                ProviderType::ClaudeCode => {
+                                    ui.collapsing("Claude Code Provider Settings", |ui| {
+                                        ui.label("Claude Code settings are configured in the section above.");
+                                    });
+                                },
+                                ProviderType::MistralRs => {
+                                    ui.collapsing("Mistral.rs Provider Settings", |ui| {
+                                        Grid::new("mistral_rs_settings_grid")
+                                            .num_columns(2)
+                                            .spacing([8.0, 8.0])
+                                            .show(ui, |ui| {
+                                                ui.label("Base URL:");
+                                                ui.add(TextEdit::singleline(&mut self.mistral_rs_base_url)
+                                                    .hint_text("http://localhost:1234"));
+                                                ui.end_row();
+
+                                                ui.label("API Key (Optional):");
+                                                ui.add(TextEdit::singleline(&mut self.mistral_rs_api_key)
+                                                    .password(true)
+                                                    .hint_text("Leave empty if no auth required"));
+                                                ui.end_row();
+
+                                                ui.label("Model:");
+                                                ui.add(TextEdit::singleline(&mut self.mistral_rs_model)
+                                                    .hint_text("default"));
+                                                ui.end_row();
+                                            });
+                                    });
+                                },
+                            }
+
                             ui.separator();
                             ui.add_space(8.0);
                             
@@ -598,47 +766,53 @@ impl SettingsPanel {
         let current_config_guard = self.sagitta_code_config.try_lock().expect("Failed to acquire sagitta_code_config lock");
         let mut updated_config = current_config_guard.clone();
         
-        // Update Claude Code fields
-        updated_config.claude_code.claude_path = self.claude_code_path.clone();
-        updated_config.claude_code.model = self.claude_code_model.clone();
-        updated_config.claude_code.fallback_model = self.claude_code_fallback_model.clone();
-        updated_config.claude_code.max_output_tokens = self.claude_code_max_output_tokens;
-        updated_config.claude_code.debug = self.claude_code_debug;
-        updated_config.claude_code.verbose = self.claude_code_verbose;
-        updated_config.claude_code.timeout = self.claude_code_timeout;
-        updated_config.claude_code.max_turns = self.claude_code_max_turns;
-        // output_format and input_format are handled internally
-        updated_config.claude_code.output_format = "stream-json".to_string();
-        updated_config.claude_code.input_format = "text".to_string();
-        // dangerously_skip_permissions is always true internally
-        updated_config.claude_code.dangerously_skip_permissions = true;
+        // Update Claude Code fields - ensure claude_code exists
+        if updated_config.claude_code.is_none() {
+            updated_config.claude_code = Some(crate::config::types::ClaudeCodeConfig::default());
+        }
         
-        // Parse comma-separated lists
-        updated_config.claude_code.allowed_tools = if self.claude_code_allowed_tools.trim().is_empty() {
-            Vec::new()
-        } else {
-            self.claude_code_allowed_tools
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect()
-        };
-        
-        updated_config.claude_code.disallowed_tools = if self.claude_code_disallowed_tools.trim().is_empty() {
-            Vec::new()
-        } else {
-            self.claude_code_disallowed_tools
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect()
-        };
-        
-        // additional_directories is handled internally - empty for now
-        updated_config.claude_code.additional_directories = Vec::new();
-        
-        // MCP config is now handled internally
-        updated_config.claude_code.auto_ide = self.claude_code_auto_ide;
+        if let Some(ref mut claude_config) = updated_config.claude_code {
+            claude_config.claude_path = self.claude_code_path.clone();
+            claude_config.model = self.claude_code_model.clone();
+            claude_config.fallback_model = self.claude_code_fallback_model.clone();
+            claude_config.max_output_tokens = self.claude_code_max_output_tokens;
+            claude_config.debug = self.claude_code_debug;
+            claude_config.verbose = self.claude_code_verbose;
+            claude_config.timeout = self.claude_code_timeout;
+            claude_config.max_turns = self.claude_code_max_turns;
+            // output_format and input_format are handled internally
+            claude_config.output_format = "stream-json".to_string();
+            claude_config.input_format = "text".to_string();
+            // dangerously_skip_permissions is always true internally
+            claude_config.dangerously_skip_permissions = true;
+            
+            // Parse comma-separated lists
+            claude_config.allowed_tools = if self.claude_code_allowed_tools.trim().is_empty() {
+                Vec::new()
+            } else {
+                self.claude_code_allowed_tools
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            };
+            
+            claude_config.disallowed_tools = if self.claude_code_disallowed_tools.trim().is_empty() {
+                Vec::new()
+            } else {
+                self.claude_code_disallowed_tools
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            };
+            
+            // additional_directories is handled internally - empty for now
+            claude_config.additional_directories = Vec::new();
+            
+            // MCP config is now handled internally
+            claude_config.auto_ide = self.claude_code_auto_ide;
+        }
         
         // Update conversation features
         updated_config.conversation.fast_model = self.conversation_fast_model.clone();
@@ -654,6 +828,26 @@ impl SettingsPanel {
         updated_config.auto_sync.sync_on_repo_switch = self.auto_sync_sync_on_repo_switch;
         updated_config.auto_sync.sync_on_repo_add = self.auto_sync_sync_on_repo_add;
         
+        // Update provider settings
+        updated_config.current_provider = self.current_provider;
+        
+        // Update provider-specific configurations
+        use crate::providers::types::MistralRsConfig;
+        
+        // Update or create MistralRs config
+        let mistral_rs_config = MistralRsConfig {
+            base_url: self.mistral_rs_base_url.clone(),
+            api_token: if self.mistral_rs_api_key.is_empty() { None } else { Some(self.mistral_rs_api_key.clone()) },
+            timeout_seconds: 120, // Default timeout
+            model: if self.mistral_rs_model.is_empty() { None } else { Some(self.mistral_rs_model.clone()) },
+        };
+        
+        // Convert to ProviderConfig and insert
+        updated_config.provider_configs.insert(
+            ProviderType::MistralRs,
+            mistral_rs_config.into(), // Use the From trait to convert
+        );
+        
         // Preserve all other fields
         // and all other config sections (sagitta, ui, logging) from the original
         
@@ -666,6 +860,212 @@ impl SettingsPanel {
         match get_repo_base_path(None) {
             Ok(path) => path.to_string_lossy().to_string(),
             Err(_) => "~/.local/share/sagitta/repositories".to_string(), // Fallback
+        }
+    }
+
+    /// Test connection to the currently selected provider
+    fn test_provider_connection(&mut self) {
+        log::info!("Testing connection to provider: {:?}", self.current_provider);
+        
+        // Set UI state to show test is in progress
+        self.test_connection_in_progress = true;
+        self.test_connection_status = Some("Testing connection...".to_string());
+        self.test_connection_success = None;
+        
+        // Create a channel for the async result
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        self.test_connection_receiver = Some(receiver);
+        
+        // Clone the necessary data for the async task
+        let provider_type = self.current_provider.clone();
+        let claude_model = self.claude_code_model.clone();
+        let claude_path = self.claude_code_path.clone();
+        let mistral_base_url = self.mistral_rs_base_url.clone();
+        let mistral_api_key = self.mistral_rs_api_key.clone();
+        let mistral_model = self.mistral_rs_model.clone();
+        
+        // Spawn async task to test the connection
+        tokio::spawn(async move {
+            let result = Self::test_provider_connection_async(
+                provider_type,
+                claude_model,
+                claude_path,
+                mistral_base_url,
+                mistral_api_key,
+                mistral_model,
+            ).await;
+            
+            // Send the result through the channel
+            let (status, success) = match result {
+                Ok(msg) => {
+                    log::info!("Connection test successful: {}", msg);
+                    (msg, true)
+                },
+                Err(e) => {
+                    log::error!("Connection test failed: {}", e);
+                    (e, false)
+                }
+            };
+            
+            // Send result to UI thread
+            let _ = sender.send((status, success));
+        });
+    }
+    
+    async fn test_provider_connection_async(
+        provider_type: ProviderType,
+        claude_model: String,
+        claude_path: String,
+        mistral_base_url: String,
+        mistral_api_key: String,
+        mistral_model: String,
+    ) -> Result<String, String> {
+        match provider_type {
+            ProviderType::ClaudeCode => {
+                Self::test_claude_code_connection(claude_model, claude_path).await
+            },
+            ProviderType::MistralRs => {
+                Self::test_mistral_rs_connection(mistral_base_url, mistral_api_key, mistral_model).await
+            },
+        }
+    }
+    
+    async fn test_claude_code_connection(model: String, binary_path: String) -> Result<String, String> {
+        use std::process::Command;
+        use std::time::Duration;
+        
+        log::info!("Testing Claude Code connection with model: {} and binary: {}", model, binary_path);
+        
+        // First, check if the claude binary exists and is executable
+        let output = match Command::new(&binary_path)
+            .arg("--version")
+            .output()
+        {
+            Ok(output) => output,
+            Err(e) => {
+                return Err(format!("Failed to execute claude binary '{}': {}", binary_path, e));
+            }
+        };
+        
+        if !output.status.success() {
+            return Err(format!("Claude binary '{}' returned error: {}", binary_path, 
+                String::from_utf8_lossy(&output.stderr)));
+        }
+        
+        let version_info = String::from_utf8_lossy(&output.stdout);
+        log::info!("Claude binary version: {}", version_info);
+        
+        // Try a simple test command to verify the model works
+        let test_output = match Command::new(&binary_path)
+            .args(&["--model", &model])
+            .arg("Hello, can you respond with just 'OK' to confirm you're working?")
+            .output()
+        {
+            Ok(output) => output,
+            Err(e) => {
+                return Err(format!("Failed to test claude model '{}': {}", model, e));
+            }
+        };
+        
+        if !test_output.status.success() {
+            let stderr = String::from_utf8_lossy(&test_output.stderr);
+            return Err(format!("Claude model '{}' test failed: {}", model, stderr));
+        }
+        
+        let response = String::from_utf8_lossy(&test_output.stdout);
+        log::info!("Claude test response: {}", response);
+        
+        Ok(format!("Claude Code connection successful! Model: {}, Version: {}", 
+            model, version_info.trim()))
+    }
+    
+    async fn test_mistral_rs_connection(base_url: String, api_key: String, model: String) -> Result<String, String> {
+        use reqwest::Client;
+        use std::time::Duration;
+        use serde_json::json;
+        
+        log::info!("Testing Mistral.rs connection to: {} with model: {}", base_url, model);
+        
+        let client = Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+        
+        // First, try to get the models list to verify the server is responding
+        let models_url = format!("{}/v1/models", base_url);
+        let mut request = client.get(&models_url);
+        
+        if !api_key.is_empty() {
+            request = request.header("Authorization", format!("Bearer {}", api_key));
+        }
+        
+        let response = request.send().await
+            .map_err(|e| format!("Failed to connect to Mistral.rs server at {}: {}", base_url, e))?;
+        
+        if !response.status().is_success() {
+            return Err(format!("Mistral.rs server returned error {}: {}", 
+                response.status(), response.text().await.unwrap_or_default()));
+        }
+        
+        let models_response: serde_json::Value = response.json().await
+            .map_err(|e| format!("Failed to parse models response: {}", e))?;
+        
+        log::info!("Available models: {}", models_response);
+        
+        // Try a simple chat completion request
+        let chat_url = format!("{}/v1/chat/completions", base_url);
+        let mut request = client.post(&chat_url);
+        
+        if !api_key.is_empty() {
+            request = request.header("Authorization", format!("Bearer {}", api_key));
+        }
+        
+        let test_body = json!({
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Hello, can you respond with just 'OK' to confirm you're working?"
+                }
+            ],
+            "max_tokens": 10
+        });
+        
+        let response = request.json(&test_body).send().await
+            .map_err(|e| format!("Failed to send test request: {}", e))?;
+        
+        if !response.status().is_success() {
+            return Err(format!("Mistral.rs test request failed {}: {}", 
+                response.status(), response.text().await.unwrap_or_default()));
+        }
+        
+        let completion_response: serde_json::Value = response.json().await
+            .map_err(|e| format!("Failed to parse completion response: {}", e))?;
+        
+        log::info!("Mistral.rs test response: {}", completion_response);
+        
+        Ok(format!("Mistral.rs connection successful! Server: {}, Model: {}", 
+            base_url, model))
+    }
+
+    /// Apply provider changes and restart the application
+    fn apply_provider_changes(&mut self) {
+        log::info!("Applying provider changes and restarting");
+        
+        // Save current settings
+        self.save_configs(crate::gui::theme::AppTheme::default());
+        
+        // Send event to reinitialize the provider
+        if let Some(ref sender) = self.app_event_sender {
+            if let Err(e) = sender.send(crate::gui::app::events::AppEvent::ReinitializeProvider {
+                provider_type: self.current_provider.clone(),
+            }) {
+                log::error!("Failed to send ReinitializeProvider event: {}", e);
+            } else {
+                log::info!("Sent ReinitializeProvider event for provider: {:?}", self.current_provider);
+            }
+        } else {
+            log::error!("No app event sender available for provider reinitialization");
         }
     }
 
@@ -711,12 +1111,14 @@ mod tests {
 
     fn create_test_sagitta_code_config() -> SagittaCodeConfig {
         SagittaCodeConfig {
-            claude_code: ClaudeCodeConfig::default(),
+            claude_code: Some(crate::config::types::ClaudeCodeConfig::default()),
             sagitta: Default::default(),
             ui: UiConfig::default(),
             logging: LoggingConfig::default(),
             conversation: ConversationConfig::default(),
             auto_sync: crate::config::types::AutoSyncConfig::default(),
+            current_provider: crate::providers::types::ProviderType::ClaudeCode,
+            provider_configs: std::collections::HashMap::new(),
         }
     }
 
@@ -815,9 +1217,13 @@ mod tests {
         
         let config = panel.create_updated_sagitta_code_config();
         
-        assert_eq!(config.claude_code.claude_path, "/custom/claude");
-        assert!(config.claude_code.verbose);
-        assert_eq!(config.claude_code.max_output_tokens, 10000);
+        if let Some(ref claude_config) = config.claude_code {
+            assert_eq!(claude_config.claude_path, "/custom/claude");
+            assert!(claude_config.verbose);
+            assert_eq!(claude_config.max_output_tokens, 10000);
+        } else {
+            panic!("Expected claude_code config to be present");
+        }
     }
 
     #[test]
@@ -839,9 +1245,15 @@ mod tests {
         assert_eq!(panel.performance_max_file_size_bytes as u64, default_app_config.performance.max_file_size_bytes);
 
         // Check SagittaCodeConfig derived fields
-        assert_eq!(panel.claude_code_path, default_sagitta_code_config.claude_code.claude_path);
-        assert_eq!(panel.claude_code_model, default_sagitta_code_config.claude_code.model);
-        assert_eq!(panel.claude_code_verbose, default_sagitta_code_config.claude_code.verbose);
+        if let Some(ref claude_config) = default_sagitta_code_config.claude_code {
+            assert_eq!(panel.claude_code_path, claude_config.claude_path);
+            assert_eq!(panel.claude_code_model, claude_config.model);
+            assert_eq!(panel.claude_code_verbose, claude_config.verbose);
+        } else {
+            // If claude_code is None, that's OK now - it's migrated to provider system
+            // Just check that provider configs are present
+            assert!(!default_sagitta_code_config.provider_configs.is_empty());
+        }
     }
 
     #[test]
@@ -862,8 +1274,12 @@ mod tests {
         
         // Verify changes were applied
         assert_eq!(updated_sagitta_config.qdrant_url, "http://new_url:6334");
-        assert_eq!(updated_sagitta_code_config.claude_code.claude_path, "/new/claude");
-        assert!(updated_sagitta_code_config.claude_code.verbose);
+        if let Some(ref claude_config) = updated_sagitta_code_config.claude_code {
+            assert_eq!(claude_config.claude_path, "/new/claude");
+            assert!(claude_config.verbose);
+        } else {
+            panic!("Expected claude_code config to be present");
+        }
     }
 
     #[test]
@@ -939,7 +1355,11 @@ mod tests {
         
         // Verify UI-exposed fields were updated
         assert_eq!(updated_sagitta_config.qdrant_url, "http://updated:6334");
-        assert_eq!(updated_sagitta_code_config.claude_code.claude_path, "/updated/claude");
+        if let Some(ref claude_config) = updated_sagitta_code_config.claude_code {
+            assert_eq!(claude_config.claude_path, "/updated/claude");
+        } else {
+            panic!("Expected claude_code config to be present");
+        }
         
         // Verify non-UI fields were preserved
         assert_eq!(updated_sagitta_config.repositories.len(), 2);

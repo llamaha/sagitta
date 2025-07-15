@@ -3,9 +3,7 @@ fn test_dependency_types_exist() {
     // Just verify that the types exist and can be imported
     use sagitta_mcp::mcp::types::{
         RepositoryDependencyParams, 
-        RepositoryDependencyResult,
         RepositoryListDependenciesParams,
-        RepositoryListDependenciesResult,
         DependencyInfo,
     };
     

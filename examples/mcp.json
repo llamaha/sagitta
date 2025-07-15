@@ -1,0 +1,17 @@
+{   
+    "servers": [
+      { 
+        "name": "sagitta-mcp",
+        "source": {
+          "type": "Process",
+          "command": "/bin/sh",
+          "args": ["-c", "exec /usr/local/bin/sagitta-code --mcp-internal 2>/tmp/mcp-error.log"],
+          "env": {
+            "LD_LIBRARY_PATH": "/home/adam/onnxruntime-linux-x64-gpu-1.20.0/lib",
+            "ORT_LIB_LOCATION": "/home/adam/onnxruntime-linux-x64-gpu-1.20.0/lib"
+          }
+        }
+      }
+    ],
+    "auto_register_tools": true
+}

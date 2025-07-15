@@ -1064,13 +1064,11 @@ mod tests {
         PointsOperationResponse, CollectionInfo, CollectionStatus, OptimizerStatus,
         HealthCheckReply, CreateCollection, SearchPoints, CountPoints, 
         CountResponse, SearchResponse, PointsSelector, DeletePoints, 
-        ScrollPoints, ScrollResponse, UpsertPoints, QueryPoints, QueryResponse,
-        PointStruct, WriteOrdering, ReadConsistency
+        ScrollPoints, ScrollResponse, UpsertPoints, QueryPoints, QueryResponse
     };
     use sagitta_search::error::SagittaError;
     use std::collections::HashMap;
     use std::path::PathBuf;
-    use anyhow::anyhow;
 
     #[derive(Clone, Debug)]
     struct MockQdrantClient {
@@ -1166,13 +1164,6 @@ mod tests {
         }
     }
 
-    fn create_test_auth_user() -> Option<Extension<AuthenticatedUser>> {
-        Some(Extension(AuthenticatedUser {
-            user_id: Some("test_user".to_string()),
-            scopes: vec![],
-        }))
-    }
-    
     fn create_test_repo_config(name: &str) -> RepositoryConfig {
         RepositoryConfig {
             name: name.to_string(),

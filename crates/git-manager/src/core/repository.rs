@@ -749,7 +749,6 @@ mod tests {
         let branch_state = branch_state.unwrap();
         assert_eq!(branch_state.commit_hash, commit_id.to_string());
         // Merkle root may be empty for test repos with no files, that's ok
-        assert!(branch_state.merkle_root.len() >= 0);
     }
 
     #[test]
@@ -773,7 +772,6 @@ mod tests {
         assert_eq!(branch_state.branch_name, detached_branch_name);
         assert_eq!(branch_state.commit_hash, commit_id.to_string());
         // Merkle root may be empty for test repos with no files, that's ok
-        assert!(branch_state.merkle_root.len() >= 0);
         assert!(!branch_state.is_synced); // Should default to false
     }
 

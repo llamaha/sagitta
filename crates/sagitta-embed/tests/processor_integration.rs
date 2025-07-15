@@ -242,7 +242,7 @@ fn factorial(n: u32) -> u32 {
         ..Default::default()
     };
     
-    let embedding_config = create_test_embedding_config();
+    let _embedding_config = create_test_embedding_config();
     let file_processor = DefaultFileProcessor::new(processing_config.clone());
     
     // Test file processing

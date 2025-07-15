@@ -195,7 +195,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use tokio::sync::RwLock;
-    use crate::mcp::types::{QueryParams, ErrorObject};
+    use crate::mcp::types::QueryParams;
     use crate::middleware::auth_middleware::AuthenticatedUser;
     use sagitta_search::{
         config::{AppConfig, RepositoryConfig, PerformanceConfig},

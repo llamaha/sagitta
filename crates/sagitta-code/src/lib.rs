@@ -13,6 +13,9 @@ pub mod config;
 /// LLM clients (Gemini)
 pub mod llm;
 
+/// Provider abstraction layer
+pub mod providers;
+
 // Tools removed - now provided via MCP from sagitta-mcp
 // Minimal stub module for compilation compatibility
 mod tools_stub;

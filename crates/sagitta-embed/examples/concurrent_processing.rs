@@ -112,7 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     for handle in handles {
         match handle.await {
-            Ok(Ok((batch_id, embedding_count, duration))) => {
+            Ok(Ok((_batch_id, embedding_count, duration))) => {
                 successful_batches += 1;
                 total_embeddings += embedding_count;
                 batch_durations.push(duration);

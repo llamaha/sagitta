@@ -35,7 +35,11 @@ env_logger = "0.10"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Networking dependencies - removed OpenRouter specific ones since we now only use Claude Code
+# Networking dependencies
+reqwest = { version = "0.11", features = ["json", "stream"] }
+futures = "0.3"
+pin-project = "1.1"
+bytes = "1.0"
 
 qdrant-client = { version = "1.14.0", features = ["serde"] }
 
@@ -120,3 +124,4 @@ mockall = "0.12"
 async-stream = "0.3"
 async-trait = "0.1"
 ctor = "0.2"
+wiremock = "0.5"        # For HTTP client testing (Mistral.rs)

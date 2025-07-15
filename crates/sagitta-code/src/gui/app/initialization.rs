@@ -10,7 +10,6 @@ use super::super::repository::RepoPanel;
 use super::super::theme::AppTheme;
 use super::super::chat::view::{StreamingMessage, MessageAuthor};
 use crate::config::loader::load_all_configs;
-use crate::llm::claude_code::client::ClaudeCodeClient;
 use crate::llm::client::LlmClient;
 use crate::agent::Agent;
 use crate::agent::state::types::AgentMode;
@@ -119,26 +118,61 @@ pub fn create_embedding_pool(core_config: &sagitta_search::AppConfig) -> Result<
     }
 }
 
-/// Create LLM client from config (always Claude Code now)
+/// Create LLM client from config
 pub async fn create_llm_client(config: &SagittaCodeConfig, _tool_registry: Option<()>) -> Result<Arc<dyn LlmClient>> {
-    log::info!("Creating Claude Code LLM client");
-    let mut claude_client = match ClaudeCodeClient::new(config) {
-        Ok(client) => client,
-        Err(e) => {
-            log::error!(
-                "Failed to create ClaudeCodeClient: {e}. Agent will not be initialized properly. Some features may be disabled."
-            );
-            return Err(anyhow::anyhow!("Failed to create ClaudeCodeClient for Agent: {}", e));
-        }
-    };
+    use crate::providers::{ProviderFactory, claude_code::mcp_integration::McpIntegration};
     
-    // Initialize MCP directly (tools provided by sagitta-mcp)
-    log::info!("Initializing MCP integration for Claude Code client");
-    if let Err(e) = claude_client.initialize_mcp(None).await {
-        log::warn!("Failed to initialize MCP integration: {e}. Tool calls may not work properly.");
+    log::info!("Creating LLM client for provider: {:?}", config.current_provider);
+    
+    // Create provider factory
+    let factory = ProviderFactory::new();
+    
+    // Create provider manager with all providers
+    let mut manager = factory.create_manager()
+        .map_err(|e| anyhow::anyhow!("Failed to create provider manager: {}", e))?;
+    
+    // Update provider configurations from saved config
+    for (provider_type, provider_config) in &config.provider_configs {
+        let mut final_config = provider_config.clone();
+        
+        // Special handling for Claude Code provider: merge model from legacy config
+        if *provider_type == crate::providers::types::ProviderType::ClaudeCode {
+            if let Some(ref legacy_claude_config) = config.claude_code {
+                // Store the model in the provider config using set_option
+                if let Err(e) = final_config.set_option("model", &legacy_claude_config.model) {
+                    log::warn!("Failed to set model from legacy config: {}", e);
+                }
+                if let Some(ref fallback_model) = legacy_claude_config.fallback_model {
+                    if let Err(e) = final_config.set_option("fallback_model", fallback_model) {
+                        log::warn!("Failed to set fallback_model from legacy config: {}", e);
+                    }
+                }
+                if let Err(e) = final_config.set_option("max_output_tokens", legacy_claude_config.max_output_tokens) {
+                    log::warn!("Failed to set max_output_tokens from legacy config: {}", e);
+                }
+                log::info!("Merged Claude Code model config: {}", legacy_claude_config.model);
+            }
+        }
+        
+        if let Err(e) = manager.update_provider_config(provider_type, final_config) {
+            log::warn!("Failed to update config for provider {:?}: {}", provider_type, e);
+        }
     }
     
-    Ok(Arc::new(claude_client))
+    // Create MCP integration (shared across providers)
+    let mcp_integration = Arc::new(McpIntegration::new());
+    
+    // Set the active provider from config
+    manager.set_active_provider(config.current_provider)
+        .map_err(|e| anyhow::anyhow!("Failed to set active provider: {}", e))?;
+    
+    // Create client for the active provider
+    let client = manager.create_active_client(mcp_integration)
+        .map_err(|e| anyhow::anyhow!("Failed to create client for provider {:?}: {}", config.current_provider, e))?;
+    
+    log::info!("Successfully created LLM client for provider: {:?}", config.current_provider);
+    
+    Ok(Arc::from(client))
 }
 
 /// Initialize Qdrant client from config
@@ -539,7 +573,9 @@ mod tests {
         let mut config = SagittaCodeConfig::default();
         
         // Set invalid claude path to force failure (if binary doesn't exist)
-        config.claude_code.claude_path = "/nonexistent/claude/path".to_string();
+        if let Some(ref mut claude_config) = config.claude_code {
+            claude_config.claude_path = "/nonexistent/claude/path".to_string();
+        }
         
         let result = create_llm_client(&config, None).await;
         

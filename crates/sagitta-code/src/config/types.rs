@@ -1,15 +1,24 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::collections::HashMap;
+use crate::providers::types::{ProviderType, ProviderConfig};
 
 
 /// Main configuration for Sagitta Code
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
 pub struct SagittaCodeConfig {
     
-    /// Claude Code configuration
+    /// Provider configuration - Current active provider
+    #[serde(default = "default_current_provider")]
+    pub current_provider: ProviderType,
+    
+    /// Provider-specific configurations
     #[serde(default)]
-    pub claude_code: ClaudeCodeConfig,
+    pub provider_configs: HashMap<ProviderType, ProviderConfig>,
+    
+    /// Legacy Claude Code configuration (deprecated, for backward compatibility)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claude_code: Option<ClaudeCodeConfig>,
     
     /// Vector DB configuration
     #[serde(default)]
@@ -34,6 +43,66 @@ pub struct SagittaCodeConfig {
 
 
 impl SagittaCodeConfig {
+    /// Migrates legacy configuration to the new provider-based system
+    pub fn migrate_legacy_config(&mut self) {
+        // If provider_configs is empty and we have a legacy claude_code config
+        if self.provider_configs.is_empty() && self.claude_code.is_some() {
+            if let Some(legacy_config) = &self.claude_code {
+                // Convert legacy config to new provider config format
+                let provider_config = ProviderConfig::try_from(legacy_config.clone())
+                    .unwrap_or_else(|_| {
+                        // Fallback to default config if conversion fails
+                        ProviderConfig::default_for_provider(ProviderType::ClaudeCode)
+                    });
+                
+                self.provider_configs.insert(ProviderType::ClaudeCode, provider_config);
+                self.current_provider = ProviderType::ClaudeCode;
+                
+                // Keep legacy config for backward compatibility, but mark for future removal
+                // We don't remove it here to avoid breaking existing workflows
+            }
+        }
+        
+        // If no providers are configured at all, set up default Claude Code provider
+        if self.provider_configs.is_empty() {
+            let default_config = ProviderConfig::default_for_provider(ProviderType::ClaudeCode);
+            self.provider_configs.insert(ProviderType::ClaudeCode, default_config);
+            self.current_provider = ProviderType::ClaudeCode;
+        }
+    }
+    
+    /// Gets the current provider configuration
+    pub fn get_current_provider_config(&self) -> Option<&ProviderConfig> {
+        self.provider_configs.get(&self.current_provider)
+    }
+    
+    /// Gets a mutable reference to the current provider configuration
+    pub fn get_current_provider_config_mut(&mut self) -> Option<&mut ProviderConfig> {
+        self.provider_configs.get_mut(&self.current_provider)
+    }
+    
+    /// Sets the current provider and ensures its configuration exists
+    pub fn set_current_provider(&mut self, provider_type: ProviderType) {
+        self.current_provider = provider_type;
+        
+        // Ensure configuration exists for the provider
+        if !self.provider_configs.contains_key(&provider_type) {
+            let default_config = ProviderConfig::default_for_provider(provider_type);
+            self.provider_configs.insert(provider_type, default_config);
+        }
+    }
+
+    /// Gets the path to the application configuration file
+    pub fn config_path(&self) -> PathBuf {
+        crate::config::paths::get_sagitta_code_app_config_path()
+            .unwrap_or_else(|_| {
+                dirs::config_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("sagitta")
+                    .join("sagitta_code_config.json")
+            })
+    }
+
     /// Gets the path to the shared sagitta-search config file.
     /// Now uses the shared ~/.config/sagitta/config.toml
     pub fn sagitta_config_path(&self) -> PathBuf {
@@ -44,6 +113,16 @@ impl SagittaCodeConfig {
                     .join("sagitta")
                     .join("config.toml")
             })
+    }
+    
+    /// Loads configuration from a specific path
+    pub fn load_from_path(path: &Path) -> anyhow::Result<Self> {
+        crate::config::loader::load_config_from_path(path)
+    }
+    
+    /// Saves configuration to a specific path
+    pub fn save_to_path(&self, path: &Path) -> anyhow::Result<()> {
+        crate::config::loader::save_config_to_path(self, path)
     }
 
     /// Gets the repositories base path with proper fallback logic
@@ -61,6 +140,26 @@ impl SagittaCodeConfig {
             .unwrap_or_else(|| PathBuf::from("."))
             .join("sagitta")
             .join("repositories")
+    }
+}
+
+impl Default for SagittaCodeConfig {
+    fn default() -> Self {
+        let mut config = Self {
+            current_provider: default_current_provider(),
+            provider_configs: HashMap::new(),
+            claude_code: None,
+            sagitta: SagittaDbConfig::default(),
+            ui: UiConfig::default(),
+            logging: LoggingConfig::default(),
+            conversation: ConversationConfig::default(),
+            auto_sync: AutoSyncConfig::default(),
+        };
+        
+        // Always ensure at least one provider is configured
+        config.migrate_legacy_config();
+        
+        config
     }
 }
 
@@ -173,12 +272,17 @@ pub struct DialogPreferences {
     /// Whether to show confirmation dialog when creating a new conversation
     #[serde(default = "default_show_new_conversation_confirmation")]
     pub show_new_conversation_confirmation: bool,
+    
+    /// Whether to show the provider setup dialog on startup
+    #[serde(default = "default_show_provider_setup")]
+    pub show_provider_setup: bool,
 }
 
 impl Default for DialogPreferences {
     fn default() -> Self {
         Self {
             show_new_conversation_confirmation: default_show_new_conversation_confirmation(),
+            show_provider_setup: default_show_provider_setup(),
         }
     }
 }
@@ -219,6 +323,10 @@ pub struct UiConfig {
     /// Dialog preferences for controlling when to show confirmation dialogs
     #[serde(default)]
     pub dialog_preferences: DialogPreferences,
+    
+    /// Whether the user has completed the first-run provider setup
+    #[serde(default = "default_first_run_completed")]
+    pub first_run_completed: bool,
 }
 
 impl Default for UiConfig {
@@ -233,6 +341,7 @@ impl Default for UiConfig {
             auto_create_claude_md: default_auto_create_claude_md(),
             claude_md_template: default_claude_md_template(),
             dialog_preferences: DialogPreferences::default(),
+            first_run_completed: default_first_run_completed(),
         }
     }
 }
@@ -596,6 +705,10 @@ fn default_show_new_conversation_confirmation() -> bool {
     true
 }
 
+fn default_show_provider_setup() -> bool {
+    true
+}
+
 fn default_log_level() -> String {
     "info".to_string()
 }
@@ -648,6 +761,10 @@ fn default_search_debounce_ms() -> u64 {
     300
 }
 
+fn default_current_provider() -> ProviderType {
+    ProviderType::ClaudeCode
+}
+
 fn default_claude_path() -> String {
     "claude".to_string()
 }
@@ -690,6 +807,10 @@ fn default_auto_create_claude_md() -> bool {
 
 fn default_claude_md_template() -> String {
     include_str!("../../templates/CLAUDE.md").to_string()
+}
+
+fn default_first_run_completed() -> bool {
+    false
 }
 
 // Auto-sync configuration defaults
@@ -781,6 +902,7 @@ mod tests {
         assert_eq!(config.current_repository_context, None);
         assert!(config.auto_create_claude_md); // default_auto_create_claude_md() returns true
         assert!(!config.claude_md_template.is_empty()); // Should contain default template
+        assert!(!config.first_run_completed); // default_first_run_completed() returns false
     }
 
     #[test]

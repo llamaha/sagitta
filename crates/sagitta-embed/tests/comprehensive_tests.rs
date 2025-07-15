@@ -3,7 +3,7 @@
 use sagitta_embed::{
     EmbeddingConfig, EmbeddingPool,
     EmbeddingModelType, ProcessingConfig, DefaultFileProcessor, FileProcessor,
-    EmbeddingProcessor, SagittaEmbedError
+    SagittaEmbedError
 };
 use sagitta_embed::config::EmbeddingConfigBuilder;
 use std::path::PathBuf;

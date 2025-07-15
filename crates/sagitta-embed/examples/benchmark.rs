@@ -94,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn create_config(model_path: &str, tokenizer_path: &str, sessions: usize, batch_size: usize) -> EmbeddingConfig {
+fn create_config(model_path: &str, tokenizer_path: &str, _sessions: usize, batch_size: usize) -> EmbeddingConfig {
     EmbeddingConfig::new_onnx(
         PathBuf::from(model_path),
         PathBuf::from(tokenizer_path)

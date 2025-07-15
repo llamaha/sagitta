@@ -35,7 +35,8 @@ pub struct ClaudeCodeClient {
 impl ClaudeCodeClient {
     /// Create a new Claude Code client
     pub fn new(config: &SagittaCodeConfig) -> Result<Self, SagittaCodeError> {
-        let claude_config = config.claude_code.clone();
+        let claude_config = config.claude_code.clone()
+            .unwrap_or_else(|| crate::config::types::ClaudeCodeConfig::default());
         
         // Verify model exists
         if ClaudeCodeModel::find_by_id(&claude_config.model).is_none() {
