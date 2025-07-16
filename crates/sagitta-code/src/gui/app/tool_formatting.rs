@@ -84,10 +84,7 @@ impl ToolResultFormatter {
             name if name.contains("__read_file") => self.format_mcp_read_file_result(value),
             name if name.contains("__write_file") => self.format_mcp_write_file_result(value),
             name if name.contains("__repository_view_file") => self.format_mcp_file_view_result(value),
-            name if name.contains("__query") => {
-                // Show raw JSON with syntax highlighting for Semantic Code Search
-                format!("```json\n{}\n```", serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string()))
-            },
+            name if name.contains("__query") => self.format_mcp_search_result(value),
             name if name.contains("__repository_map") => self.format_mcp_repo_map_result(value),
             name if name.contains("__repository_list") => self.format_mcp_repo_list_result(value),
             name if name.contains("__repository_search_file") => self.format_mcp_file_search_result(value),
@@ -1757,5 +1754,52 @@ mod tests {
             let formatted = formatter.format_successful_tool_result(tool_type, &test_data);
             assert!(!formatted.is_empty(), "Tool type {tool_type} should produce non-empty output");
         }
+    }
+
+    #[test]
+    fn test_format_mcp_query_result() {
+        let formatter = ToolResultFormatter::new();
+        let query_result = json!({
+            "results": [
+                {
+                    "filePath": "src/main.rs",
+                    "startLine": 10,
+                    "endLine": 20,
+                    "score": 0.95,
+                    "preview": "fn main() {\n    println!(\"Hello, world!\");\n}",
+                    "elementType": "function",
+                    "language": "rust"
+                },
+                {
+                    "filePath": "src/lib.rs",
+                    "startLine": 5,
+                    "endLine": 15,
+                    "score": 0.85,
+                    "preview": "pub fn greet(name: &str) {\n    println!(\"Hello, {}!\", name);\n}",
+                    "elementType": "function", 
+                    "language": "rust"
+                }
+            ]
+        });
+        
+        // Test that __query tool uses the proper formatter
+        let formatted = formatter.format_successful_tool_result("mcp__sagitta__query", &query_result);
+        
+        // Should contain formatted search results, not raw JSON
+        assert!(formatted.contains("Found 2 results"));
+        assert!(formatted.contains("src/main.rs"));
+        assert!(formatted.contains("src/lib.rs"));
+        assert!(formatted.contains("10-20"));
+        assert!(formatted.contains("5-15"));
+        assert!(formatted.contains("score: 0.95"));
+        assert!(formatted.contains("score: 0.85"));
+        assert!(formatted.contains("```rust"));
+        assert!(formatted.contains("fn main()"));
+        assert!(formatted.contains("pub fn greet"));
+        
+        // Should NOT contain raw JSON formatting
+        assert!(!formatted.contains("```json"));
+        assert!(!formatted.contains("\"results\":"));
+        assert!(!formatted.contains("\"filePath\":"));
     }
 } 
