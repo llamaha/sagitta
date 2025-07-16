@@ -398,10 +398,12 @@ impl SettingsPanel {
                                     .selected_text(match self.current_provider {
                                         ProviderType::ClaudeCode => "Claude Code",
                                         ProviderType::MistralRs => "Mistral.rs",
+                                        ProviderType::OpenAICompatible => "OpenAI Compatible",
                                     })
                                     .show_ui(ui, |ui| {
                                         ui.selectable_value(&mut self.current_provider, ProviderType::ClaudeCode, "Claude Code");
                                         ui.selectable_value(&mut self.current_provider, ProviderType::MistralRs, "Mistral.rs");
+                                        ui.selectable_value(&mut self.current_provider, ProviderType::OpenAICompatible, "OpenAI Compatible");
                                     });
                             });
                             
@@ -448,8 +450,13 @@ impl SettingsPanel {
                                         ui.label("Claude Code settings are configured in the section above.");
                                     });
                                 },
-                                ProviderType::MistralRs => {
-                                    ui.collapsing("Mistral.rs Provider Settings", |ui| {
+                                ProviderType::MistralRs | ProviderType::OpenAICompatible => {
+                                    let title = if self.current_provider == ProviderType::MistralRs {
+                                        "Mistral.rs Provider Settings"
+                                    } else {
+                                        "OpenAI Compatible Provider Settings"
+                                    };
+                                    ui.collapsing(title, |ui| {
                                         Grid::new("mistral_rs_settings_grid")
                                             .num_columns(2)
                                             .spacing([8.0, 8.0])
@@ -924,7 +931,7 @@ impl SettingsPanel {
             ProviderType::ClaudeCode => {
                 Self::test_claude_code_connection(claude_model, claude_path).await
             },
-            ProviderType::MistralRs => {
+            ProviderType::MistralRs | ProviderType::OpenAICompatible => {
                 Self::test_mistral_rs_connection(mistral_base_url, mistral_api_key, mistral_model).await
             },
         }

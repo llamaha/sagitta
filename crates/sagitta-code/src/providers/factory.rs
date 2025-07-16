@@ -2,6 +2,7 @@
 
 use super::{ProviderType, ProviderConfig, ProviderManager, Provider, ClaudeCodeProvider};
 use super::mistral_rs::MistralRsProvider;
+use super::openai_compatible::OpenAICompatibleProvider;
 use crate::utils::errors::SagittaCodeError;
 
 /// Factory for creating provider instances
@@ -32,6 +33,9 @@ impl ProviderFactory {
             ProviderType::MistralRs => {
                 Ok(Box::new(MistralRsProvider::new()))
             },
+            ProviderType::OpenAICompatible => {
+                Ok(Box::new(OpenAICompatibleProvider::new()))
+            },
         }
     }
     
@@ -44,6 +48,10 @@ impl ProviderFactory {
         // Register Mistral.rs provider
         let mistral_provider = self.create_provider(ProviderType::MistralRs)?;
         manager.register_provider(mistral_provider);
+        
+        // Register OpenAI Compatible provider
+        let openai_provider = self.create_provider(ProviderType::OpenAICompatible)?;
+        manager.register_provider(openai_provider);
         
         Ok(())
     }
@@ -84,6 +92,7 @@ mod tests {
         let provider_types = manager.get_provider_types();
         assert!(provider_types.contains(&ProviderType::ClaudeCode));
         assert!(provider_types.contains(&ProviderType::MistralRs));
+        assert!(provider_types.contains(&ProviderType::OpenAICompatible));
     }
     
     #[test]
@@ -123,5 +132,36 @@ mod tests {
         let mut empty_config = config.clone();
         empty_config.set_option("base_url", "").unwrap();
         assert!(provider.validate_config(&empty_config).is_err());
+    }
+    
+    #[test]
+    fn test_create_openai_compatible_provider() {
+        let factory = create_test_factory();
+        let provider = factory.create_provider(ProviderType::OpenAICompatible).unwrap();
+        
+        assert_eq!(provider.provider_type(), ProviderType::OpenAICompatible);
+        assert_eq!(provider.display_name(), "OpenAI Compatible");
+        assert!(!provider.requires_api_key());
+    }
+    
+    #[test]
+    fn test_openai_compatible_config_validation() {
+        let factory = create_test_factory();
+        let provider = factory.create_provider(ProviderType::OpenAICompatible).unwrap();
+        
+        let config = provider.default_config();
+        match provider.validate_config(&config) {
+            Ok(_) => {},
+            Err(e) => panic!("OpenAI Compatible validation failed: {:?}", e),
+        }
+        
+        // Test missing base URL
+        let mut invalid_config = ProviderConfig::new(ProviderType::OpenAICompatible);
+        assert!(provider.validate_config(&invalid_config).is_err());
+        
+        // Test invalid timeout
+        let mut zero_timeout_config = config.clone();
+        zero_timeout_config.set_option("timeout_seconds", 0u64).unwrap();
+        assert!(provider.validate_config(&zero_timeout_config).is_err());
     }
 }

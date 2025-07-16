@@ -9,6 +9,7 @@ pub mod manager;
 pub mod factory;
 pub mod claude_code;
 pub mod mistral_rs;
+pub mod openai_compatible;
 
 // Re-export commonly used types
 pub use types::{ProviderType, ProviderConfig};
@@ -16,6 +17,7 @@ pub use manager::{ProviderManager, ProviderState};
 pub use factory::ProviderFactory;
 pub use claude_code::ClaudeCodeProvider;
 pub use mistral_rs::MistralRsProvider;
+pub use openai_compatible::OpenAICompatibleProvider;
 
 use crate::llm::client::LlmClient;
 use crate::utils::errors::SagittaCodeError;
