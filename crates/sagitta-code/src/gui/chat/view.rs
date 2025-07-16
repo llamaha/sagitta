@@ -1136,7 +1136,13 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
             String::new()
         };
         
+        // Format header text with tool icon and name
         let header_text = format!("{status_icon} 🔧 {friendly_name}{inline_params}");
+        
+        // Apply tool color to the header for better visual distinction
+        let header_text_colored = egui::RichText::new(header_text)
+            .color(app_theme.tool_color())
+            .strong();
         
         // Create parameter tooltip text
         let mut tooltip_text = String::new();
@@ -1173,9 +1179,9 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
             !tool_cards_collapsed // tool_cards_collapsed true means collapsed, so we invert for open
         };
         
-        let mut collapsing_response = egui::CollapsingHeader::new(header_text)
+        let mut collapsing_response = egui::CollapsingHeader::new(header_text_colored)
             .id_salt(id)
-            .open(Some(should_be_open))
+            .default_open(should_be_open)
             .show(ui, |ui| {
                     // Add progress bar for running tools
                     if tool_call.status == MessageStatus::Streaming {
@@ -1335,9 +1341,9 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
         
         // Check if the user manually toggled this tool card
         if collapsing_response.header_response.clicked() {
-            // User clicked the header - track their preference
-            let is_currently_open = collapsing_response.openness > 0.5;
-            tool_card_individual_states.insert(tool_call.id.clone(), !is_currently_open); // Store collapsed state (inverted from open)
+            // User clicked the header - track their preference  
+            let new_collapsed_state = collapsing_response.openness < 0.5; // If openness < 0.5, it's collapsing
+            tool_card_individual_states.insert(tool_call.id.clone(), new_collapsed_state);
         }
         
         // Add tooltip to the header if we have parameter info
@@ -1398,7 +1404,13 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
             }
         };
         
+        // Format header text with tool icon and name
         let header_text = format!("{status_icon} 🔧 {friendly_name}{inline_params}");
+        
+        // Apply tool color to the header for better visual distinction
+        let header_text_colored = egui::RichText::new(header_text)
+            .color(app_theme.tool_color())
+            .strong();
         
         // Create parameter tooltip text
         let mut tooltip_text = String::new();
@@ -1431,9 +1443,9 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
             !tool_cards_collapsed // tool_cards_collapsed true means collapsed, so we invert for open
         };
         
-        let mut collapsing_response = egui::CollapsingHeader::new(header_text)
+        let mut collapsing_response = egui::CollapsingHeader::new(header_text_colored)
             .id_salt(id)
-            .open(Some(should_be_open))
+            .default_open(should_be_open)
             .show(ui, |ui| {
                     // Show progress bar if running
                     if tool_card.status == ToolCardStatus::Running {
@@ -1583,8 +1595,8 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
         // Check if the user manually toggled this tool card
         if collapsing_response.header_response.clicked() {
             // User clicked the header - track their preference
-            let is_currently_open = collapsing_response.openness > 0.5;
-            tool_card_individual_states.insert(tool_card_key, !is_currently_open); // Store collapsed state (inverted from open)
+            let new_collapsed_state = collapsing_response.openness < 0.5; // If openness < 0.5, it's collapsing
+            tool_card_individual_states.insert(tool_card_key, new_collapsed_state);
         }
         
         // Add tooltip to the header if we have parameter info
