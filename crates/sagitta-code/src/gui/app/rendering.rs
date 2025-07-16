@@ -274,6 +274,12 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
         }
     }
     
+    // Focus input area shortcut
+    if ctx.input(|i| i.key_pressed(Key::Slash) && i.modifiers.ctrl) {
+        // Ctrl+/: Focus input area
+        app.state.should_focus_input = true;
+    }
+    
     // Phase 10: Conversation sidebar organization mode shortcuts (Ctrl+1-6)
     let enable_shortcuts = {
         match app.config.try_lock() {
@@ -1032,6 +1038,16 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button(egui::RichText::new("Switch").color(theme.button_text_color())).clicked() {
                             app.state.show_provider_quick_switch = true;
+                        }
+                    });
+                });
+                
+                // Focus Input Area
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + /: Focus Input Area").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Focus").color(theme.button_text_color())).clicked() {
+                            app.state.should_focus_input = true;
                         }
                     });
                 });

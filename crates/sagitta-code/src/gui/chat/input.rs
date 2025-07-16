@@ -49,6 +49,7 @@ pub fn chat_input_ui(
 ) -> Option<egui::Id> {
     // Handle key events before the text edit widget to manually process Ctrl+Enter
     let mut new_line_added = false;
+    let mut cursor_pos_to_set: Option<usize> = None;
     
     // Process raw events to catch Ctrl+Enter before the TextEdit widget does
     ui.input_mut(|input| {
@@ -57,8 +58,9 @@ pub fn chat_input_ui(
         for event_index in 0..input.events.len() {
             if let Event::Key { key, pressed, modifiers, .. } = &input.events[event_index] {
                 if *key == Key::Enter && *pressed && (modifiers.ctrl || modifiers.command) {
-                    // Add a newline manually
+                    // Add a newline manually and remember cursor position
                     input_buffer.push('\n');
+                    cursor_pos_to_set = Some(input_buffer.len()); // Position cursor at end (after the newline)
                     new_line_added = true;
                     events_to_eat.push(event_index);
                 }
@@ -374,6 +376,15 @@ pub fn chat_input_ui(
                             let response = ui.add(text_edit);
                             text_edit_id = Some(response.id);
                             
+                            // Set cursor position if we added a newline with Ctrl+Enter
+                            if let Some(cursor_pos) = cursor_pos_to_set {
+                                if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), response.id) {
+                                    let ccursor = egui::text::CCursor::new(cursor_pos);
+                                    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(ccursor)));
+                                    state.store(ui.ctx(), response.id);
+                                }
+                            }
+                            
                             // Handle Enter key for submission
                             if input_enabled && response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)) && !new_line_added
                                 && !input_buffer.trim().is_empty() {
@@ -398,6 +409,15 @@ pub fn chat_input_ui(
                     
                     let response = ui.add(text_edit);
                     text_edit_id = Some(response.id);
+                    
+                    // Set cursor position if we added a newline with Ctrl+Enter
+                    if let Some(cursor_pos) = cursor_pos_to_set {
+                        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), response.id) {
+                            let ccursor = egui::text::CCursor::new(cursor_pos);
+                            state.cursor.set_char_range(Some(egui::text::CCursorRange::one(ccursor)));
+                            state.store(ui.ctx(), response.id);
+                        }
+                    }
                     
                     // Request focus when needed (cursor should be visible without ScrollArea)
                     if *should_focus_input && input_enabled {
