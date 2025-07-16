@@ -31,3 +31,5 @@ repo-collection/
 
 # File that is created when tests run
 test_file.rs
+
+.sagitta/

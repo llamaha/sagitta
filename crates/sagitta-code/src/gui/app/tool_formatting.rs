@@ -1217,50 +1217,12 @@ impl ToolResultFormatter {
     }
     
     fn format_generic_result(&self, value: &serde_json::Value) -> String {
-        let mut result = String::new();
-        result.push_str("RESULT: Tool Result\n\n");
+        // Pretty-print the JSON directly without any header
+        let pretty_json = serde_json::to_string_pretty(value)
+            .unwrap_or_else(|_| value.to_string());
         
-        // Try to extract meaningful information from the JSON
-        if let Some(obj) = value.as_object() {
-            for (key, val) in obj {
-                // Skip very long values or binary data
-                let val_str = match val {
-                    serde_json::Value::String(s) => {
-                        if s.len() > 200 {
-                            format!("{}...", &s[..197])
-                        } else {
-                            s.clone()
-                        }
-                    },
-                    serde_json::Value::Array(arr) => {
-                        // Show actual array content with proper formatting
-                        serde_json::to_string_pretty(arr).unwrap_or_else(|_| format!("Array with {} items", arr.len()))
-                    },
-                    serde_json::Value::Object(obj) => {
-                        // Show actual object content with proper formatting
-                        serde_json::to_string_pretty(obj).unwrap_or_else(|_| format!("Object with {} fields", obj.len()))
-                    },
-                    _ => val.to_string(),
-                };
-                
-                result.push_str(&format!("**{key}:** {val_str}\n"));
-            }
-        } else {
-            // If it's not an object, just show the value
-            let val_str = value.to_string();
-            if val_str.len() > 500 {
-                result.push_str(&format!("{}...", &val_str[..497]));
-            } else {
-                result.push_str(&val_str);
-            }
-        }
-        
-        // Check if result is still just the header
-        if result == "RESULT: Tool Result\n\n" {
-            result.push_str("No detailed information available.");
-        }
-        
-        result
+        // Wrap in markdown code block for proper formatting and selection
+        format!("```json\n{}\n```", pretty_json)
     }
 }
 
@@ -1622,13 +1584,13 @@ mod tests {
         });
         
         let formatted = formatter.format_generic_result(&value);
-        assert!(formatted.contains("RESULT: Tool Result"));
-        assert!(formatted.contains("**status:** success"));
-        assert!(formatted.contains("**count:** 42"));
-        // Now we expect the actual array content
-        assert!(formatted.contains("**items:** [\n  \"item1\",\n  \"item2\",\n  \"item3\"\n]"));
-        // And the actual object content
-        assert!(formatted.contains("**metadata:** {\n  \"timestamp\": \"2023-01-01T00:00:00Z\",\n  \"version\": \"1.0\"\n}"));
+        // Now we expect pretty-printed JSON in a markdown code block
+        assert!(formatted.starts_with("```json\n"));
+        assert!(formatted.ends_with("\n```"));
+        assert!(formatted.contains("\"status\": \"success\""));
+        assert!(formatted.contains("\"count\": 42"));
+        assert!(formatted.contains("\"items\": [\n    \"item1\",\n    \"item2\",\n    \"item3\"\n  ]"));
+        assert!(formatted.contains("\"metadata\": {\n    \"timestamp\": \"2023-01-01T00:00:00Z\",\n    \"version\": \"1.0\"\n  }"));
     }
 
     #[test]
@@ -1640,11 +1602,12 @@ mod tests {
         });
         
         let formatted = formatter.format_generic_result(&value);
-        assert!(formatted.contains("RESULT: Tool Result"));
-        assert!(formatted.contains("**long_field:**"));
-        assert!(formatted.contains("..."));
-        // Should be truncated
-        assert!(formatted.len() < long_string.len() + 100);
+        // Should be pretty-printed JSON in markdown code block
+        assert!(formatted.starts_with("```json\n"));
+        assert!(formatted.ends_with("\n```"));
+        assert!(formatted.contains("long_field"));
+        // Should contain the full string (no truncation in JSON output)
+        assert!(formatted.contains(&long_string));
     }
 
     #[test]
@@ -1653,7 +1616,9 @@ mod tests {
         let value = json!("Simple string result");
         
         let formatted = formatter.format_generic_result(&value);
-        assert!(formatted.contains("RESULT: Tool Result"));
+        // Should be pretty-printed JSON in markdown code block
+        assert!(formatted.starts_with("```json\n"));
+        assert!(formatted.ends_with("\n```"));
         assert!(formatted.contains("Simple string result"));
     }
 
@@ -1663,8 +1628,10 @@ mod tests {
         let value = json!({});
         
         let formatted = formatter.format_generic_result(&value);
-        assert!(formatted.contains("RESULT: Tool Result"));
-        assert!(formatted.contains("No detailed information available"));
+        // Empty object should still be pretty-printed JSON
+        assert!(formatted.starts_with("```json\n"));
+        assert!(formatted.ends_with("\n```"));
+        assert!(formatted.contains("{}"));
     }
 
     #[test]
@@ -1674,10 +1641,10 @@ mod tests {
         let value = json!(very_long_string);
         
         let formatted = formatter.format_generic_result(&value);
-        assert!(formatted.contains("RESULT: Tool Result"));
-        assert!(formatted.contains("..."));
-        // Should be truncated to around 500 chars
-        assert!(formatted.len() < very_long_string.len() + 100);
+        // Should be pretty-printed JSON, not truncated
+        assert!(formatted.starts_with("```json\n"));
+        assert!(formatted.ends_with("\n```"));
+        assert!(formatted.contains(&very_long_string)); // Should contain the full string
     }
 
     #[test]
@@ -1716,7 +1683,10 @@ mod tests {
         // Test unknown tool falls back to generic
         let unknown_result = json!({"data": "test"});
         let formatted = formatter.format_successful_tool_result("unknown_tool", &unknown_result);
-        assert!(formatted.contains("RESULT: Tool Result"));
+        // Should be pretty-printed JSON in markdown code block
+        assert!(formatted.starts_with("```json\n"));
+        assert!(formatted.ends_with("\n```"));
+        assert!(formatted.contains("data"));
     }
 
     #[test]
