@@ -463,7 +463,7 @@ pub fn chat_input_ui(
         // Bottom controls
         ui.horizontal(|ui| {
             // Left side - keyboard shortcuts hint
-            ui.small(RichText::new("Enter: Send • Ctrl+Enter: New line • F1: Menu").color(hint_color));
+            ui.small(RichText::new("Enter: Send • Ctrl+Enter: New line • Ctrl+H: Toggle results • F1: Menu").color(hint_color));
 
             // Right side - buttons
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

@@ -314,6 +314,12 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
         }
     }
     
+    // Tool card collapse toggle shortcut
+    if ctx.input(|i| i.key_pressed(Key::H) && i.modifiers.ctrl) {
+        // Ctrl+H: Toggle tool card collapse state
+        app.state.tool_cards_collapsed = !app.state.tool_cards_collapsed;
+    }
+    
     // Loop control shortcuts
     if ctx.input(|i| i.key_pressed(Key::I) && i.modifiers.ctrl) && app.state.is_in_loop {
         // Ctrl+I: Toggle loop injection input when in loop
@@ -1103,6 +1109,16 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                         if ui.button(egui::RichText::new("Break").color(theme.button_text_color())).clicked() 
                             && app.state.is_in_loop {
                             app.state.loop_break_requested = true;
+                        }
+                    });
+                });
+                
+                // Tool Card Collapse
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + H: Toggle Tool Card Collapse").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                            app.state.tool_cards_collapsed = !app.state.tool_cards_collapsed;
                         }
                     });
                 });

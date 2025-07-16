@@ -1175,7 +1175,7 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
         
         let mut collapsing_response = egui::CollapsingHeader::new(header_text)
             .id_salt(id)
-            .default_open(should_be_open)
+            .open(Some(should_be_open))
             .show(ui, |ui| {
                     // Add progress bar for running tools
                     if tool_call.status == MessageStatus::Streaming {
@@ -1433,7 +1433,7 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
         
         let mut collapsing_response = egui::CollapsingHeader::new(header_text)
             .id_salt(id)
-            .default_open(should_be_open)
+            .open(Some(should_be_open))
             .show(ui, |ui| {
                     // Show progress bar if running
                     if tool_card.status == ToolCardStatus::Running {
