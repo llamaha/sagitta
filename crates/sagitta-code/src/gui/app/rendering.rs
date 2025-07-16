@@ -318,6 +318,8 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
     if ctx.input(|i| i.key_pressed(Key::H) && i.modifiers.ctrl) {
         // Ctrl+H: Toggle tool card collapse state
         app.state.tool_cards_collapsed = !app.state.tool_cards_collapsed;
+        // Clear individual overrides so ALL cards follow the new global state
+        app.state.tool_card_individual_states.clear();
     }
     
     // Loop control shortcuts
@@ -1119,6 +1121,8 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
                             app.state.tool_cards_collapsed = !app.state.tool_cards_collapsed;
+                            // Clear individual overrides so ALL cards follow the new global state
+                            app.state.tool_card_individual_states.clear();
                         }
                     });
                 });
@@ -1272,6 +1276,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 &mut app.state.stop_requested,
                 // Tool card collapse state
                 &mut app.state.tool_cards_collapsed,
+                &mut app.state.tool_card_individual_states,
             );
             
             // Handle repository refresh request

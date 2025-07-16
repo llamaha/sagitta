@@ -58,6 +58,8 @@ pub struct CustomThemeColors {
     pub code_background: Color32,
     #[serde(with = "color32_serde")]
     pub thinking_background: Color32,
+    #[serde(with = "color32_serde")]
+    pub tool_card_background: Color32,
     
     // Text colors
     #[serde(with = "color32_serde")]
@@ -142,6 +144,7 @@ impl Default for CustomThemeColors {
             button_background: Color32::from_rgb(60, 60, 60),
             code_background: Color32::from_rgb(35, 35, 35),
             thinking_background: Color32::from_rgb(45, 45, 45),
+            tool_card_background: Color32::from_rgb(32, 32, 40),
             
             // Text colors
             text_color: Color32::from_rgb(220, 220, 220),
@@ -623,6 +626,15 @@ impl AppTheme {
                 get_custom_theme_colors().agent_color.b(),
                 20
             ),
+        }
+    }
+    
+    /// Get tool card background color
+    pub fn tool_card_background(&self) -> Color32 {
+        match self {
+            AppTheme::Dark => Color32::from_rgb(32, 32, 40),
+            AppTheme::Light => Color32::from_rgb(242, 242, 248),
+            AppTheme::Custom => get_custom_theme_colors().tool_card_background,
         }
     }
     

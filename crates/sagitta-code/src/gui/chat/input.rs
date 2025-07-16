@@ -48,6 +48,7 @@ pub fn chat_input_ui(
     stop_requested: &mut bool,
     // Tool card collapse state
     tool_cards_collapsed: &mut bool,
+    tool_card_individual_states: &mut std::collections::HashMap<String, bool>,
 ) -> Option<egui::Id> {
     // Handle key events before the text edit widget to manually process Ctrl+Enter
     let mut new_line_added = false;
@@ -269,6 +270,8 @@ pub fn chat_input_ui(
                     .clicked() 
                 {
                     *tool_cards_collapsed = !*tool_cards_collapsed;
+                    // Clear individual overrides so ALL cards follow the new global state
+                    tool_card_individual_states.clear();
                 }
                 
                 ui.add_space(8.0);

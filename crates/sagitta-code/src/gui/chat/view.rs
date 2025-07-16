@@ -13,6 +13,9 @@ use egui::{
     Layout,
     CornerRadius,
 };
+
+pub mod collapsing_header_helper;
+use collapsing_header_helper::{create_controlled_collapsing_header, get_tool_card_state};
 use syntect::{
     highlighting::{ThemeSet, Style as SyntectStyle},
     parsing::SyntaxSet,
@@ -1102,9 +1105,26 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
     // Limit tool card width to 90% of max_width
     let tool_card_width = max_width * 0.9;
     
-    // Create a vertical layout with the constrained width
-    ui.vertical(|ui| {
-        ui.set_max_width(tool_card_width);
+    // Add some padding around the tool card
+    ui.add_space(2.0);
+    
+    // Create a simple, modern-looking frame without custom interaction handling
+    let frame_response = Frame::NONE
+        .fill(app_theme.tool_card_background())
+        .inner_margin(egui::Margin::same(12))
+        .corner_radius(egui::CornerRadius::same(6))
+        .stroke(Stroke::new(0.5, app_theme.border_color().linear_multiply(0.3)))
+        .shadow(egui::Shadow {
+            offset: [0, 2],
+            blur: 8,
+            spread: 0,
+            color: Color32::from_black_alpha(25),
+        })
+        .show(ui, |ui| {
+            
+            // Create a vertical layout with the constrained width
+            ui.vertical(|ui| {
+                ui.set_max_width(tool_card_width);
         
         // Build the header text with inline parameters
         let friendly_name = get_human_friendly_tool_name(&tool_call.name);
@@ -1170,19 +1190,16 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
         // Use CollapsingHeader for the tool card
         let id = egui::Id::new(&tool_call.id);
         
-        // Determine if this tool card should be open based on global and individual state
-        let should_be_open = if let Some(&individual_state) = tool_card_individual_states.get(&tool_call.id) {
-            // Individual state overrides global state
-            !individual_state // individual_state true means collapsed, so we invert for open
-        } else {
-            // Use global state
-            !tool_cards_collapsed // tool_cards_collapsed true means collapsed, so we invert for open
-        };
+        // Determine if this tool card should be open and if it has an override
+        let (should_be_open, has_override) = get_tool_card_state(&tool_call.id, tool_cards_collapsed, tool_card_individual_states);
         
-        let mut collapsing_response = egui::CollapsingHeader::new(header_text_colored)
-            .id_salt(id)
-            .default_open(should_be_open)
-            .show(ui, |ui| {
+        let mut collapsing_response = create_controlled_collapsing_header(
+            ui,
+            id,
+            header_text_colored,
+            should_be_open,
+            has_override,
+            |ui| {
                     // Add progress bar for running tools
                     if tool_call.status == MessageStatus::Streaming {
                         // Try to find running tool info to get actual progress
@@ -1278,12 +1295,15 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
                         
                         if needs_scroll {
                             // Large content - use scroll area
-                            let min_height = if actual_content_size > 0 {
+                            let min_height = if tool_call.name.contains("query") || tool_call.name.contains("search") {
+                                // For search results, ensure adequate height
+                                600.0
+                            } else if actual_content_size > 0 {
                                 // For file content, ensure a reasonable minimum height
-                                300.0f32.min(400.0)
+                                400.0
                             } else {
                                 // For other content, allow more flexible sizing
-                                100.0
+                                300.0
                             };
                             
                             egui::ScrollArea::vertical()
@@ -1337,7 +1357,8 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
                         ui.code(result_str);
                     }
                 }
-            });
+            },
+        );
         
         // Check if the user manually toggled this tool card
         if collapsing_response.header_response.clicked() {
@@ -1351,6 +1372,7 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
             collapsing_response.header_response = collapsing_response.header_response.on_hover_text(tooltip_text);
         }
     });
+        });
     
     clicked_tool_result
 }
@@ -1363,7 +1385,7 @@ fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Co
         if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state, tool_cards_collapsed, tool_card_individual_states) {
             clicked_tool_result = Some(tool_info);
         }
-        ui.add_space(4.0); // Spacing between tool cards
+        ui.add_space(8.0); // Spacing between tool cards
     }
     
     clicked_tool_result
@@ -1376,9 +1398,26 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
     // Limit tool card width to 90% of max_width
     let tool_card_width = max_width * 0.9;
     
-    // Create a vertical layout with the constrained width
-    ui.vertical(|ui| {
-        ui.set_max_width(tool_card_width);
+    // Add some padding around the tool card
+    ui.add_space(2.0);
+    
+    // Create a simple, modern-looking frame without custom interaction handling
+    let frame_response = Frame::NONE
+        .fill(app_theme.tool_card_background())
+        .inner_margin(egui::Margin::same(12))
+        .corner_radius(egui::CornerRadius::same(6))
+        .stroke(Stroke::new(0.5, app_theme.border_color().linear_multiply(0.3)))
+        .shadow(egui::Shadow {
+            offset: [0, 2],
+            blur: 8,
+            spread: 0,
+            color: Color32::from_black_alpha(25),
+        })
+        .show(ui, |ui| {
+            
+            // Create a vertical layout with the constrained width
+            ui.vertical(|ui| {
+                ui.set_max_width(tool_card_width);
         
         // Build the header text with inline parameters
         let friendly_name = get_human_friendly_tool_name(&tool_card.tool_name);
@@ -1434,19 +1473,16 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
         // Use the run_id as the key for individual state tracking
         let tool_card_key = tool_card.run_id.to_string();
         
-        // Determine if this tool card should be open based on global and individual state
-        let should_be_open = if let Some(&individual_state) = tool_card_individual_states.get(&tool_card_key) {
-            // Individual state overrides global state
-            !individual_state // individual_state true means collapsed, so we invert for open
-        } else {
-            // Use global state
-            !tool_cards_collapsed // tool_cards_collapsed true means collapsed, so we invert for open
-        };
+        // Determine if this tool card should be open and if it has an override
+        let (should_be_open, has_override) = get_tool_card_state(&tool_card_key, tool_cards_collapsed, tool_card_individual_states);
         
-        let mut collapsing_response = egui::CollapsingHeader::new(header_text_colored)
-            .id_salt(id)
-            .default_open(should_be_open)
-            .show(ui, |ui| {
+        let mut collapsing_response = create_controlled_collapsing_header(
+            ui,
+            id,
+            header_text_colored,
+            should_be_open,
+            has_override,
+            |ui| {
                     // Show progress bar if running
                     if tool_card.status == ToolCardStatus::Running {
                         if let Some(progress) = tool_card.progress {
@@ -1534,12 +1570,15 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
                     
                     if needs_scroll {
                         // Large content - use scroll area
-                        let min_height = if actual_content_size > 0 {
+                        let min_height = if tool_card.tool_name.contains("query") || tool_card.tool_name.contains("search") {
+                            // For search results, ensure adequate height
+                            600.0
+                        } else if actual_content_size > 0 {
                             // For file content, ensure a reasonable minimum height
-                            300.0f32.min(400.0)
+                            400.0
                         } else {
                             // For other content, allow more flexible sizing
-                            100.0
+                            300.0
                         };
                         
                         egui::ScrollArea::vertical()
@@ -1590,7 +1629,8 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
                     }
                 }
             }
-        });
+        },
+    );
         
         // Check if the user manually toggled this tool card
         if collapsing_response.header_response.clicked() {
@@ -1604,6 +1644,7 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
             collapsing_response.header_response = collapsing_response.header_response.on_hover_text(tooltip_text);
         }
     });
+        });
     
     clicked_tool_result
 }

@@ -74,6 +74,7 @@ impl ThemeCustomizer {
                     button_background: Color32::from_rgb(240, 240, 240),
                     code_background: Color32::from_rgb(250, 250, 250),
                     thinking_background: Color32::from_rgb(245, 245, 245),
+                    tool_card_background: Color32::from_rgb(242, 242, 248),
                     
                     // Text colors
                     text_color: Color32::from_rgb(60, 60, 60),
@@ -372,6 +373,17 @@ impl ThemeCustomizer {
                         
                         ui.add_space(4.0);
                         
+                        // Tool card background test
+                        Frame::NONE
+                            .fill(self.colors.tool_card_background)
+                            .stroke(Stroke::new(1.0, self.colors.border_color))
+                            .inner_margin(Vec2::splat(4.0))
+                            .show(ui, |ui| {
+                                ui.label(RichText::new("🔧 Tool Card Background").color(self.colors.tool_color).strong());
+                            });
+                        
+                        ui.add_space(4.0);
+                        
                         // Accent colors test
                         ui.horizontal(|ui| {
                             ui.label(RichText::new("Accent").color(self.colors.accent_color));
@@ -448,6 +460,8 @@ impl ThemeCustomizer {
                         self.test_code_background(ui);
                         ui.add_space(4.0);
                         self.test_thinking_background(ui);
+                        ui.add_space(4.0);
+                        self.test_tool_card_background(ui);
                     });
                 
                 ui.add_space(8.0);
@@ -612,6 +626,19 @@ impl ThemeCustomizer {
             .show(ui, |ui| {
                 ui.label(RichText::new("Sagitta Code is thinking about your request...").italics());
                 ui.label("Used in: Thinking bubbles, reasoning displays");
+            });
+    }
+
+    fn test_tool_card_background(&self, ui: &mut Ui) {
+        ui.label(RichText::new("Tool Card Background Test:").strong());
+        Frame::NONE
+            .fill(self.colors.tool_card_background)
+            .stroke(Stroke::new(2.0, Color32::RED))
+            .inner_margin(Vec2::splat(8.0))
+            .show(ui, |ui| {
+                ui.label(RichText::new("🔧 Tool: Read File - path: /example.txt").color(self.colors.tool_color).strong());
+                ui.label("This frame simulates a tool card background");
+                ui.label("Used in: Tool execution cards, function call results");
             });
     }
 
@@ -876,6 +903,7 @@ impl ThemeCustomizer {
                         changed |= color_picker_standalone(ui, "Button Background", &mut self.colors.button_background);
                         changed |= color_picker_standalone(ui, "Code Background", &mut self.colors.code_background);
                         changed |= color_picker_standalone(ui, "Thinking Background", &mut self.colors.thinking_background);
+                        changed |= color_picker_standalone(ui, "Tool Card Background", &mut self.colors.tool_card_background);
                     });
             });
         
@@ -1154,6 +1182,7 @@ impl ThemeCustomizer {
         self.colors.button_background = hsl_to_color32(get_next_hue(), bg_saturation, background_lightness + if is_dark { 0.1 } else { -0.1 });
         self.colors.code_background = hsl_to_color32(get_next_hue(), bg_saturation, background_lightness + if is_dark { 0.03 } else { -0.03 });
         self.colors.thinking_background = hsl_to_color32(get_next_hue(), bg_saturation, background_lightness + if is_dark { 0.07 } else { -0.07 });
+        self.colors.tool_card_background = hsl_to_color32(get_next_hue(), bg_saturation, background_lightness + if is_dark { 0.02 } else { -0.02 });
         
         // Text colors (low saturation, high contrast)
         let text_saturation = base_saturation * 0.2;
@@ -1279,6 +1308,7 @@ impl ThemeCustomizer {
         self.colors.button_background = hsl_to_color32(get_hue(), bg_saturation, background_lightness + if is_dark { 0.1 } else { -0.1 });
         self.colors.code_background = hsl_to_color32(get_hue(), bg_saturation, background_lightness + if is_dark { 0.03 } else { -0.03 });
         self.colors.thinking_background = hsl_to_color32(get_hue(), bg_saturation, background_lightness + if is_dark { 0.07 } else { -0.07 });
+        self.colors.tool_card_background = hsl_to_color32(get_hue(), bg_saturation, background_lightness + if is_dark { 0.02 } else { -0.02 });
         
         // Text colors (low saturation, high contrast)
         let text_saturation = base_saturation * 0.2;
