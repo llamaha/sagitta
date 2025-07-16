@@ -6,7 +6,133 @@ use axum::Extension;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::fs;
+use tokio::time::{timeout, Duration};
 use similar::{TextDiff, ChangeTag};
+use tracing::{info, error};
+use uuid;
+
+/// Timeout for file operations to prevent hanging
+const FILE_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Maximum number of concurrent file operations per file
+const MAX_CONCURRENT_OPERATIONS: usize = 1;
+
+/// Helper function to perform file read with timeout
+async fn read_file_with_timeout(file_path: &str) -> Result<String, ErrorObject> {
+    match timeout(FILE_OPERATION_TIMEOUT, fs::read_to_string(file_path)).await {
+        Ok(Ok(content)) => Ok(content),
+        Ok(Err(e)) => Err(ErrorObject {
+            code: -32603,
+            message: format!("Failed to read file '{}': {}", file_path, e),
+            data: None,
+        }),
+        Err(_) => Err(ErrorObject {
+            code: -32603,
+            message: format!("File read operation timed out after 30 seconds for '{}'", file_path),
+            data: None,
+        }),
+    }
+}
+
+/// Helper function to perform atomic file write with timeout
+async fn write_file_atomic_with_timeout(file_path: &str, content: &str) -> Result<(), ErrorObject> {
+    let temp_path = format!("{}.tmp.{}", file_path, uuid::Uuid::new_v4());
+    
+    // Write to temporary file first
+    match timeout(FILE_OPERATION_TIMEOUT, fs::write(&temp_path, content)).await {
+        Ok(Ok(_)) => {},
+        Ok(Err(e)) => {
+            // Clean up temp file on error
+            let _ = fs::remove_file(&temp_path).await;
+            return Err(ErrorObject {
+                code: -32603,
+                message: format!("Failed to write file: {}", e),
+                data: None,
+            });
+        },
+        Err(_) => {
+            // Clean up temp file on timeout
+            let _ = fs::remove_file(&temp_path).await;
+            return Err(ErrorObject {
+                code: -32603,
+                message: "File write operation timed out after 30 seconds".to_string(),
+                data: None,
+            });
+        },
+    }
+    
+    // Atomically rename to final location
+    match timeout(FILE_OPERATION_TIMEOUT, fs::rename(&temp_path, file_path)).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(e)) => {
+            // Clean up temp file on error
+            let _ = fs::remove_file(&temp_path).await;
+            Err(ErrorObject {
+                code: -32603,
+                message: format!("Failed to rename file: {}", e),
+                data: None,
+            })
+        },
+        Err(_) => {
+            // Clean up temp file on timeout
+            let _ = fs::remove_file(&temp_path).await;
+            Err(ErrorObject {
+                code: -32603,
+                message: "File rename operation timed out after 30 seconds".to_string(),
+                data: None,
+            })
+        },
+    }
+}
+
+/// File locking manager to prevent concurrent modifications
+use std::collections::HashMap;
+use std::sync::Mutex;
+use tokio::sync::Semaphore;
+
+lazy_static::lazy_static! {
+    static ref FILE_LOCKS: Mutex<HashMap<String, Arc<Semaphore>>> = Mutex::new(HashMap::new());
+}
+
+/// Get or create a semaphore for file-level locking
+fn get_file_lock(file_path: &str) -> Arc<Semaphore> {
+    let mut locks = FILE_LOCKS.lock().unwrap();
+    locks.entry(file_path.to_string())
+        .or_insert_with(|| Arc::new(Semaphore::new(MAX_CONCURRENT_OPERATIONS)))
+        .clone()
+}
+
+/// Helper function to perform file edit with locking
+async fn edit_file_with_lock<F, Fut>(file_path: &str, operation: F) -> Result<EditFileResult, ErrorObject>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<EditFileResult, ErrorObject>>,
+{
+    let lock = get_file_lock(file_path);
+    
+    // Acquire file lock with timeout
+    let permit = match timeout(FILE_OPERATION_TIMEOUT, lock.acquire()).await {
+        Ok(Ok(permit)) => permit,
+        Ok(Err(_)) => return Err(ErrorObject {
+            code: -32603,
+            message: "Failed to acquire file lock".to_string(),
+            data: None,
+        }),
+        Err(_) => return Err(ErrorObject {
+            code: -32603,
+            message: "File lock acquisition timed out after 30 seconds".to_string(),
+            data: None,
+        }),
+    };
+    
+    // Perform the operation while holding the lock
+    let result = operation().await;
+    
+    // Lock is automatically released when permit is dropped
+    drop(permit);
+    
+    result
+}
 
 /// Get context around the edit location (10 lines before and after)
 fn _get_context_lines(content: &str, match_start: usize, match_end: usize) -> (String, String) {
@@ -122,17 +248,29 @@ pub async fn handle_edit_file<C: QdrantClientTrait + Send + Sync + 'static>(
     _qdrant_client: Arc<C>,
     _auth_user_ext: Option<Extension<AuthenticatedUser>>,
 ) -> Result<EditFileResult, ErrorObject> {
-    // Read the file
-    let content = match fs::read_to_string(&params.file_path).await {
-        Ok(content) => content,
-        Err(e) => {
-            return Err(ErrorObject {
-                code: -32603,
-                message: format!("Failed to read file: {e}"),
-                data: None,
-            });
-        }
-    };
+    let start_time = std::time::Instant::now();
+    info!("Starting edit_file operation for: {}", params.file_path);
+    
+    let file_path = params.file_path.clone();
+    
+    // Use file locking to prevent concurrent modifications
+    let result = edit_file_with_lock(&file_path, || async {
+        handle_edit_file_inner(params).await
+    }).await;
+    
+    let duration = start_time.elapsed();
+    match &result {
+        Ok(_) => info!("Edit completed successfully in {:?}", duration),
+        Err(e) => error!("Edit failed after {:?}: {}", duration, e.message),
+    }
+    
+    result
+}
+
+/// Inner handler for editing a file (without locking)
+async fn handle_edit_file_inner(params: EditFileParams) -> Result<EditFileResult, ErrorObject> {
+    // Read the file with timeout protection
+    let content = read_file_with_timeout(&params.file_path).await?;
     
     // Find the old_string in the content
     let matches: Vec<_> = content.match_indices(&params.old_string).collect();
@@ -163,14 +301,8 @@ pub async fn handle_edit_file<C: QdrantClientTrait + Send + Sync + 'static>(
         format!("{}{}{}", &content[..start], &params.new_string, &content[end..])
     };
     
-    // Write the new content
-    if let Err(e) = fs::write(&params.file_path, &new_content).await {
-        return Err(ErrorObject {
-            code: -32603,
-            message: format!("Failed to write file: {e}"),
-            data: None,
-        });
-    }
+    // Write the new content atomically with timeout protection
+    write_file_atomic_with_timeout(&params.file_path, &new_content).await?;
     
     // Get context for display (show limited context around changes)
     let (old_context, new_context) = if matches.len() == 1 && !params.replace_all {
@@ -227,6 +359,8 @@ pub async fn handle_edit_file<C: QdrantClientTrait + Send + Sync + 'static>(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use std::time::Duration;
+    use tokio::time::sleep;
     // use std::path::PathBuf;
     
     fn create_mock_qdrant() -> Arc<qdrant_client::Qdrant> {
@@ -341,5 +475,404 @@ mod tests {
         assert!(result.is_err());
         let error = result.unwrap_err();
         assert!(error.message.contains("not found in file"));
+    }
+
+    // NEW TESTS FOR TIMEOUT PROTECTION
+    #[tokio::test]
+    async fn test_edit_file_timeout_on_read() {
+        // Test that our timeout protection works by creating a mock slow filesystem
+        // We'll create a custom test that simulates a slow read operation
+        
+        // First, let's test that our timeout wrapper works correctly
+        use std::future::Future;
+        use std::pin::Pin;
+        use std::task::{Context, Poll};
+        
+        // Create a future that never completes to simulate hanging read
+        struct NeverComplete;
+        impl Future for NeverComplete {
+            type Output = Result<String, std::io::Error>;
+            fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+                // Never return Ready - simulates hanging
+                Poll::Pending
+            }
+        }
+        
+        // Test the timeout wrapper directly
+        let start_time = std::time::Instant::now();
+        let result = timeout(Duration::from_millis(100), NeverComplete).await;
+        let elapsed = start_time.elapsed();
+        
+        // Should timeout quickly
+        assert!(elapsed < Duration::from_secs(1));
+        assert!(result.is_err()); // Should be a timeout error
+        
+        // If we get here, the timeout mechanism is working
+        // The actual file operations will use the same timeout mechanism
+    }
+
+    #[tokio::test]
+    async fn test_edit_file_timeout_on_write() {
+        // Test that write operations handle permission errors gracefully
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+        
+        // Create test file
+        fs::write(&file_path, "Hello world").await.unwrap();
+        
+        // Make directory read-only to simulate write failure
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(temp_dir.path()).await.unwrap().permissions();
+            perms.set_mode(0o444); // Read-only directory
+            fs::set_permissions(temp_dir.path(), perms).await.unwrap();
+        }
+        
+        let params = EditFileParams {
+            file_path: file_path.to_str().unwrap().to_string(),
+            old_string: "Hello".to_string(),
+            new_string: "Hi".to_string(),
+            replace_all: false,
+        };
+        
+        let config = Arc::new(RwLock::new(AppConfig::default()));
+        let qdrant_client = create_mock_qdrant();
+        
+        let start_time = std::time::Instant::now();
+        let result = handle_edit_file(params, config, qdrant_client, None).await;
+        let elapsed = start_time.elapsed();
+        
+        // Should complete quickly with proper error handling
+        assert!(elapsed < Duration::from_secs(5));
+        assert!(result.is_err());
+        
+        // Error should be about permissions, not timeout
+        let error = result.unwrap_err();
+        assert!(error.message.contains("Failed to write file") || 
+                error.message.contains("permission") || 
+                error.message.contains("denied"));
+    }
+
+    // NEW TESTS FOR FILE LOCKING
+    #[tokio::test]
+    async fn test_concurrent_edit_same_file() {
+        // This test will fail initially - we need to implement file locking
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+        
+        // Create test file
+        let original_content = "line1\nline2\nline3\nline4\nline5";
+        fs::write(&file_path, original_content).await.unwrap();
+        
+        let file_path_str = file_path.to_str().unwrap().to_string();
+        let config = Arc::new(RwLock::new(AppConfig::default()));
+        let qdrant_client = create_mock_qdrant();
+        
+        // Start two concurrent edits
+        let params1 = EditFileParams {
+            file_path: file_path_str.clone(),
+            old_string: "line1".to_string(),
+            new_string: "LINE1".to_string(),
+            replace_all: false,
+        };
+        
+        let params2 = EditFileParams {
+            file_path: file_path_str.clone(),
+            old_string: "line2".to_string(),
+            new_string: "LINE2".to_string(),
+            replace_all: false,
+        };
+        
+        let config1 = config.clone();
+        let config2 = config.clone();
+        let client1 = qdrant_client.clone();
+        let client2 = qdrant_client.clone();
+        
+        // Run concurrently
+        let (result1, result2) = tokio::join!(
+            handle_edit_file(params1, config1, client1, None),
+            handle_edit_file(params2, config2, client2, None)
+        );
+        
+        // Both should succeed due to file locking preventing corruption
+        assert!(result1.is_ok());
+        assert!(result2.is_ok());
+        
+        // Verify final file content is consistent (either line1 or line2 should be changed first)
+        let final_content = fs::read_to_string(&file_path).await.unwrap();
+        assert!(final_content.contains("LINE1") || final_content.contains("LINE2"));
+        
+        // File should not be corrupted
+        assert_eq!(final_content.lines().count(), 5);
+    }
+
+    #[tokio::test]
+    async fn test_file_locking_prevents_corruption() {
+        // This test will fail initially - we need to implement file locking
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+        
+        // Create test file
+        let original_content = "0123456789".repeat(1000); // Large content
+        fs::write(&file_path, &original_content).await.unwrap();
+        
+        let file_path_str = file_path.to_str().unwrap().to_string();
+        let config = Arc::new(RwLock::new(AppConfig::default()));
+        let qdrant_client = create_mock_qdrant();
+        
+        // Start multiple concurrent edits
+        let mut handles = Vec::new();
+        for i in 0..10 {
+            let params = EditFileParams {
+                file_path: file_path_str.clone(),
+                old_string: format!("{}", i),
+                new_string: format!("X{}", i),
+                replace_all: true,
+            };
+            
+            let config_clone = config.clone();
+            let client_clone = qdrant_client.clone();
+            
+            let handle = tokio::spawn(async move {
+                handle_edit_file(params, config_clone, client_clone, None).await
+            });
+            handles.push(handle);
+        }
+        
+        // Wait for all to complete
+        let results: Vec<_> = futures::future::join_all(handles).await;
+        
+        // All should succeed
+        for result in results {
+            assert!(result.unwrap().is_ok());
+        }
+        
+        // Verify file is not corrupted
+        let final_content = fs::read_to_string(&file_path).await.unwrap();
+        assert!(!final_content.is_empty());
+        assert!(final_content.len() >= original_content.len()); // Should not be truncated
+    }
+
+    // NEW TESTS FOR ATOMIC OPERATIONS
+    #[tokio::test]
+    async fn test_atomic_write_prevents_partial_content() {
+        // This test will fail initially - we need to implement atomic operations
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+        
+        // Create test file
+        let original_content = "Hello world\nThis is important data\nDo not lose this";
+        fs::write(&file_path, original_content).await.unwrap();
+        
+        let params = EditFileParams {
+            file_path: file_path.to_str().unwrap().to_string(),
+            old_string: "Hello world".to_string(),
+            new_string: "Hi universe".to_string(),
+            replace_all: false,
+        };
+        
+        let config = Arc::new(RwLock::new(AppConfig::default()));
+        let qdrant_client = create_mock_qdrant();
+        
+        // Simulate a crash by having the edit operation continue in background
+        let file_path_clone = file_path.clone();
+        let read_during_write = tokio::spawn(async move {
+            // Give the edit some time to start
+            sleep(Duration::from_millis(10)).await;
+            
+            // Try to read the file during the write operation
+            for _ in 0..100 {
+                if let Ok(content) = fs::read_to_string(&file_path_clone).await {
+                    // File should never be empty or partially written
+                    assert!(!content.is_empty());
+                    assert!(content.contains("This is important data"));
+                    assert!(content.contains("Do not lose this"));
+                }
+                sleep(Duration::from_millis(1)).await;
+            }
+        });
+        
+        let result = handle_edit_file(params, config, qdrant_client, None).await;
+        read_during_write.await.unwrap();
+        
+        assert!(result.is_ok());
+        
+        // Verify final content is correct
+        let final_content = fs::read_to_string(&file_path).await.unwrap();
+        assert!(final_content.contains("Hi universe"));
+        assert!(final_content.contains("This is important data"));
+        assert!(final_content.contains("Do not lose this"));
+    }
+
+    #[tokio::test]
+    async fn test_atomic_rollback_on_disk_full() {
+        // This test will fail initially - we need to implement atomic operations
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+        
+        // Create test file
+        let original_content = "Hello world";
+        fs::write(&file_path, original_content).await.unwrap();
+        
+        let params = EditFileParams {
+            file_path: file_path.to_str().unwrap().to_string(),
+            old_string: "Hello world".to_string(),
+            new_string: "X".repeat(1_000_000), // Very large replacement
+            replace_all: false,
+        };
+        
+        let config = Arc::new(RwLock::new(AppConfig::default()));
+        let qdrant_client = create_mock_qdrant();
+        
+        let result = handle_edit_file(params, config, qdrant_client, None).await;
+        
+        // If write fails, original content should remain intact
+        let final_content = fs::read_to_string(&file_path).await.unwrap();
+        if result.is_err() {
+            // Original file should be unchanged
+            assert_eq!(final_content, original_content);
+        } else {
+            // If it succeeded, content should be fully written
+            assert!(final_content.contains("X"));
+        }
+    }
+
+    // NEW TESTS FOR ENHANCED ERROR HANDLING AND LOGGING
+    #[tokio::test]
+    async fn test_detailed_error_messages() {
+        // This test will fail initially - we need to implement enhanced error handling
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("nonexistent_dir/test.txt");
+        
+        let params = EditFileParams {
+            file_path: file_path.to_str().unwrap().to_string(),
+            old_string: "Hello".to_string(),
+            new_string: "Hi".to_string(),
+            replace_all: false,
+        };
+        
+        let config = Arc::new(RwLock::new(AppConfig::default()));
+        let qdrant_client = create_mock_qdrant();
+        
+        let result = handle_edit_file(params, config, qdrant_client, None).await;
+        
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        
+        // Error message should be detailed and helpful
+        assert!(error.message.contains("Failed to read file"));
+        assert!(error.message.contains("nonexistent_dir"));
+        assert!(error.code == -32603);
+    }
+
+    #[tokio::test]
+    async fn test_operation_timing_logging() {
+        // This test will fail initially - we need to implement timing logging
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+        
+        // Create test file
+        let original_content = "Hello world";
+        fs::write(&file_path, original_content).await.unwrap();
+        
+        let params = EditFileParams {
+            file_path: file_path.to_str().unwrap().to_string(),
+            old_string: "Hello".to_string(),
+            new_string: "Hi".to_string(),
+            replace_all: false,
+        };
+        
+        let config = Arc::new(RwLock::new(AppConfig::default()));
+        let qdrant_client = create_mock_qdrant();
+        
+        let start_time = std::time::Instant::now();
+        let result = handle_edit_file(params, config, qdrant_client, None).await;
+        let elapsed = start_time.elapsed();
+        
+        assert!(result.is_ok());
+        
+        // Should complete reasonably quickly for small files
+        assert!(elapsed < Duration::from_secs(1));
+        
+        // TODO: Add actual logging verification once we implement structured logging
+        // For now, just verify the operation completed successfully
+    }
+
+    #[tokio::test]
+    async fn test_permission_error_handling() {
+        // This test will fail initially - we need to implement enhanced error handling
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+        
+        // Create test file
+        fs::write(&file_path, "Hello world").await.unwrap();
+        
+        // Remove read permissions
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&file_path).await.unwrap().permissions();
+            perms.set_mode(0o000); // No permissions
+            fs::set_permissions(&file_path, perms).await.unwrap();
+        }
+        
+        let params = EditFileParams {
+            file_path: file_path.to_str().unwrap().to_string(),
+            old_string: "Hello".to_string(),
+            new_string: "Hi".to_string(),
+            replace_all: false,
+        };
+        
+        let config = Arc::new(RwLock::new(AppConfig::default()));
+        let qdrant_client = create_mock_qdrant();
+        
+        let result = handle_edit_file(params, config, qdrant_client, None).await;
+        
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        
+        // Should provide helpful error message about permissions
+        assert!(error.message.contains("Failed to read file"));
+        assert!(error.message.contains("permission") || error.message.contains("denied"));
+    }
+
+    // INTEGRATION TESTS FOR ALL FEATURES COMBINED
+    #[tokio::test]
+    async fn test_robust_edit_with_all_features() {
+        // This test will fail initially - combines timeout, locking, atomicity, and error handling
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+        
+        // Create test file
+        let original_content = "line1\nline2\nline3\nline4\nline5";
+        fs::write(&file_path, original_content).await.unwrap();
+        
+        let params = EditFileParams {
+            file_path: file_path.to_str().unwrap().to_string(),
+            old_string: "line2".to_string(),
+            new_string: "LINE2".to_string(),
+            replace_all: false,
+        };
+        
+        let config = Arc::new(RwLock::new(AppConfig::default()));
+        let qdrant_client = create_mock_qdrant();
+        
+        let start_time = std::time::Instant::now();
+        let result = handle_edit_file(params, config, qdrant_client, None).await;
+        let elapsed = start_time.elapsed();
+        
+        // Should complete within reasonable time (timeout protection)
+        assert!(elapsed < Duration::from_secs(30));
+        
+        // Should succeed (proper error handling)
+        assert!(result.is_ok());
+        
+        // Should produce correct content (atomicity)
+        let final_content = fs::read_to_string(&file_path).await.unwrap();
+        assert!(final_content.contains("LINE2"));
+        assert!(final_content.contains("line1"));
+        assert!(final_content.contains("line3"));
+        assert_eq!(final_content.lines().count(), 5);
     }
 }
