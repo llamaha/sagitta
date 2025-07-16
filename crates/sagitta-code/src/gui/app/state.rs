@@ -107,6 +107,10 @@ pub struct AppState {
     // Input focus management
     pub should_focus_input: bool,
     
+    // Tool card collapse state
+    pub tool_cards_collapsed: bool,
+    pub tool_card_individual_states: HashMap<String, bool>, // tool_call_id -> collapsed state
+    
     // Undo/redo for chat input
     pub input_undo_stack: Vec<String>,
     pub input_redo_stack: Vec<String>,
@@ -200,6 +204,10 @@ impl AppState {
             
             // Input focus management
             should_focus_input: true, // Focus input on startup
+            
+            // Tool card collapse state
+            tool_cards_collapsed: false, // Start with tool cards expanded
+            tool_card_individual_states: HashMap::new(),
             
             // Undo/redo for chat input
             input_undo_stack: Vec::new(),

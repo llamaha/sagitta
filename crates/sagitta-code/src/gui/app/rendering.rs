@@ -1254,6 +1254,8 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 &app.state.current_token_usage,
                 // Stop/Cancel request
                 &mut app.state.stop_requested,
+                // Tool card collapse state
+                &mut app.state.tool_cards_collapsed,
             );
             
             // Handle repository refresh request
@@ -1524,7 +1526,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 let items = app.chat_manager.get_all_items();
                 
                 // Check for tool clicks
-                if let Some((tool_name, tool_args)) = modern_chat_view_ui(ui, &items, app.state.current_theme, &mut app.state.copy_button_state, &app.state.running_tools, &mut app.state.collapsed_thinking, &app.state.tool_results) {
+                if let Some((tool_name, tool_args)) = modern_chat_view_ui(ui, &items, app.state.current_theme, &mut app.state.copy_button_state, &app.state.running_tools, &mut app.state.collapsed_thinking, &app.state.tool_results, app.state.tool_cards_collapsed, &mut app.state.tool_card_individual_states) {
                     app.state.clicked_tool_info = Some((tool_name, tool_args));
                 }
             });

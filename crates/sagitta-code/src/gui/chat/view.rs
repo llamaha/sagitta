@@ -619,10 +619,11 @@ pub fn chat_view_ui(ui: &mut egui::Ui, messages: &[ChatMessage], app_theme: AppT
     let empty_running_tools = HashMap::new();
     let mut empty_collapsed_thinking = HashMap::new();
     let empty_tool_results = HashMap::new();
-    modern_chat_view_ui(ui, &chat_items, app_theme, copy_state, &empty_running_tools, &mut empty_collapsed_thinking, &empty_tool_results);
+    let mut empty_tool_card_states = HashMap::new();
+    modern_chat_view_ui(ui, &chat_items, app_theme, copy_state, &empty_running_tools, &mut empty_collapsed_thinking, &empty_tool_results, false, &mut empty_tool_card_states);
 }
 
-pub fn modern_chat_view_ui(ui: &mut egui::Ui, items: &[ChatItem], app_theme: AppTheme, copy_state: &mut CopyButtonState, running_tools: &HashMap<ToolRunId, RunningToolInfo>, collapsed_thinking: &mut HashMap<String, bool>, tool_results: &HashMap<String, String>) -> Option<(String, String)> {
+pub fn modern_chat_view_ui(ui: &mut egui::Ui, items: &[ChatItem], app_theme: AppTheme, copy_state: &mut CopyButtonState, running_tools: &HashMap<ToolRunId, RunningToolInfo>, collapsed_thinking: &mut HashMap<String, bool>, tool_results: &HashMap<String, String>, tool_cards_collapsed: bool, tool_card_individual_states: &mut HashMap<String, bool>) -> Option<(String, String)> {
     // Use the app theme's colors directly
     let bg_color = app_theme.panel_background();
     let _text_color = app_theme.text_color();
@@ -694,13 +695,13 @@ pub fn modern_chat_view_ui(ui: &mut egui::Ui, items: &[ChatItem], app_theme: App
                             ChatItem::Message(message) => {
                                 // Render individual messages
                                 let messages_group = vec![message];
-                                if let Some(tool_info) = render_message_group(ui, &messages_group, &bg_color, total_width - 32.0, app_theme, copy_state, running_tools, collapsed_thinking) {
+                                if let Some(tool_info) = render_message_group(ui, &messages_group, &bg_color, total_width - 32.0, app_theme, copy_state, running_tools, collapsed_thinking, tool_cards_collapsed, tool_card_individual_states) {
                                     clicked_tool = Some(tool_info);
                                 }
                             }
                             ChatItem::ToolCard(tool_card) => {
                                 // Render tool card
-                                if let Some(tool_info) = render_tool_card(ui, tool_card, &bg_color, total_width - 32.0, app_theme, running_tools, copy_state) {
+                                if let Some(tool_info) = render_tool_card(ui, tool_card, &bg_color, total_width - 32.0, app_theme, running_tools, copy_state, tool_cards_collapsed, tool_card_individual_states) {
                                     clicked_tool = Some(tool_info);
                                 }
                             }
@@ -762,6 +763,8 @@ fn render_message_group(
     copy_state: &mut CopyButtonState,
     running_tools: &HashMap<ToolRunId, RunningToolInfo>,
     collapsed_thinking: &mut HashMap<String, bool>,
+    tool_cards_collapsed: bool,
+    tool_card_individual_states: &mut HashMap<String, bool>,
 ) -> Option<(String, String)> {
     if message_group.is_empty() {
         return None;
@@ -874,14 +877,14 @@ fn render_message_group(
                 ui.vertical(|ui| {
                     ui.set_max_width(total_width - 80.0); // Leave space for timestamp
                     
-                    if let Some(tool_info) = render_single_message_content(ui, message, bg_color, total_width - 80.0, app_theme, running_tools, copy_state, collapsed_thinking) {
+                    if let Some(tool_info) = render_single_message_content(ui, message, bg_color, total_width - 80.0, app_theme, running_tools, copy_state, collapsed_thinking, tool_cards_collapsed, tool_card_individual_states) {
                         clicked_tool = Some(tool_info);
                     }
                 });
             });
         } else {
             // Single message in group - use full width
-            if let Some(tool_info) = render_single_message_content(ui, message, bg_color, total_width, app_theme, running_tools, copy_state, collapsed_thinking) {
+            if let Some(tool_info) = render_single_message_content(ui, message, bg_color, total_width, app_theme, running_tools, copy_state, collapsed_thinking, tool_cards_collapsed, tool_card_individual_states) {
                 clicked_tool = Some(tool_info);
             }
         }
@@ -921,6 +924,8 @@ fn render_single_message_content(
     running_tools: &HashMap<ToolRunId, RunningToolInfo>,
     copy_state: &mut CopyButtonState,
     collapsed_thinking: &mut HashMap<String, bool>,
+    tool_cards_collapsed: bool,
+    tool_card_individual_states: &mut HashMap<String, bool>,
 ) -> Option<(String, String)> {
     let mut clicked_tool = None;
     
@@ -953,7 +958,7 @@ fn render_single_message_content(
         
         // Render the tool call
         ui.add_space(1.0);
-        if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state) {
+        if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state, tool_cards_collapsed, tool_card_individual_states) {
             clicked_tool = Some(tool_info);
         }
         ui.add_space(1.0);
@@ -979,7 +984,7 @@ fn render_single_message_content(
     if !unpositioned_tools.is_empty() {
         ui.add_space(1.0);
         for tool_call in unpositioned_tools {
-            if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state) {
+            if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state, tool_cards_collapsed, tool_card_individual_states) {
                 clicked_tool = Some(tool_info);
             }
             ui.add_space(4.0);
@@ -1091,7 +1096,7 @@ fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, _bg_color: &
 }
 
 /// Render a single tool call as a compact, clickable card
-fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, _copy_state: &mut CopyButtonState) -> Option<(String, String)> {
+fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, _copy_state: &mut CopyButtonState, tool_cards_collapsed: bool, tool_card_individual_states: &mut HashMap<String, bool>) -> Option<(String, String)> {
     let mut clicked_tool_result = None;
     
     // Limit tool card width to 90% of max_width
@@ -1158,9 +1163,19 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
         
         // Use CollapsingHeader for the tool card
         let id = egui::Id::new(&tool_call.id);
+        
+        // Determine if this tool card should be open based on global and individual state
+        let should_be_open = if let Some(&individual_state) = tool_card_individual_states.get(&tool_call.id) {
+            // Individual state overrides global state
+            !individual_state // individual_state true means collapsed, so we invert for open
+        } else {
+            // Use global state
+            !tool_cards_collapsed // tool_cards_collapsed true means collapsed, so we invert for open
+        };
+        
         let mut collapsing_response = egui::CollapsingHeader::new(header_text)
             .id_salt(id)
-            .default_open(false) // Default to collapsed
+            .default_open(should_be_open)
             .show(ui, |ui| {
                     // Add progress bar for running tools
                     if tool_call.status == MessageStatus::Streaming {
@@ -1318,6 +1333,13 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
                 }
             });
         
+        // Check if the user manually toggled this tool card
+        if collapsing_response.header_response.clicked() {
+            // User clicked the header - track their preference
+            let is_currently_open = collapsing_response.openness > 0.5;
+            tool_card_individual_states.insert(tool_call.id.clone(), !is_currently_open); // Store collapsed state (inverted from open)
+        }
+        
         // Add tooltip to the header if we have parameter info
         if !tooltip_text.is_empty() {
             collapsing_response.header_response = collapsing_response.header_response.on_hover_text(tooltip_text);
@@ -1328,11 +1350,11 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
 }
 
 /// Render tool calls as compact, clickable cards (for backward compatibility)
-fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, copy_state: &mut CopyButtonState) -> Option<(String, String)> {
+fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, copy_state: &mut CopyButtonState, tool_cards_collapsed: bool, tool_card_individual_states: &mut HashMap<String, bool>) -> Option<(String, String)> {
     let mut clicked_tool_result = None;
     
     for tool_call in tool_calls {
-        if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state) {
+        if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state, tool_cards_collapsed, tool_card_individual_states) {
             clicked_tool_result = Some(tool_info);
         }
         ui.add_space(4.0); // Spacing between tool cards
@@ -1342,7 +1364,7 @@ fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Co
 }
 
 /// Render a standalone tool card
-fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_width: f32, app_theme: AppTheme, _running_tools: &HashMap<ToolRunId, RunningToolInfo>, _copy_state: &mut CopyButtonState) -> Option<(String, String)> {
+fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_width: f32, app_theme: AppTheme, _running_tools: &HashMap<ToolRunId, RunningToolInfo>, _copy_state: &mut CopyButtonState, tool_cards_collapsed: bool, tool_card_individual_states: &mut HashMap<String, bool>) -> Option<(String, String)> {
     let mut clicked_tool_result = None;
     
     // Limit tool card width to 90% of max_width
@@ -1394,11 +1416,24 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
             tooltip_text.push_str(&format!("\nDuration: {:.1}s", duration.num_milliseconds() as f64 / 1000.0));
         }
         
-        // Use CollapsingHeader for the tool card (but default to open for standalone cards)
+        // Use CollapsingHeader for the tool card
         let id = egui::Id::new(tool_card.run_id);
+        
+        // Use the run_id as the key for individual state tracking
+        let tool_card_key = tool_card.run_id.to_string();
+        
+        // Determine if this tool card should be open based on global and individual state
+        let should_be_open = if let Some(&individual_state) = tool_card_individual_states.get(&tool_card_key) {
+            // Individual state overrides global state
+            !individual_state // individual_state true means collapsed, so we invert for open
+        } else {
+            // Use global state
+            !tool_cards_collapsed // tool_cards_collapsed true means collapsed, so we invert for open
+        };
+        
         let mut collapsing_response = egui::CollapsingHeader::new(header_text)
             .id_salt(id)
-            .default_open(true) // Default to open for standalone tool cards
+            .default_open(should_be_open)
             .show(ui, |ui| {
                     // Show progress bar if running
                     if tool_card.status == ToolCardStatus::Running {
@@ -1544,6 +1579,13 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
                 }
             }
         });
+        
+        // Check if the user manually toggled this tool card
+        if collapsing_response.header_response.clicked() {
+            // User clicked the header - track their preference
+            let is_currently_open = collapsing_response.openness > 0.5;
+            tool_card_individual_states.insert(tool_card_key, !is_currently_open); // Store collapsed state (inverted from open)
+        }
         
         // Add tooltip to the header if we have parameter info
         if !tooltip_text.is_empty() {
