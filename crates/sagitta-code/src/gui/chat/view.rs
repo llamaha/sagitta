@@ -1266,7 +1266,7 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
                             };
                             
                             egui::ScrollArea::vertical()
-                                .max_height(400.0)
+                                .max_height(1000.0)  // Increased height for better readability
                                 .min_scrolled_height(min_height)
                                 .id_salt(format!("tool_result_{}", tool_call.id))
                                 .auto_shrink([false, false])  // Don't auto-shrink to preserve content visibility
@@ -1496,7 +1496,7 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
                         };
                         
                         egui::ScrollArea::vertical()
-                            .max_height(400.0)  // Reduced from 600 for better UI
+                            .max_height(1000.0)  // Increased height for better readability
                             .min_scrolled_height(min_height)
                             .id_salt(format!("tool_result_{}", tool_card.run_id))
                             .auto_shrink([false, false])  // Don't auto-shrink to preserve content visibility
