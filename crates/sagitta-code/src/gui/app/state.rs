@@ -227,6 +227,7 @@ impl AppState {
         match provider_type {
             ProviderType::ClaudeCode => "Claude Code",
             ProviderType::MistralRs => "Mistral.rs",
+            ProviderType::OpenAICompatible => "OpenAI Compatible",
         }
     }
 

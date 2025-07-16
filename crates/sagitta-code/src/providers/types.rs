@@ -10,10 +10,11 @@ pub enum ProviderType {
     ClaudeCode,
     /// Mistral.rs provider (OpenAI-compatible API)
     MistralRs,
+    /// Generic OpenAI-compatible provider
+    OpenAICompatible,
     // Future providers (commented out for now):
     // Gemini,
     // LlamaCpp,
-    // OpenRouter,
 }
 
 impl ProviderType {
@@ -22,6 +23,7 @@ impl ProviderType {
         match self {
             ProviderType::ClaudeCode => "Claude Code",
             ProviderType::MistralRs => "Mistral.rs",
+            ProviderType::OpenAICompatible => "OpenAI Compatible",
         }
     }
     
@@ -30,6 +32,7 @@ impl ProviderType {
         match self {
             ProviderType::ClaudeCode => "claude-code",
             ProviderType::MistralRs => "mistral-rs",
+            ProviderType::OpenAICompatible => "openai-compatible",
         }
     }
     
@@ -38,6 +41,7 @@ impl ProviderType {
         vec![
             ProviderType::ClaudeCode,
             ProviderType::MistralRs,
+            ProviderType::OpenAICompatible,
         ]
     }
 }
@@ -80,6 +84,7 @@ impl ProviderConfig {
         match provider_type {
             ProviderType::ClaudeCode => ClaudeCodeConfig::default().into(),
             ProviderType::MistralRs => MistralRsConfig::default().into(),
+            ProviderType::OpenAICompatible => OpenAICompatibleConfig::default().into(),
         }
     }
     
@@ -171,6 +176,33 @@ impl Default for MistralRsConfig {
     }
 }
 
+/// OpenAI-compatible provider configuration options
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenAICompatibleConfig {
+    /// Base URL for the OpenAI-compatible API
+    pub base_url: String,
+    /// Optional API key for authentication
+    pub api_key: Option<String>,
+    /// Optional model to use (uses server default if not specified)
+    pub model: Option<String>,
+    /// Timeout for HTTP requests in seconds
+    pub timeout_seconds: u64,
+    /// Maximum number of retries on failure
+    pub max_retries: u32,
+}
+
+impl Default for OpenAICompatibleConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "http://localhost:1234/v1".to_string(),
+            api_key: None,
+            model: None,
+            timeout_seconds: 120, // 2 minutes
+            max_retries: 3,
+        }
+    }
+}
+
 /// Converts a ClaudeCodeConfig to a generic ProviderConfig
 impl From<ClaudeCodeConfig> for ProviderConfig {
     fn from(config: ClaudeCodeConfig) -> Self {
@@ -257,6 +289,55 @@ impl TryFrom<ProviderConfig> for MistralRsConfig {
     
     fn try_from(config: ProviderConfig) -> Result<Self, Self::Error> {
         MistralRsConfig::try_from(&config)
+    }
+}
+
+/// Converts an OpenAICompatibleConfig to a generic ProviderConfig
+impl From<OpenAICompatibleConfig> for ProviderConfig {
+    fn from(config: OpenAICompatibleConfig) -> Self {
+        let mut provider_config = ProviderConfig::new(ProviderType::OpenAICompatible);
+        provider_config.set_option("base_url", &config.base_url).unwrap();
+        // Only set api_key if it's Some
+        if let Some(ref api_key) = config.api_key {
+            provider_config.set_option("api_key", api_key).unwrap();
+        }
+        provider_config.set_option("timeout_seconds", config.timeout_seconds).unwrap();
+        provider_config.set_option("max_retries", config.max_retries).unwrap();
+        // Only set model if it's Some
+        if let Some(ref model) = config.model {
+            provider_config.set_option("model", model).unwrap();
+        }
+        provider_config
+    }
+}
+
+/// Converts a generic ProviderConfig to an OpenAICompatibleConfig
+impl TryFrom<&ProviderConfig> for OpenAICompatibleConfig {
+    type Error = ConfigError;
+    
+    fn try_from(config: &ProviderConfig) -> Result<Self, Self::Error> {
+        if config.provider_type != ProviderType::OpenAICompatible {
+            return Err(ConfigError::InvalidValue(
+                format!("Expected OpenAICompatible provider, got {:?}", config.provider_type)
+            ));
+        }
+        
+        Ok(OpenAICompatibleConfig {
+            base_url: config.get_required_option("base_url")?,
+            api_key: config.get_option("api_key")?,
+            model: config.get_option("model")?,
+            timeout_seconds: config.get_option("timeout_seconds")?.unwrap_or(120),
+            max_retries: config.get_option("max_retries")?.unwrap_or(3),
+        })
+    }
+}
+
+/// Converts an owned ProviderConfig to an OpenAICompatibleConfig
+impl TryFrom<ProviderConfig> for OpenAICompatibleConfig {
+    type Error = ConfigError;
+    
+    fn try_from(config: ProviderConfig) -> Result<Self, Self::Error> {
+        OpenAICompatibleConfig::try_from(&config)
     }
 }
 

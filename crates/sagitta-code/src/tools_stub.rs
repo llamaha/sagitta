@@ -4,7 +4,9 @@ use std::sync::Arc;
 use serde::{Serialize, Deserialize};
 use tokio::sync::mpsc;
 
-/// Stub tool registry - no actual tools
+pub mod mcp_bridge;
+
+/// Tool registry that bridges MCP tools
 pub struct ToolRegistry;
 
 impl Default for ToolRegistry {
@@ -19,7 +21,10 @@ impl ToolRegistry {
     }
     
     pub async fn get_definitions(&self) -> Vec<crate::llm::client::ToolDefinition> {
-        vec![] // No tools - they come from MCP
+        // Return MCP tool definitions for non-Claude providers
+        let definitions = mcp_bridge::get_mcp_tool_definitions();
+        log::info!("ToolRegistry::get_definitions returning {} MCP tool definitions", definitions.len());
+        definitions
     }
 }
 

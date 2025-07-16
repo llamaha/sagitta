@@ -97,6 +97,21 @@ impl ProviderSetupDialog {
                 };
                 mistral_config.into()
             },
+            ProviderType::OpenAICompatible => {
+                // For now, treat OpenAICompatible the same as MistralRs
+                let openai_config = crate::providers::types::OpenAICompatibleConfig {
+                    base_url: self.mistral_base_url.clone(),
+                    api_key: if self.mistral_api_key.trim().is_empty() { 
+                        None 
+                    } else { 
+                        Some(self.mistral_api_key.clone()) 
+                    },
+                    model: None,
+                    timeout_seconds: 120,
+                    max_retries: 3,
+                };
+                openai_config.into()
+            },
         };
         
         (self.selected_provider, config)
@@ -128,9 +143,9 @@ impl ProviderSetupDialog {
                 // We assume it's properly configured if selected
                 Ok(())
             },
-            ProviderType::MistralRs => {
+            ProviderType::MistralRs | ProviderType::OpenAICompatible => {
                 if self.mistral_base_url.trim().is_empty() {
-                    return Err("Base URL is required for Mistral.rs".to_string());
+                    return Err("Base URL is required".to_string());
                 }
                 
                 // Basic URL validation
@@ -271,7 +286,7 @@ impl ProviderSetupDialog {
                                     .size(12.0)
                                     .color(theme.hint_text_color()));
                             },
-                            ProviderType::MistralRs => {
+                            ProviderType::MistralRs | ProviderType::OpenAICompatible => {
                                 Grid::new("mistral_setup_grid")
                                     .num_columns(2)
                                     .spacing([8.0, 8.0])
