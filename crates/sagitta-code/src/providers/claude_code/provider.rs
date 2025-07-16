@@ -46,8 +46,12 @@ impl ClaudeCodeProvider {
             output_format: "text".to_string(), // Default format
             input_format: "text".to_string(), // Default format
             dangerously_skip_permissions: false,
-            allowed_tools: vec![], // Provider config doesn't have this
-            disallowed_tools: vec![], // Provider config doesn't have this
+            allowed_tools: config.get_option::<Vec<String>>("allowed_tools")
+                .unwrap_or_else(|_| None)
+                .unwrap_or_default(),
+            disallowed_tools: config.get_option::<Vec<String>>("disallowed_tools")
+                .unwrap_or_else(|_| None)
+                .unwrap_or_default(),
             additional_directories: vec![], // Provider config doesn't have this
             mcp_config: None, // Will be set up by client
             auto_ide: false, // Provider config doesn't have this
@@ -81,9 +85,41 @@ impl Provider for ClaudeCodeProvider {
         // Create the Claude Code client
         let mut client = ClaudeCodeClient::new(&sagitta_config)?;
         
-        // Initialize with MCP integration - we'll need to modify ClaudeCodeClient
-        // to accept the shared MCP integration instead of creating its own
-        // For now, let the client manage its own MCP
+        // Initialize MCP integration in a way that works in both sync and async contexts
+        // We use a new runtime if we're not already in one
+        let mcp_init_result = if tokio::runtime::Handle::try_current().is_ok() {
+            // We're in an async context, use block_in_place if possible
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                match handle.runtime_flavor() {
+                    tokio::runtime::RuntimeFlavor::MultiThread => {
+                        // Multi-threaded runtime, can use block_in_place
+                        tokio::task::block_in_place(|| {
+                            handle.block_on(client.initialize_mcp(None))
+                        })
+                    }
+                    _ => {
+                        // Single-threaded runtime, create a new runtime
+                        let rt = tokio::runtime::Runtime::new()
+                            .map_err(|e| SagittaCodeError::ConfigError(format!("Failed to create runtime: {e}")))?;
+                        rt.block_on(client.initialize_mcp(None))
+                    }
+                }
+            } else {
+                // Shouldn't happen, but handle it
+                let rt = tokio::runtime::Runtime::new()
+                    .map_err(|e| SagittaCodeError::ConfigError(format!("Failed to create runtime: {e}")))?;
+                rt.block_on(client.initialize_mcp(None))
+            }
+        } else {
+            // No async context, create a new runtime
+            let rt = tokio::runtime::Runtime::new()
+                .map_err(|e| SagittaCodeError::ConfigError(format!("Failed to create runtime: {e}")))?;
+            rt.block_on(client.initialize_mcp(None))
+        };
+        
+        if let Err(e) = mcp_init_result {
+            log::warn!("Failed to initialize MCP integration: {e}. Tool calls may not work.");
+        }
         
         Ok(Box::new(client))
     }

@@ -46,9 +46,13 @@ pub fn chat_input_ui(
     current_token_usage: &Option<crate::llm::client::TokenUsage>,
     // Stop/Cancel callback
     stop_requested: &mut bool,
+    // Tool card collapse state
+    tool_cards_collapsed: &mut bool,
+    tool_card_individual_states: &mut std::collections::HashMap<String, bool>,
 ) -> Option<egui::Id> {
     // Handle key events before the text edit widget to manually process Ctrl+Enter
     let mut new_line_added = false;
+    let mut cursor_pos_to_set: Option<usize> = None;
     
     // Process raw events to catch Ctrl+Enter before the TextEdit widget does
     ui.input_mut(|input| {
@@ -56,9 +60,10 @@ pub fn chat_input_ui(
         
         for event_index in 0..input.events.len() {
             if let Event::Key { key, pressed, modifiers, .. } = &input.events[event_index] {
-                if *key == Key::Enter && *pressed && modifiers.ctrl {
-                    // Add a newline manually
+                if *key == Key::Enter && *pressed && (modifiers.ctrl || modifiers.command) {
+                    // Add a newline manually and remember cursor position
                     input_buffer.push('\n');
+                    cursor_pos_to_set = Some(input_buffer.len()); // Position cursor at end (after the newline)
                     new_line_added = true;
                     events_to_eat.push(event_index);
                 }
@@ -246,6 +251,29 @@ pub fn chat_input_ui(
                     *show_hotkeys_modal = !*show_hotkeys_modal;
                 }
                 
+                ui.add_space(4.0);
+                
+                // Tool card collapse/expand toggle button
+                let toggle_icon = if *tool_cards_collapsed { "+" } else { "−" };
+                let toggle_label = RichText::new(toggle_icon)
+                    .color(accent_color)
+                    .small();
+                
+                let tooltip_text = if *tool_cards_collapsed {
+                    "Results are collapsed"
+                } else {
+                    "Results are uncollapsed"
+                };
+                
+                if ui.small_button(toggle_label)
+                    .on_hover_text(tooltip_text)
+                    .clicked() 
+                {
+                    *tool_cards_collapsed = !*tool_cards_collapsed;
+                    // Clear individual overrides so ALL cards follow the new global state
+                    tool_card_individual_states.clear();
+                }
+                
                 ui.add_space(8.0);
                 
                 // Show character count on the right
@@ -374,6 +402,15 @@ pub fn chat_input_ui(
                             let response = ui.add(text_edit);
                             text_edit_id = Some(response.id);
                             
+                            // Set cursor position if we added a newline with Ctrl+Enter
+                            if let Some(cursor_pos) = cursor_pos_to_set {
+                                if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), response.id) {
+                                    let ccursor = egui::text::CCursor::new(cursor_pos);
+                                    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(ccursor)));
+                                    state.store(ui.ctx(), response.id);
+                                }
+                            }
+                            
                             // Handle Enter key for submission
                             if input_enabled && response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)) && !new_line_added
                                 && !input_buffer.trim().is_empty() {
@@ -399,6 +436,15 @@ pub fn chat_input_ui(
                     let response = ui.add(text_edit);
                     text_edit_id = Some(response.id);
                     
+                    // Set cursor position if we added a newline with Ctrl+Enter
+                    if let Some(cursor_pos) = cursor_pos_to_set {
+                        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), response.id) {
+                            let ccursor = egui::text::CCursor::new(cursor_pos);
+                            state.cursor.set_char_range(Some(egui::text::CCursorRange::one(ccursor)));
+                            state.store(ui.ctx(), response.id);
+                        }
+                    }
+                    
                     // Request focus when needed (cursor should be visible without ScrollArea)
                     if *should_focus_input && input_enabled {
                         response.request_focus();
@@ -420,7 +466,7 @@ pub fn chat_input_ui(
         // Bottom controls
         ui.horizontal(|ui| {
             // Left side - keyboard shortcuts hint
-            ui.small(RichText::new("Enter: Send • Ctrl+Enter: New line • F1: Menu").color(hint_color));
+            ui.small(RichText::new("Enter: Send • Ctrl+Enter: New line • Ctrl+H: Toggle results • F1: Menu").color(hint_color));
 
             // Right side - buttons
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

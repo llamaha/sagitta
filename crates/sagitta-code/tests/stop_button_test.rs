@@ -41,6 +41,8 @@ mod tests {
                 let mut should_focus = false;
                 let token_usage = None;
                 let mut stop_requested = false;
+                let mut tool_cards_collapsed = false;
+                let mut tool_card_individual_states = std::collections::HashMap::new();
                 
                 chat_input_ui(
                     ui,
@@ -66,6 +68,8 @@ mod tests {
                     &mut should_focus,
                     &token_usage,
                     &mut stop_requested,
+                    &mut tool_cards_collapsed,
+                    &mut tool_card_individual_states,
                 );
                 
                 stop_requested

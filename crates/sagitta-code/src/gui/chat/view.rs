@@ -13,6 +13,9 @@ use egui::{
     Layout,
     CornerRadius,
 };
+
+pub mod collapsing_header_helper;
+use collapsing_header_helper::{create_controlled_collapsing_header, get_tool_card_state};
 use syntect::{
     highlighting::{ThemeSet, Style as SyntectStyle},
     parsing::SyntaxSet,
@@ -95,6 +98,129 @@ fn get_human_friendly_tool_name(raw_name: &str) -> String {
 }
 
 /// Format tool parameters for display in the UI
+// Format tool parameters for inline display (excludes edit details)
+fn format_tool_parameters_for_inline(tool_name: &str, args: &serde_json::Value) -> Vec<(String, String)> {
+    let mut params = Vec::new();
+    
+    if let Some(obj) = args.as_object() {
+        // Special handling for common tools
+        match tool_name {
+            name if name.contains("__query") => {
+                // Check both camelCase (MCP style) and snake_case parameter names
+                if let Some(query) = obj.get("queryText").and_then(|v| v.as_str())
+                    .or_else(|| obj.get("query").and_then(|v| v.as_str())) {
+                    params.push(("query".to_string(), format!("\"{}\"", query)));
+                }
+                if let Some(repo) = obj.get("repository").and_then(|v| v.as_str()) {
+                    params.push(("repo".to_string(), repo.to_string()));
+                }
+            },
+            name if name == "Read" || name == "Write" || name.contains("__read_file") 
+                || name.contains("__write_file") || name.contains("__view_file") => {
+                // Check both camelCase (MCP style) and snake_case parameter names
+                if let Some(path) = obj.get("filePath").and_then(|v| v.as_str())
+                    .or_else(|| obj.get("file_path").and_then(|v| v.as_str())) {
+                    params.push(("file".to_string(), path.to_string()));
+                }
+            },
+            name if name == "Edit" || name.contains("__edit_file") => {
+                // For edit tools, only show file path, not the edit details
+                if let Some(path) = obj.get("filePath").and_then(|v| v.as_str())
+                    .or_else(|| obj.get("file_path").and_then(|v| v.as_str())) {
+                    params.push(("file".to_string(), path.to_string()));
+                }
+            },
+            "MultiEdit" => {
+                // For MultiEdit, show file and number of edits but not the edit details
+                if let Some(path) = obj.get("file_path").and_then(|v| v.as_str()) {
+                    params.push(("file".to_string(), path.to_string()));
+                }
+                if let Some(edits) = obj.get("edits").and_then(|v| v.as_array()) {
+                    params.push(("edits".to_string(), edits.len().to_string()));
+                }
+            },
+            "Bash" => {
+                if let Some(cmd) = obj.get("command").and_then(|v| v.as_str()) {
+                    // Truncate very long commands for inline display
+                    let display_cmd = if cmd.len() > 40 {
+                        format!("{}...", &cmd[..37])
+                    } else {
+                        cmd.to_string()
+                    };
+                    params.push(("cmd".to_string(), format!("\"{}\"", display_cmd)));
+                }
+            },
+            "Grep" => {
+                if let Some(pattern) = obj.get("pattern").and_then(|v| v.as_str()) {
+                    params.push(("pattern".to_string(), format!("\"{}\"", pattern)));
+                }
+                if let Some(path) = obj.get("path").and_then(|v| v.as_str()) {
+                    params.push(("path".to_string(), path.to_string()));
+                }
+            },
+            "Glob" => {
+                if let Some(pattern) = obj.get("pattern").and_then(|v| v.as_str()) {
+                    params.push(("pattern".to_string(), format!("\"{}\"", pattern)));
+                }
+                if let Some(path) = obj.get("path").and_then(|v| v.as_str()) {
+                    params.push(("path".to_string(), path.to_string()));
+                }
+            },
+            "WebSearch" => {
+                if let Some(query) = obj.get("query").and_then(|v| v.as_str()) {
+                    params.push(("query".to_string(), format!("\"{}\"", query)));
+                }
+            },
+            "WebFetch" => {
+                if let Some(url) = obj.get("url").and_then(|v| v.as_str()) {
+                    // Truncate very long URLs for inline display
+                    let display_url = if url.len() > 30 {
+                        format!("{}...", &url[..27])
+                    } else {
+                        url.to_string()
+                    };
+                    params.push(("url".to_string(), display_url));
+                }
+            },
+            "TodoRead" => {
+                // TodoRead has no parameters
+            },
+            "TodoWrite" => {
+                if let Some(todos) = obj.get("todos").and_then(|v| v.as_array()) {
+                    params.push(("tasks".to_string(), todos.len().to_string()));
+                }
+            },
+            _ => {
+                // For unknown tools, show a limited set of key parameters
+                // Exclude complex objects and arrays from inline display
+                for (key, value) in obj {
+                    if params.len() >= 3 { break; } // Limit to 3 params for readability
+                    
+                    match value {
+                        serde_json::Value::String(s) => {
+                            let display_value = if s.len() > 30 {
+                                format!("\"{}...\"", &s[..27])
+                            } else {
+                                format!("\"{}\"", s)
+                            };
+                            params.push((key.clone(), display_value));
+                        },
+                        serde_json::Value::Number(n) => {
+                            params.push((key.clone(), n.to_string()));
+                        },
+                        serde_json::Value::Bool(b) => {
+                            params.push((key.clone(), b.to_string()));
+                        },
+                        _ => {} // Skip complex types for inline display
+                    }
+                }
+            }
+        }
+    }
+    
+    params
+}
+
 fn format_tool_parameters(tool_name: &str, args: &serde_json::Value) -> Vec<(String, String)> {
     let mut params = Vec::new();
     
@@ -496,10 +622,11 @@ pub fn chat_view_ui(ui: &mut egui::Ui, messages: &[ChatMessage], app_theme: AppT
     let empty_running_tools = HashMap::new();
     let mut empty_collapsed_thinking = HashMap::new();
     let empty_tool_results = HashMap::new();
-    modern_chat_view_ui(ui, &chat_items, app_theme, copy_state, &empty_running_tools, &mut empty_collapsed_thinking, &empty_tool_results);
+    let mut empty_tool_card_states = HashMap::new();
+    modern_chat_view_ui(ui, &chat_items, app_theme, copy_state, &empty_running_tools, &mut empty_collapsed_thinking, &empty_tool_results, false, &mut empty_tool_card_states);
 }
 
-pub fn modern_chat_view_ui(ui: &mut egui::Ui, items: &[ChatItem], app_theme: AppTheme, copy_state: &mut CopyButtonState, running_tools: &HashMap<ToolRunId, RunningToolInfo>, collapsed_thinking: &mut HashMap<String, bool>, tool_results: &HashMap<String, String>) -> Option<(String, String)> {
+pub fn modern_chat_view_ui(ui: &mut egui::Ui, items: &[ChatItem], app_theme: AppTheme, copy_state: &mut CopyButtonState, running_tools: &HashMap<ToolRunId, RunningToolInfo>, collapsed_thinking: &mut HashMap<String, bool>, tool_results: &HashMap<String, String>, tool_cards_collapsed: bool, tool_card_individual_states: &mut HashMap<String, bool>) -> Option<(String, String)> {
     // Use the app theme's colors directly
     let bg_color = app_theme.panel_background();
     let _text_color = app_theme.text_color();
@@ -571,13 +698,13 @@ pub fn modern_chat_view_ui(ui: &mut egui::Ui, items: &[ChatItem], app_theme: App
                             ChatItem::Message(message) => {
                                 // Render individual messages
                                 let messages_group = vec![message];
-                                if let Some(tool_info) = render_message_group(ui, &messages_group, &bg_color, total_width - 32.0, app_theme, copy_state, running_tools, collapsed_thinking) {
+                                if let Some(tool_info) = render_message_group(ui, &messages_group, &bg_color, total_width - 32.0, app_theme, copy_state, running_tools, collapsed_thinking, tool_cards_collapsed, tool_card_individual_states) {
                                     clicked_tool = Some(tool_info);
                                 }
                             }
                             ChatItem::ToolCard(tool_card) => {
                                 // Render tool card
-                                if let Some(tool_info) = render_tool_card(ui, tool_card, &bg_color, total_width - 32.0, app_theme, running_tools, copy_state) {
+                                if let Some(tool_info) = render_tool_card(ui, tool_card, &bg_color, total_width - 32.0, app_theme, running_tools, copy_state, tool_cards_collapsed, tool_card_individual_states) {
                                     clicked_tool = Some(tool_info);
                                 }
                             }
@@ -639,6 +766,8 @@ fn render_message_group(
     copy_state: &mut CopyButtonState,
     running_tools: &HashMap<ToolRunId, RunningToolInfo>,
     collapsed_thinking: &mut HashMap<String, bool>,
+    tool_cards_collapsed: bool,
+    tool_card_individual_states: &mut HashMap<String, bool>,
 ) -> Option<(String, String)> {
     if message_group.is_empty() {
         return None;
@@ -751,14 +880,14 @@ fn render_message_group(
                 ui.vertical(|ui| {
                     ui.set_max_width(total_width - 80.0); // Leave space for timestamp
                     
-                    if let Some(tool_info) = render_single_message_content(ui, message, bg_color, total_width - 80.0, app_theme, running_tools, copy_state, collapsed_thinking) {
+                    if let Some(tool_info) = render_single_message_content(ui, message, bg_color, total_width - 80.0, app_theme, running_tools, copy_state, collapsed_thinking, tool_cards_collapsed, tool_card_individual_states) {
                         clicked_tool = Some(tool_info);
                     }
                 });
             });
         } else {
             // Single message in group - use full width
-            if let Some(tool_info) = render_single_message_content(ui, message, bg_color, total_width, app_theme, running_tools, copy_state, collapsed_thinking) {
+            if let Some(tool_info) = render_single_message_content(ui, message, bg_color, total_width, app_theme, running_tools, copy_state, collapsed_thinking, tool_cards_collapsed, tool_card_individual_states) {
                 clicked_tool = Some(tool_info);
             }
         }
@@ -798,6 +927,8 @@ fn render_single_message_content(
     running_tools: &HashMap<ToolRunId, RunningToolInfo>,
     copy_state: &mut CopyButtonState,
     collapsed_thinking: &mut HashMap<String, bool>,
+    tool_cards_collapsed: bool,
+    tool_card_individual_states: &mut HashMap<String, bool>,
 ) -> Option<(String, String)> {
     let mut clicked_tool = None;
     
@@ -830,7 +961,7 @@ fn render_single_message_content(
         
         // Render the tool call
         ui.add_space(1.0);
-        if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state) {
+        if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state, tool_cards_collapsed, tool_card_individual_states) {
             clicked_tool = Some(tool_info);
         }
         ui.add_space(1.0);
@@ -856,7 +987,7 @@ fn render_single_message_content(
     if !unpositioned_tools.is_empty() {
         ui.add_space(1.0);
         for tool_call in unpositioned_tools {
-            if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state) {
+            if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state, tool_cards_collapsed, tool_card_individual_states) {
                 clicked_tool = Some(tool_info);
             }
             ui.add_space(4.0);
@@ -968,17 +1099,34 @@ fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, _bg_color: &
 }
 
 /// Render a single tool call as a compact, clickable card
-fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, _copy_state: &mut CopyButtonState) -> Option<(String, String)> {
+fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, _copy_state: &mut CopyButtonState, tool_cards_collapsed: bool, tool_card_individual_states: &mut HashMap<String, bool>) -> Option<(String, String)> {
     let mut clicked_tool_result = None;
     
     // Limit tool card width to 90% of max_width
     let tool_card_width = max_width * 0.9;
     
-    // Create a vertical layout with the constrained width
-    ui.vertical(|ui| {
-        ui.set_max_width(tool_card_width);
+    // Add some padding around the tool card
+    ui.add_space(2.0);
+    
+    // Create a simple, modern-looking frame without custom interaction handling
+    let frame_response = Frame::NONE
+        .fill(app_theme.tool_card_background())
+        .inner_margin(egui::Margin::same(12))
+        .corner_radius(egui::CornerRadius::same(6))
+        .stroke(Stroke::new(0.5, app_theme.border_color().linear_multiply(0.3)))
+        .shadow(egui::Shadow {
+            offset: [0, 2],
+            blur: 8,
+            spread: 0,
+            color: Color32::from_black_alpha(25),
+        })
+        .show(ui, |ui| {
+            
+            // Create a vertical layout with the constrained width
+            ui.vertical(|ui| {
+                ui.set_max_width(tool_card_width);
         
-        // Build the header text
+        // Build the header text with inline parameters
         let friendly_name = get_human_friendly_tool_name(&tool_call.name);
         let status_icon = match tool_call.status {
             MessageStatus::Complete => "✅",
@@ -987,7 +1135,34 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
             MessageStatus::Sending => "⏳",
             _ => "🔧",
         };
-        let header_text = format!("{status_icon} 🔧 {friendly_name}");
+        
+        // Get parameters for inline display (excluding edits for edit tools)
+        let inline_params = if !tool_call.arguments.is_empty() {
+            if let Ok(args_value) = serde_json::from_str::<serde_json::Value>(&tool_call.arguments) {
+                let params = format_tool_parameters_for_inline(&tool_call.name, &args_value);
+                if !params.is_empty() {
+                    let param_str = params.iter()
+                        .map(|(k, v)| format!("{}: {}", k, v))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!(" - {}", param_str)
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+        
+        // Format header text with tool icon and name
+        let header_text = format!("{status_icon} 🔧 {friendly_name}{inline_params}");
+        
+        // Apply tool color to the header for better visual distinction
+        let header_text_colored = egui::RichText::new(header_text)
+            .color(app_theme.tool_color())
+            .strong();
         
         // Create parameter tooltip text
         let mut tooltip_text = String::new();
@@ -1014,10 +1189,17 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
         
         // Use CollapsingHeader for the tool card
         let id = egui::Id::new(&tool_call.id);
-        let mut collapsing_response = egui::CollapsingHeader::new(header_text)
-            .id_salt(id)
-            .default_open(false) // Default to collapsed
-            .show(ui, |ui| {
+        
+        // Determine if this tool card should be open and if it has an override
+        let (should_be_open, has_override) = get_tool_card_state(&tool_call.id, tool_cards_collapsed, tool_card_individual_states);
+        
+        let mut collapsing_response = create_controlled_collapsing_header(
+            ui,
+            id,
+            header_text_colored,
+            should_be_open,
+            has_override,
+            |ui| {
                     // Add progress bar for running tools
                     if tool_call.status == MessageStatus::Streaming {
                         // Try to find running tool info to get actual progress
@@ -1113,16 +1295,19 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
                         
                         if needs_scroll {
                             // Large content - use scroll area
-                            let min_height = if actual_content_size > 0 {
+                            let min_height = if tool_call.name.contains("query") || tool_call.name.contains("search") {
+                                // For search results, ensure adequate height
+                                600.0
+                            } else if actual_content_size > 0 {
                                 // For file content, ensure a reasonable minimum height
-                                300.0f32.min(400.0)
+                                400.0
                             } else {
                                 // For other content, allow more flexible sizing
-                                100.0
+                                300.0
                             };
                             
                             egui::ScrollArea::vertical()
-                                .max_height(400.0)
+                                .max_height(1000.0)  // Increased height for better readability
                                 .min_scrolled_height(min_height)
                                 .id_salt(format!("tool_result_{}", tool_call.id))
                                 .auto_shrink([false, false])  // Don't auto-shrink to preserve content visibility
@@ -1172,43 +1357,69 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
                         ui.code(result_str);
                     }
                 }
-            });
+            },
+        );
+        
+        // Check if the user manually toggled this tool card
+        if collapsing_response.header_response.clicked() {
+            // User clicked the header - track their preference  
+            let new_collapsed_state = collapsing_response.openness < 0.5; // If openness < 0.5, it's collapsing
+            tool_card_individual_states.insert(tool_call.id.clone(), new_collapsed_state);
+        }
         
         // Add tooltip to the header if we have parameter info
         if !tooltip_text.is_empty() {
             collapsing_response.header_response = collapsing_response.header_response.on_hover_text(tooltip_text);
         }
     });
+        });
     
     clicked_tool_result
 }
 
 /// Render tool calls as compact, clickable cards (for backward compatibility)
-fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, copy_state: &mut CopyButtonState) -> Option<(String, String)> {
+fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, copy_state: &mut CopyButtonState, tool_cards_collapsed: bool, tool_card_individual_states: &mut HashMap<String, bool>) -> Option<(String, String)> {
     let mut clicked_tool_result = None;
     
     for tool_call in tool_calls {
-        if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state) {
+        if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state, tool_cards_collapsed, tool_card_individual_states) {
             clicked_tool_result = Some(tool_info);
         }
-        ui.add_space(4.0); // Spacing between tool cards
+        ui.add_space(8.0); // Spacing between tool cards
     }
     
     clicked_tool_result
 }
 
 /// Render a standalone tool card
-fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_width: f32, app_theme: AppTheme, _running_tools: &HashMap<ToolRunId, RunningToolInfo>, _copy_state: &mut CopyButtonState) -> Option<(String, String)> {
+fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_width: f32, app_theme: AppTheme, _running_tools: &HashMap<ToolRunId, RunningToolInfo>, _copy_state: &mut CopyButtonState, tool_cards_collapsed: bool, tool_card_individual_states: &mut HashMap<String, bool>) -> Option<(String, String)> {
     let mut clicked_tool_result = None;
     
     // Limit tool card width to 90% of max_width
     let tool_card_width = max_width * 0.9;
     
-    // Create a vertical layout with the constrained width
-    ui.vertical(|ui| {
-        ui.set_max_width(tool_card_width);
+    // Add some padding around the tool card
+    ui.add_space(2.0);
+    
+    // Create a simple, modern-looking frame without custom interaction handling
+    let frame_response = Frame::NONE
+        .fill(app_theme.tool_card_background())
+        .inner_margin(egui::Margin::same(12))
+        .corner_radius(egui::CornerRadius::same(6))
+        .stroke(Stroke::new(0.5, app_theme.border_color().linear_multiply(0.3)))
+        .shadow(egui::Shadow {
+            offset: [0, 2],
+            blur: 8,
+            spread: 0,
+            color: Color32::from_black_alpha(25),
+        })
+        .show(ui, |ui| {
+            
+            // Create a vertical layout with the constrained width
+            ui.vertical(|ui| {
+                ui.set_max_width(tool_card_width);
         
-        // Build the header text
+        // Build the header text with inline parameters
         let friendly_name = get_human_friendly_tool_name(&tool_card.tool_name);
         let status_icon = match tool_card.status {
             ToolCardStatus::Completed { success: true } => "✅",
@@ -1217,7 +1428,28 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
             ToolCardStatus::Running => "🔄",
             ToolCardStatus::Cancelled => "⏹️",
         };
-        let header_text = format!("{status_icon} 🔧 {friendly_name}");
+        
+        // Get parameters for inline display (excluding edits for edit tools)
+        let inline_params = {
+            let params = format_tool_parameters_for_inline(&tool_card.tool_name, &tool_card.input_params);
+            if !params.is_empty() {
+                let param_str = params.iter()
+                    .map(|(k, v)| format!("{}: {}", k, v))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(" - {}", param_str)
+            } else {
+                String::new()
+            }
+        };
+        
+        // Format header text with tool icon and name
+        let header_text = format!("{status_icon} 🔧 {friendly_name}{inline_params}");
+        
+        // Apply tool color to the header for better visual distinction
+        let header_text_colored = egui::RichText::new(header_text)
+            .color(app_theme.tool_color())
+            .strong();
         
         // Create parameter tooltip text
         let mut tooltip_text = String::new();
@@ -1235,12 +1467,22 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
             tooltip_text.push_str(&format!("\nDuration: {:.1}s", duration.num_milliseconds() as f64 / 1000.0));
         }
         
-        // Use CollapsingHeader for the tool card (but default to open for standalone cards)
+        // Use CollapsingHeader for the tool card
         let id = egui::Id::new(tool_card.run_id);
-        let mut collapsing_response = egui::CollapsingHeader::new(header_text)
-            .id_salt(id)
-            .default_open(true) // Default to open for standalone tool cards
-            .show(ui, |ui| {
+        
+        // Use the run_id as the key for individual state tracking
+        let tool_card_key = tool_card.run_id.to_string();
+        
+        // Determine if this tool card should be open and if it has an override
+        let (should_be_open, has_override) = get_tool_card_state(&tool_card_key, tool_cards_collapsed, tool_card_individual_states);
+        
+        let mut collapsing_response = create_controlled_collapsing_header(
+            ui,
+            id,
+            header_text_colored,
+            should_be_open,
+            has_override,
+            |ui| {
                     // Show progress bar if running
                     if tool_card.status == ToolCardStatus::Running {
                         if let Some(progress) = tool_card.progress {
@@ -1298,8 +1540,17 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
                     
                     // Check content size to decide if we need scroll area
                     // For file results, check the actual content field
-                    let actual_content_size = if tool_card.tool_name.contains("file") || tool_card.tool_name.contains("view") {
+                    let actual_content_size = if tool_card.tool_name.contains("__repository_view_file") {
+                        // Specifically for repository view file, check content field
                         result.get("content")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.len())
+                            .unwrap_or(0)
+                    } else if tool_card.tool_name.contains("file") || tool_card.tool_name.contains("view") || tool_card.tool_name.contains("read") {
+                        // For other file operations, check various possible content fields
+                        result.get("content")
+                            .or_else(|| result.get("file_content"))
+                            .or_else(|| result.get("data"))
                             .and_then(|v| v.as_str())
                             .map(|s| s.len())
                             .unwrap_or(0)
@@ -1308,14 +1559,33 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
                     };
                     
                     let content_lines = formatted_result.lines().count();
-                    let needs_scroll = content_lines > 20 || formatted_result.len() > 2000 || actual_content_size > 1000;
+                    // Use same threshold logic as tool calls for consistency
+                    let needs_scroll = if actual_content_size > 0 {
+                        // For file content, use lower thresholds
+                        content_lines > 10 || formatted_result.len() > 500 || actual_content_size > 500
+                    } else {
+                        // For other content, use standard thresholds
+                        content_lines > 20 || formatted_result.len() > 2000
+                    };
                     
                     if needs_scroll {
                         // Large content - use scroll area
+                        let min_height = if tool_card.tool_name.contains("query") || tool_card.tool_name.contains("search") {
+                            // For search results, ensure adequate height
+                            600.0
+                        } else if actual_content_size > 0 {
+                            // For file content, ensure a reasonable minimum height
+                            400.0
+                        } else {
+                            // For other content, allow more flexible sizing
+                            300.0
+                        };
+                        
                         egui::ScrollArea::vertical()
-                            .max_height(400.0)  // Reduced from 600 for better UI
+                            .max_height(1000.0)  // Increased height for better readability
+                            .min_scrolled_height(min_height)
                             .id_salt(format!("tool_result_{}", tool_card.run_id))
-                            .auto_shrink([false, true])  // Auto-shrink vertically
+                            .auto_shrink([false, false])  // Don't auto-shrink to preserve content visibility
                             .show(ui, |ui| {
                                 ui.set_max_width(tool_card_width - 24.0);
                                 
@@ -1359,13 +1629,22 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
                     }
                 }
             }
-        });
+        },
+    );
+        
+        // Check if the user manually toggled this tool card
+        if collapsing_response.header_response.clicked() {
+            // User clicked the header - track their preference
+            let new_collapsed_state = collapsing_response.openness < 0.5; // If openness < 0.5, it's collapsing
+            tool_card_individual_states.insert(tool_card_key, new_collapsed_state);
+        }
         
         // Add tooltip to the header if we have parameter info
         if !tooltip_text.is_empty() {
             collapsing_response.header_response = collapsing_response.header_response.on_hover_text(tooltip_text);
         }
     });
+        });
     
     clicked_tool_result
 }

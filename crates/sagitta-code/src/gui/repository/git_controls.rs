@@ -41,7 +41,8 @@ pub struct GitControlsState {
     pub is_switching: bool,
     /// Last error message
     pub last_error: Option<String>,
-    /// Whether to show advanced controls
+    /// Whether to show advanced controls (unused - functionality moved to repo manager)
+    #[allow(dead_code)]
     pub show_advanced: bool,
     /// New branch name input
     pub new_branch_name: String,
@@ -299,16 +300,7 @@ impl GitControls {
                 ui.separator();
             }
 
-            // Advanced controls toggle
-            if ui.button(if self.state.show_advanced { "🔧 Less" } else { "🔧 More" }).clicked() {
-                self.state.show_advanced = !self.state.show_advanced;
-            }
-
-            // Advanced controls
-            if self.state.show_advanced {
-                ui.separator();
-                self.render_advanced_controls(ui, theme);
-            }
+            // Note: Advanced controls toggle removed as this functionality is duplicated by the branch tool in the repo manager
 
             // Error display
             if let Some(error) = &self.state.last_error {

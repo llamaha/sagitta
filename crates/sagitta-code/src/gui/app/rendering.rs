@@ -274,6 +274,12 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
         }
     }
     
+    // Focus input area shortcut
+    if ctx.input(|i| i.key_pressed(Key::Slash) && i.modifiers.ctrl) {
+        // Ctrl+/: Focus input area
+        app.state.should_focus_input = true;
+    }
+    
     // Phase 10: Conversation sidebar organization mode shortcuts (Ctrl+1-6)
     let enable_shortcuts = {
         match app.config.try_lock() {
@@ -306,6 +312,14 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
             // Ctrl+6: Switch to Success mode
             app.conversation_sidebar.set_organization_mode(OrganizationMode::Success);
         }
+    }
+    
+    // Tool card collapse toggle shortcut
+    if ctx.input(|i| i.key_pressed(Key::H) && i.modifiers.ctrl) {
+        // Ctrl+H: Toggle tool card collapse state
+        app.state.tool_cards_collapsed = !app.state.tool_cards_collapsed;
+        // Clear individual overrides so ALL cards follow the new global state
+        app.state.tool_card_individual_states.clear();
     }
     
     // Loop control shortcuts
@@ -1036,6 +1050,16 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     });
                 });
                 
+                // Focus Input Area
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + /: Focus Input Area").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Focus").color(theme.button_text_color())).clicked() {
+                            app.state.should_focus_input = true;
+                        }
+                    });
+                });
+                
                 // F1 Help
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("F1: Show/Hide This Help").color(theme.text_color()));
@@ -1087,6 +1111,18 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                         if ui.button(egui::RichText::new("Break").color(theme.button_text_color())).clicked() 
                             && app.state.is_in_loop {
                             app.state.loop_break_requested = true;
+                        }
+                    });
+                });
+                
+                // Tool Card Collapse
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + H: Toggle Tool Card Collapse").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                            app.state.tool_cards_collapsed = !app.state.tool_cards_collapsed;
+                            // Clear individual overrides so ALL cards follow the new global state
+                            app.state.tool_card_individual_states.clear();
                         }
                     });
                 });
@@ -1238,6 +1274,9 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 &app.state.current_token_usage,
                 // Stop/Cancel request
                 &mut app.state.stop_requested,
+                // Tool card collapse state
+                &mut app.state.tool_cards_collapsed,
+                &mut app.state.tool_card_individual_states,
             );
             
             // Handle repository refresh request
@@ -1508,7 +1547,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 let items = app.chat_manager.get_all_items();
                 
                 // Check for tool clicks
-                if let Some((tool_name, tool_args)) = modern_chat_view_ui(ui, &items, app.state.current_theme, &mut app.state.copy_button_state, &app.state.running_tools, &mut app.state.collapsed_thinking, &app.state.tool_results) {
+                if let Some((tool_name, tool_args)) = modern_chat_view_ui(ui, &items, app.state.current_theme, &mut app.state.copy_button_state, &app.state.running_tools, &mut app.state.collapsed_thinking, &app.state.tool_results, app.state.tool_cards_collapsed, &mut app.state.tool_card_individual_states) {
                     app.state.clicked_tool_info = Some((tool_name, tool_args));
                 }
             });

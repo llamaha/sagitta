@@ -71,31 +71,31 @@ impl ClaudeProcess {
             args.push("--allowedTools".to_string());
             
             // Build a list of all MCP tool patterns
+            // Based on the actual tools in sagitta-mcp/src/handlers/tool.rs
             let mcp_tools = vec![
-                // Shell execution
-                "mcp__*__streaming_shell_execution",
+                // Core tools
+                "mcp__*__ping",
+                // Repository management
+                "mcp__*__repository_add",
+                "mcp__*__repository_list",
+                "mcp__*__repository_sync",
+                "mcp__*__repository_switch_branch",
+                "mcp__*__repository_list_branches",
+                // Code search
+                "mcp__*__semantic_code_search",
+                "mcp__*__search_file",
+                // Todo management
+                "mcp__*__todo_read",
+                "mcp__*__todo_write",
                 // File operations
                 "mcp__*__read_file",
-                // Repository tools
-                "mcp__*__view_file",
-                "mcp__*__list_repositories",
-                "mcp__*__add_existing_repository",
-                "mcp__*__sync_repository", 
-                "mcp__*__remove_repository",
-                "mcp__*__search_file_in_repository",
-                "mcp__*__repository_map",
-                "mcp__*__targeted_view",
-                // Code search
-                "mcp__*__search_code",
-                // Web search
-                "mcp__*__web_search",
-                // Code editing
+                "mcp__*__write_file",
                 "mcp__*__edit_file",
-                "mcp__*__validate",
-                "mcp__*__semantic_edit",
-                // Wildcards as fallback
-                "mcp__*",
-                "*"
+                "mcp__*__multi_edit_file",
+                // Shell execution
+                "mcp__*__shell_execute",
+                // Wildcard to catch any we missed
+                "mcp__*"
             ];
             
             args.push(mcp_tools.join(","));

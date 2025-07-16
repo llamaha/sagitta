@@ -2,15 +2,13 @@ use crate::mcp::{
     error_codes,
     types::{
         CallToolParams, CallToolResult, ContentBlock, ErrorObject, PingParams, QueryParams,
-        RepositoryAddParams, RepositoryListParams, RepositoryRemoveParams, RepositorySyncParams, ToolAnnotations, ToolDefinition,
-        RepositorySearchFileParams, RepositoryViewFileParams,
+        RepositoryAddParams, RepositoryListParams, RepositorySyncParams, ToolAnnotations, ToolDefinition,
+        RepositorySearchFileParams,
         RepositorySwitchBranchParams, RepositoryListBranchesParams,
         TodoReadParams, TodoWriteParams,
         EditFileParams, MultiEditFileParams,
         ShellExecuteParams,
-        ReadFileParams, WriteFileParams,
-        RepositoryGitHistoryParams,
-        RepositoryDependencyParams, RepositoryListDependenciesParams,
+        WriteFileParams,
     },
 };
 use crate::server::{deserialize_value, ok_some, result_to_call_result}; // Import necessary helpers
@@ -19,10 +17,8 @@ use crate::handlers::{ping::handle_ping, query::handle_query, repository::*,
                       todo_read::handle_todo_read, todo_write::handle_todo_write,
                       edit_file::handle_edit_file, multi_edit_file::handle_multi_edit_file,
                       shell_execute::handle_shell_execute,
-                      read_file::handle_read_file, write_file::handle_write_file,
-                      git_history::handle_repository_git_history,
-                      dependency::{handle_repository_add_dependency, handle_repository_remove_dependency, 
-                                   handle_repository_list_dependencies}}; // Import actual handlers
+                      write_file::handle_write_file,
+                      read_file::handle_read_file}; // Import actual handlers
 
 use anyhow::Result;
 use serde_json::json;
@@ -65,14 +61,6 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
                 Err(e) => Err(e),
             }
         }
-        "repository_remove" => {
-            let remove_params: RepositoryRemoveParams = deserialize_value(arguments, tool_name)?;
-             // Call imported handler
-            match handle_repository_remove(remove_params, config, qdrant_client, None).await {
-                Ok(res) => result_to_call_result(res),
-                Err(e) => Err(e),
-            }
-        }
         "repository_sync" => {
             let sync_params: RepositorySyncParams = deserialize_value(arguments, tool_name)?;
              // Call imported handler
@@ -81,7 +69,7 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
                 Err(e) => Err(e),
             }
         }
-        "query" => {
+        "semantic_code_search" => {
             let query_params: QueryParams = deserialize_value(arguments, tool_name)?;
              // Call imported handler
             match handle_query(query_params, config, qdrant_client, None).await {
@@ -89,16 +77,9 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
                 Err(e) => Err(e),
             }
         }
-        "repository_search_file" => {
+        "search_file" => {
             let search_params: RepositorySearchFileParams = deserialize_value(arguments, tool_name)?;
              match handle_repository_search_file(search_params, config, None).await {
-                Ok(res) => result_to_call_result(res),
-                Err(e) => Err(e),
-            }
-        }
-        "repository_view_file" => {
-            let view_params: RepositoryViewFileParams = deserialize_value(arguments, tool_name)?;
-             match handle_repository_view_file(view_params, config, None).await {
                 Ok(res) => result_to_call_result(res),
                 Err(e) => Err(e),
             }
@@ -160,13 +141,6 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
                 Err(e) => Err(e),
             }
         }
-        "read_file" => {
-            let read_params: ReadFileParams = deserialize_value(arguments, tool_name)?;
-            match handle_read_file(read_params, config, qdrant_client, None).await {
-                Ok(res) => result_to_call_result(res),
-                Err(e) => Err(e),
-            }
-        }
         "write_file" => {
             let write_params: WriteFileParams = deserialize_value(arguments, tool_name)?;
             match handle_write_file(write_params, config, qdrant_client, None).await {
@@ -174,44 +148,11 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
                 Err(e) => Err(e),
             }
         }
-        "repository_git_history" => {
-            let history_params: RepositoryGitHistoryParams = deserialize_value(arguments, tool_name)?;
-            match handle_repository_git_history(history_params, config, qdrant_client, None).await {
+        "read_file" => {
+            let read_params: crate::mcp::types::ReadFileParams = deserialize_value(arguments, tool_name)?;
+            match handle_read_file(read_params, config, qdrant_client, None).await {
                 Ok(res) => result_to_call_result(res),
                 Err(e) => Err(e),
-            }
-        }
-        "repository_add_dependency" => {
-            let dep_params: RepositoryDependencyParams = deserialize_value(arguments, tool_name)?;
-            match handle_repository_add_dependency(dep_params, config.clone()).await {
-                Ok(res) => result_to_call_result(res),
-                Err(e) => Err(ErrorObject {
-                    code: error_codes::INTERNAL_ERROR,
-                    message: e.to_string(),
-                    data: None,
-                }),
-            }
-        }
-        "repository_remove_dependency" => {
-            let dep_params: RepositoryDependencyParams = deserialize_value(arguments, tool_name)?;
-            match handle_repository_remove_dependency(dep_params, config.clone()).await {
-                Ok(res) => result_to_call_result(res),
-                Err(e) => Err(ErrorObject {
-                    code: error_codes::INTERNAL_ERROR,
-                    message: e.to_string(),
-                    data: None,
-                }),
-            }
-        }
-        "repository_list_dependencies" => {
-            let list_params: RepositoryListDependenciesParams = deserialize_value(arguments, tool_name)?;
-            match handle_repository_list_dependencies(list_params, config.clone()).await {
-                Ok(res) => result_to_call_result(res),
-                Err(e) => Err(ErrorObject {
-                    code: error_codes::INTERNAL_ERROR,
-                    message: e.to_string(),
-                    data: None,
-                }),
             }
         }
         _ => Err(ErrorObject {
@@ -292,25 +233,6 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 open_world_hint: Some(false),
             }),
         },
-        // --- Repository Remove ---
-        ToolDefinition {
-            name: "repository_remove".to_string(),
-            description: Some("Removes a repository configuration and deletes its data.".to_string()),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "name": { "type": "string", "description": "Name of the repository to remove" }
-                },
-                "required": ["name"]
-            }),
-            annotations: Some(ToolAnnotations {
-                title: Some("Remove Repository".to_string()),
-                read_only_hint: Some(false),
-                destructive_hint: Some(true), // Deletes data
-                idempotent_hint: Some(true), // Removing a non-existent repo is a no-op (or error)
-                open_world_hint: Some(false),
-            }),
-        },
         // --- Repository Sync ---
         ToolDefinition {
             name: "repository_sync".to_string(),
@@ -331,9 +253,9 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 open_world_hint: Some(true), // Interacts with Git remotes
             }),
         },
-        // --- Query ---
+        // --- Semantic Code Search ---
         ToolDefinition {
-            name: "query".to_string(),
+            name: "semantic_code_search".to_string(),
             description: Some(
                 "Performs semantic search on an indexed repository. The search uses hybrid (dense + sparse vector) technology for best results.\n\
 \n**RECOMMENDED PARAMETERS for Better Results:**\n\
@@ -376,16 +298,16 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 "required": ["repositoryName", "queryText", "limit"]
             }),
              annotations: Some(ToolAnnotations {
-                title: Some("Query Repository".to_string()),
+                title: Some("Semantic Code Search".to_string()),
                 read_only_hint: Some(true),
                 destructive_hint: Some(false),
                 idempotent_hint: Some(true),
                 open_world_hint: Some(false),
             }),
         },
-        // --- Repository Search File ---
+        // --- Search File ---
         ToolDefinition {
-            name: "repository_search_file".to_string(),
+            name: "search_file".to_string(),
             description: Some("Searches for files within a repository using a glob pattern.".to_string()),
             input_schema: json!({
                 "type": "object",
@@ -397,29 +319,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 "required": ["repositoryName", "pattern"]
             }),
              annotations: Some(ToolAnnotations {
-                title: Some("Search Repository Files".to_string()),
-                read_only_hint: Some(true),
-                destructive_hint: Some(false),
-                idempotent_hint: Some(true),
-                open_world_hint: Some(false),
-            }),
-        },
-        // --- Repository View File ---
-        ToolDefinition {
-            name: "repository_view_file".to_string(),
-            description: Some("Views the content of a specific file within a repository, optionally within a line range.".to_string()),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "repositoryName": { "type": "string", "description": "Name of the repository containing the file." },
-                    "filePath": { "type": "string", "description": "Relative path of the file within the repository." },
-                    "startLine": { "type": "integer", "description": "Optional start line number (1-based)." },
-                    "endLine": { "type": "integer", "description": "Optional end line number (1-based)." }
-                },
-                "required": ["repositoryName", "filePath"]
-            }),
-             annotations: Some(ToolAnnotations {
-                title: Some("View Repository File".to_string()),
+                title: Some("Search Files".to_string()),
                 read_only_hint: Some(true),
                 destructive_hint: Some(false),
                 idempotent_hint: Some(true),
@@ -639,16 +539,17 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         
+        
         // --- Read File ---
         ToolDefinition {
             name: "read_file".to_string(),
-            description: Some("Reads file contents with optional line range support.".to_string()),
+            description: Some("Reads content from a file with optional line range support.".to_string()),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "file_path": { "type": "string", "description": "The absolute path to the file to read" },
-                    "start_line": { "type": "integer", "description": "Optional start line (1-based, inclusive)" },
-                    "end_line": { "type": "integer", "description": "Optional end line (1-based, inclusive)" }
+                    "limit": { "type": "integer", "description": "Optional number of lines to read" },
+                    "offset": { "type": "integer", "description": "Optional line number to start reading from" }
                 },
                 "required": ["file_path"]
             }),
@@ -683,95 +584,6 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         
-        // --- Repository Git History ---
-        ToolDefinition {
-            name: "repository_git_history".to_string(),
-            description: Some("Retrieves git commit history for a repository with filtering options.".to_string()),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "repositoryName": { "type": "string", "description": "Name of the repository to get history for." },
-                    "maxCommits": { "type": "integer", "description": "Maximum number of commits to retrieve (default: 100, max: 1000)." },
-                    "branchName": { "type": "string", "description": "Optional branch name (defaults to current branch)." },
-                    "since": { "type": "string", "description": "Optional start date filter (RFC3339 format, e.g., '2024-01-01T00:00:00Z')." },
-                    "until": { "type": "string", "description": "Optional end date filter (RFC3339 format)." },
-                    "author": { "type": "string", "description": "Optional author name/email filter (partial match)." },
-                    "path": { "type": "string", "description": "Optional path filter (show commits affecting specific paths)." }
-                },
-                "required": ["repositoryName"]
-            }),
-            annotations: Some(ToolAnnotations {
-                title: Some("Get Git History".to_string()),
-                read_only_hint: Some(true),
-                destructive_hint: Some(false),
-                idempotent_hint: Some(true),
-                open_world_hint: Some(false),
-            }),
-        },
-        
-        // --- Repository Add Dependency ---
-        ToolDefinition {
-            name: "repository_add_dependency".to_string(),
-            description: Some("Adds or updates a dependency for a repository. Dependencies are other repositories in the system that the main repository depends on.".to_string()),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "repositoryName": { "type": "string", "description": "The main repository to add the dependency to." },
-                    "dependencyName": { "type": "string", "description": "The name of the dependency repository (must already exist in the system)." },
-                    "targetRef": { "type": "string", "description": "Optional specific ref (branch/tag/commit) of the dependency to use." },
-                    "purpose": { "type": "string", "description": "Optional description of why this dependency is needed." }
-                },
-                "required": ["repositoryName", "dependencyName"]
-            }),
-            annotations: Some(ToolAnnotations {
-                title: Some("Add Repository Dependency".to_string()),
-                read_only_hint: Some(false),
-                destructive_hint: Some(false),
-                idempotent_hint: Some(true),
-                open_world_hint: Some(false),
-            }),
-        },
-        
-        // --- Repository Remove Dependency ---
-        ToolDefinition {
-            name: "repository_remove_dependency".to_string(),
-            description: Some("Removes a dependency from a repository.".to_string()),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "repositoryName": { "type": "string", "description": "The main repository to remove the dependency from." },
-                    "dependencyName": { "type": "string", "description": "The name of the dependency repository to remove." }
-                },
-                "required": ["repositoryName", "dependencyName"]
-            }),
-            annotations: Some(ToolAnnotations {
-                title: Some("Remove Repository Dependency".to_string()),
-                read_only_hint: Some(false),
-                destructive_hint: Some(false),
-                idempotent_hint: Some(true),
-                open_world_hint: Some(false),
-            }),
-        },
-        
-        // --- Repository List Dependencies ---
-        ToolDefinition {
-            name: "repository_list_dependencies".to_string(),
-            description: Some("Lists all dependencies for a repository, showing their target refs and availability status.".to_string()),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "repositoryName": { "type": "string", "description": "The repository to list dependencies for." }
-                },
-                "required": ["repositoryName"]
-            }),
-            annotations: Some(ToolAnnotations {
-                title: Some("List Repository Dependencies".to_string()),
-                read_only_hint: Some(true),
-                destructive_hint: Some(false),
-                idempotent_hint: Some(true),
-                open_world_hint: Some(false),
-            }),
-        },
     ]
 }
 
@@ -864,18 +676,12 @@ mod tests {
             "ping",
             "repository_add",
             "repository_list",
-            "repository_remove",
             "repository_sync",
-            "query",
-            "repository_search_file",
-            "repository_view_file",
+            "semantic_code_search",
+            "search_file",
             // "repository_map", // DISABLED - consumes too many tokens
             "repository_switch_branch",
             "repository_list_branches",
-            "repository_git_history",
-            "repository_add_dependency",
-            "repository_remove_dependency",
-            "repository_list_dependencies",
             "todo_read",
             "todo_write",
             "edit_file",

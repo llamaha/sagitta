@@ -410,6 +410,12 @@ pub fn load_config(override_path: Option<&PathBuf>) -> Result<AppConfig> {
 /// Creates the configuration directory if it doesn't exist.
 /// Overwrites the existing configuration file at the target path.
 pub fn save_config(config: &AppConfig, override_path: Option<&PathBuf>) -> Result<()> {
+    // IMPORTANT: Check if we're in test mode to prevent overwriting real configs
+    if std::env::var("SAGITTA_TEST_MODE").is_ok() {
+        log::debug!("Test mode detected - skipping config save to prevent overwriting real config");
+        return Ok(());
+    }
+    
     let config_file_path = get_config_path_or_default(override_path)?;
     let app_config_dir = config_file_path
         .parent()

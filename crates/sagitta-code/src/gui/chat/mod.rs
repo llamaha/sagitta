@@ -2,6 +2,9 @@
 pub mod input;
 pub mod view;
 
+#[cfg(test)]
+mod collapsing_tests;
+
 use view::{StreamingMessage, MessageAuthor, MessageStatus, ToolCall, MessageType};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
