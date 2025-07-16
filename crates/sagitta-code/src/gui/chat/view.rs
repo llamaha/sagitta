@@ -95,6 +95,129 @@ fn get_human_friendly_tool_name(raw_name: &str) -> String {
 }
 
 /// Format tool parameters for display in the UI
+// Format tool parameters for inline display (excludes edit details)
+fn format_tool_parameters_for_inline(tool_name: &str, args: &serde_json::Value) -> Vec<(String, String)> {
+    let mut params = Vec::new();
+    
+    if let Some(obj) = args.as_object() {
+        // Special handling for common tools
+        match tool_name {
+            name if name.contains("__query") => {
+                // Check both camelCase (MCP style) and snake_case parameter names
+                if let Some(query) = obj.get("queryText").and_then(|v| v.as_str())
+                    .or_else(|| obj.get("query").and_then(|v| v.as_str())) {
+                    params.push(("query".to_string(), format!("\"{}\"", query)));
+                }
+                if let Some(repo) = obj.get("repository").and_then(|v| v.as_str()) {
+                    params.push(("repo".to_string(), repo.to_string()));
+                }
+            },
+            name if name == "Read" || name == "Write" || name.contains("__read_file") 
+                || name.contains("__write_file") || name.contains("__view_file") => {
+                // Check both camelCase (MCP style) and snake_case parameter names
+                if let Some(path) = obj.get("filePath").and_then(|v| v.as_str())
+                    .or_else(|| obj.get("file_path").and_then(|v| v.as_str())) {
+                    params.push(("file".to_string(), path.to_string()));
+                }
+            },
+            name if name == "Edit" || name.contains("__edit_file") => {
+                // For edit tools, only show file path, not the edit details
+                if let Some(path) = obj.get("filePath").and_then(|v| v.as_str())
+                    .or_else(|| obj.get("file_path").and_then(|v| v.as_str())) {
+                    params.push(("file".to_string(), path.to_string()));
+                }
+            },
+            "MultiEdit" => {
+                // For MultiEdit, show file and number of edits but not the edit details
+                if let Some(path) = obj.get("file_path").and_then(|v| v.as_str()) {
+                    params.push(("file".to_string(), path.to_string()));
+                }
+                if let Some(edits) = obj.get("edits").and_then(|v| v.as_array()) {
+                    params.push(("edits".to_string(), edits.len().to_string()));
+                }
+            },
+            "Bash" => {
+                if let Some(cmd) = obj.get("command").and_then(|v| v.as_str()) {
+                    // Truncate very long commands for inline display
+                    let display_cmd = if cmd.len() > 40 {
+                        format!("{}...", &cmd[..37])
+                    } else {
+                        cmd.to_string()
+                    };
+                    params.push(("cmd".to_string(), format!("\"{}\"", display_cmd)));
+                }
+            },
+            "Grep" => {
+                if let Some(pattern) = obj.get("pattern").and_then(|v| v.as_str()) {
+                    params.push(("pattern".to_string(), format!("\"{}\"", pattern)));
+                }
+                if let Some(path) = obj.get("path").and_then(|v| v.as_str()) {
+                    params.push(("path".to_string(), path.to_string()));
+                }
+            },
+            "Glob" => {
+                if let Some(pattern) = obj.get("pattern").and_then(|v| v.as_str()) {
+                    params.push(("pattern".to_string(), format!("\"{}\"", pattern)));
+                }
+                if let Some(path) = obj.get("path").and_then(|v| v.as_str()) {
+                    params.push(("path".to_string(), path.to_string()));
+                }
+            },
+            "WebSearch" => {
+                if let Some(query) = obj.get("query").and_then(|v| v.as_str()) {
+                    params.push(("query".to_string(), format!("\"{}\"", query)));
+                }
+            },
+            "WebFetch" => {
+                if let Some(url) = obj.get("url").and_then(|v| v.as_str()) {
+                    // Truncate very long URLs for inline display
+                    let display_url = if url.len() > 30 {
+                        format!("{}...", &url[..27])
+                    } else {
+                        url.to_string()
+                    };
+                    params.push(("url".to_string(), display_url));
+                }
+            },
+            "TodoRead" => {
+                // TodoRead has no parameters
+            },
+            "TodoWrite" => {
+                if let Some(todos) = obj.get("todos").and_then(|v| v.as_array()) {
+                    params.push(("tasks".to_string(), todos.len().to_string()));
+                }
+            },
+            _ => {
+                // For unknown tools, show a limited set of key parameters
+                // Exclude complex objects and arrays from inline display
+                for (key, value) in obj {
+                    if params.len() >= 3 { break; } // Limit to 3 params for readability
+                    
+                    match value {
+                        serde_json::Value::String(s) => {
+                            let display_value = if s.len() > 30 {
+                                format!("\"{}...\"", &s[..27])
+                            } else {
+                                format!("\"{}\"", s)
+                            };
+                            params.push((key.clone(), display_value));
+                        },
+                        serde_json::Value::Number(n) => {
+                            params.push((key.clone(), n.to_string()));
+                        },
+                        serde_json::Value::Bool(b) => {
+                            params.push((key.clone(), b.to_string()));
+                        },
+                        _ => {} // Skip complex types for inline display
+                    }
+                }
+            }
+        }
+    }
+    
+    params
+}
+
 fn format_tool_parameters(tool_name: &str, args: &serde_json::Value) -> Vec<(String, String)> {
     let mut params = Vec::new();
     
@@ -978,7 +1101,7 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
     ui.vertical(|ui| {
         ui.set_max_width(tool_card_width);
         
-        // Build the header text
+        // Build the header text with inline parameters
         let friendly_name = get_human_friendly_tool_name(&tool_call.name);
         let status_icon = match tool_call.status {
             MessageStatus::Complete => "✅",
@@ -987,7 +1110,28 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
             MessageStatus::Sending => "⏳",
             _ => "🔧",
         };
-        let header_text = format!("{status_icon} 🔧 {friendly_name}");
+        
+        // Get parameters for inline display (excluding edits for edit tools)
+        let inline_params = if !tool_call.arguments.is_empty() {
+            if let Ok(args_value) = serde_json::from_str::<serde_json::Value>(&tool_call.arguments) {
+                let params = format_tool_parameters_for_inline(&tool_call.name, &args_value);
+                if !params.is_empty() {
+                    let param_str = params.iter()
+                        .map(|(k, v)| format!("{}: {}", k, v))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!(" - {}", param_str)
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+        
+        let header_text = format!("{status_icon} 🔧 {friendly_name}{inline_params}");
         
         // Create parameter tooltip text
         let mut tooltip_text = String::new();
@@ -1208,7 +1352,7 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
     ui.vertical(|ui| {
         ui.set_max_width(tool_card_width);
         
-        // Build the header text
+        // Build the header text with inline parameters
         let friendly_name = get_human_friendly_tool_name(&tool_card.tool_name);
         let status_icon = match tool_card.status {
             ToolCardStatus::Completed { success: true } => "✅",
@@ -1217,7 +1361,22 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
             ToolCardStatus::Running => "🔄",
             ToolCardStatus::Cancelled => "⏹️",
         };
-        let header_text = format!("{status_icon} 🔧 {friendly_name}");
+        
+        // Get parameters for inline display (excluding edits for edit tools)
+        let inline_params = {
+            let params = format_tool_parameters_for_inline(&tool_card.tool_name, &tool_card.input_params);
+            if !params.is_empty() {
+                let param_str = params.iter()
+                    .map(|(k, v)| format!("{}: {}", k, v))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(" - {}", param_str)
+            } else {
+                String::new()
+            }
+        };
+        
+        let header_text = format!("{status_icon} 🔧 {friendly_name}{inline_params}");
         
         // Create parameter tooltip text
         let mut tooltip_text = String::new();
@@ -1298,8 +1457,17 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
                     
                     // Check content size to decide if we need scroll area
                     // For file results, check the actual content field
-                    let actual_content_size = if tool_card.tool_name.contains("file") || tool_card.tool_name.contains("view") {
+                    let actual_content_size = if tool_card.tool_name.contains("__repository_view_file") {
+                        // Specifically for repository view file, check content field
                         result.get("content")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.len())
+                            .unwrap_or(0)
+                    } else if tool_card.tool_name.contains("file") || tool_card.tool_name.contains("view") || tool_card.tool_name.contains("read") {
+                        // For other file operations, check various possible content fields
+                        result.get("content")
+                            .or_else(|| result.get("file_content"))
+                            .or_else(|| result.get("data"))
                             .and_then(|v| v.as_str())
                             .map(|s| s.len())
                             .unwrap_or(0)
@@ -1308,14 +1476,30 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
                     };
                     
                     let content_lines = formatted_result.lines().count();
-                    let needs_scroll = content_lines > 20 || formatted_result.len() > 2000 || actual_content_size > 1000;
+                    // Use same threshold logic as tool calls for consistency
+                    let needs_scroll = if actual_content_size > 0 {
+                        // For file content, use lower thresholds
+                        content_lines > 10 || formatted_result.len() > 500 || actual_content_size > 500
+                    } else {
+                        // For other content, use standard thresholds
+                        content_lines > 20 || formatted_result.len() > 2000
+                    };
                     
                     if needs_scroll {
                         // Large content - use scroll area
+                        let min_height = if actual_content_size > 0 {
+                            // For file content, ensure a reasonable minimum height
+                            300.0f32.min(400.0)
+                        } else {
+                            // For other content, allow more flexible sizing
+                            100.0
+                        };
+                        
                         egui::ScrollArea::vertical()
                             .max_height(400.0)  // Reduced from 600 for better UI
+                            .min_scrolled_height(min_height)
                             .id_salt(format!("tool_result_{}", tool_card.run_id))
-                            .auto_shrink([false, true])  // Auto-shrink vertically
+                            .auto_shrink([false, false])  // Don't auto-shrink to preserve content visibility
                             .show(ui, |ui| {
                                 ui.set_max_width(tool_card_width - 24.0);
                                 

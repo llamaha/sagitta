@@ -610,7 +610,7 @@ impl ThemeCustomizer {
             .stroke(Stroke::new(2.0, Color32::RED))
             .inner_margin(Vec2::splat(8.0))
             .show(ui, |ui| {
-                ui.label(RichText::new("Sagitta Code is thinking about your request...").italics());
+                ui.label(RichText::new("Claude is thinking about your request...").italics());
                 ui.label("Used in: Thinking bubbles, reasoning displays");
             });
     }

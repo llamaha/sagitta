@@ -1133,7 +1133,9 @@ impl ToolResultFormatter {
     fn format_mcp_write_file_result(&self, value: &serde_json::Value) -> String {
         let mut result = String::new();
         
-        if let Some(file_path) = value.get("file_path").and_then(|v| v.as_str()) {
+        let file_path = value.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+        
+        if !file_path.is_empty() {
             let action = if value.get("created").and_then(|v| v.as_bool()).unwrap_or(false) {
                 "✨ **Created:**"
             } else {
@@ -1143,7 +1145,72 @@ impl ToolResultFormatter {
         }
         
         if let Some(bytes) = value.get("bytes_written").and_then(|v| v.as_u64()) {
-            result.push_str(&format!("**Bytes written:** {bytes}\n"));
+            result.push_str(&format!("**Size:** {} bytes\n", bytes));
+        }
+        
+        // Display the file content if available
+        if let Some(content) = value.get("content").and_then(|v| v.as_str()) {
+            // Detect language from file extension
+            let language = file_path.split('.').last()
+                .and_then(|ext| match ext {
+                    "rs" => Some("rust"),
+                    "py" => Some("python"),
+                    "js" | "mjs" | "cjs" => Some("javascript"),
+                    "ts" | "tsx" => Some("typescript"),
+                    "jsx" => Some("jsx"),
+                    "java" => Some("java"),
+                    "c" => Some("c"),
+                    "cpp" | "cc" | "cxx" => Some("cpp"),
+                    "h" | "hpp" => Some("cpp"),
+                    "cs" => Some("csharp"),
+                    "go" => Some("go"),
+                    "rb" => Some("ruby"),
+                    "php" => Some("php"),
+                    "swift" => Some("swift"),
+                    "kt" | "kts" => Some("kotlin"),
+                    "scala" => Some("scala"),
+                    "r" => Some("r"),
+                    "m" => Some("matlab"),
+                    "sql" => Some("sql"),
+                    "sh" | "bash" => Some("bash"),
+                    "yml" | "yaml" => Some("yaml"),
+                    "toml" => Some("toml"),
+                    "json" => Some("json"),
+                    "xml" => Some("xml"),
+                    "html" | "htm" => Some("html"),
+                    "css" => Some("css"),
+                    "scss" | "sass" => Some("scss"),
+                    "less" => Some("less"),
+                    "md" | "markdown" => Some("markdown"),
+                    "tex" => Some("latex"),
+                    "vim" => Some("vim"),
+                    "lua" => Some("lua"),
+                    "dart" => Some("dart"),
+                    "elm" => Some("elm"),
+                    "clj" | "cljs" => Some("clojure"),
+                    "ex" | "exs" => Some("elixir"),
+                    "erl" | "hrl" => Some("erlang"),
+                    "fs" | "fsx" | "fsi" => Some("fsharp"),
+                    "ml" | "mli" => Some("ocaml"),
+                    "pas" | "pp" => Some("pascal"),
+                    "pl" | "pm" => Some("perl"),
+                    "ps1" => Some("powershell"),
+                    "purs" => Some("purescript"),
+                    "rkt" => Some("racket"),
+                    "scm" => Some("scheme"),
+                    "zig" => Some("zig"),
+                    "v" => Some("v"),
+                    "nim" => Some("nim"),
+                    "jl" => Some("julia"),
+                    "d" => Some("d"),
+                    "hs" => Some("haskell"),
+                    _ => None,
+                })
+                .unwrap_or("");
+            
+            result.push_str(&format!("\n```{language}\n"));
+            result.push_str(content);
+            result.push_str("\n```");
         }
         
         result
@@ -1166,10 +1233,12 @@ impl ToolResultFormatter {
                         }
                     },
                     serde_json::Value::Array(arr) => {
-                        format!("Array with {} items", arr.len())
+                        // Show actual array content with proper formatting
+                        serde_json::to_string_pretty(arr).unwrap_or_else(|_| format!("Array with {} items", arr.len()))
                     },
                     serde_json::Value::Object(obj) => {
-                        format!("Object with {} fields", obj.len())
+                        // Show actual object content with proper formatting
+                        serde_json::to_string_pretty(obj).unwrap_or_else(|_| format!("Object with {} fields", obj.len()))
                     },
                     _ => val.to_string(),
                 };
@@ -1556,8 +1625,10 @@ mod tests {
         assert!(formatted.contains("RESULT: Tool Result"));
         assert!(formatted.contains("**status:** success"));
         assert!(formatted.contains("**count:** 42"));
-        assert!(formatted.contains("**items:** Array with 3 items"));
-        assert!(formatted.contains("**metadata:** Object with 2 fields"));
+        // Now we expect the actual array content
+        assert!(formatted.contains("**items:** [\n  \"item1\",\n  \"item2\",\n  \"item3\"\n]"));
+        // And the actual object content
+        assert!(formatted.contains("**metadata:** {\n  \"timestamp\": \"2023-01-01T00:00:00Z\",\n  \"version\": \"1.0\"\n}"));
     }
 
     #[test]
