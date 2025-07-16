@@ -399,6 +399,8 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                 // Potentially clear other related state if needed, e.g., thinking indicators
                 app.state.is_thinking = false;
                 app.state.is_responding = false;
+                // Request focus when response processing completes so user can type immediately
+                app.state.should_focus_input = true;
 
                 // Ensure current_response_id is also cleared if the stream truly finished.
                 // This might already be handled by AgentEvent::LlmChunk is_final=true,
@@ -562,6 +564,8 @@ fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: bool, i
                 app.state.current_response_id = None;
                 app.state.is_streaming_response = false;
                 app.state.is_waiting_for_response = false;
+                // Request focus when thinking/response completes so user can type immediately
+                app.state.should_focus_input = true;
                 if std::env::var("SAGITTA_STREAMING_DEBUG").is_ok() {
                     log::debug!("handle_llm_chunk: Completed streaming response for ID: '{current_id}'");
                 } else {

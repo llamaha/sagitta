@@ -286,7 +286,7 @@ pub fn chat_input_ui(
                 }
             } else if is_waiting {
                 ui.add_space(4.0);
-                ui.small(RichText::new("Claude is thinking...").color(hint_color));
+                ui.small(RichText::new("Sagitta Code is thinking...").color(hint_color));
                 ui.spinner();
             }
         });
@@ -363,7 +363,7 @@ pub fn chat_input_ui(
                                 } else if is_in_loop {
                                     "Input disabled during reasoning loop..."
                                 } else {
-                                    "Input disabled while Claude is thinking..."
+                                    "Input disabled while Sagitta Code is thinking..."
                                 })
                                 .desired_width(ui.available_width())
                                 .min_size(Vec2::new(ui.available_width(), 60.0))
@@ -388,7 +388,7 @@ pub fn chat_input_ui(
                         } else if is_in_loop {
                             "Input disabled during reasoning loop..."
                         } else {
-                            "Input disabled while Claude is thinking..."
+                            "Input disabled while Sagitta Code is thinking..."
                         })
                         .desired_width(ui.available_width())
                         .min_size(Vec2::new(ui.available_width(), 60.0))
