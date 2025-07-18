@@ -266,6 +266,26 @@ impl ProviderSetupDialog {
                             .size(12.0)
                             .color(theme.hint_text_color()));
                         
+                        ui.add_space(16.0);
+                        
+                        // Claude Code Router option
+                        let ccr_selected = ui.selectable_value(
+                            &mut self.selected_provider,
+                            ProviderType::ClaudeCodeRouter,
+                            "◉ Claude Code Router"
+                        ).clicked();
+                        
+                        if ccr_selected {
+                            self.initialize_default_configs();
+                        }
+                        
+                        ui.label(RichText::new("• Routes Claude Code API calls to alternative providers")
+                            .size(12.0)
+                            .color(theme.hint_text_color()));
+                        ui.label(RichText::new("• Requires ccr command-line tool to be installed")
+                            .size(12.0)
+                            .color(theme.hint_text_color()));
+                        
                         ui.add_space(8.0);
                     });
                     
@@ -307,9 +327,12 @@ impl ProviderSetupDialog {
                                     });
                             },
                             ProviderType::ClaudeCodeRouter => {
-                                ui.label(RichText::new("📋 Claude Code Router is a placeholder for future implementation.")
+                                ui.label(RichText::new("✅ Claude Code Router uses the ccr command-line tool.")
+                                    .color(theme.success_color()));
+                                ui.label(RichText::new("Make sure you have ccr installed and configured.")
+                                    .size(12.0)
                                     .color(theme.hint_text_color()));
-                                ui.label(RichText::new("This will enable smart routing to multiple LLM providers.")
+                                ui.label(RichText::new("It will route requests to your configured providers.")
                                     .size(12.0)
                                     .color(theme.hint_text_color()));
                             },
