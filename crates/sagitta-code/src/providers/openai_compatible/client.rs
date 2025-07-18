@@ -1,21 +1,19 @@
 use super::translator::OpenAITranslator;
 use super::types::*;
+use super::stream_processor::FinalChunk;
 use crate::llm::client::{
-    GroundingConfig, LlmClient, LlmResponse, Message, MessagePart, Role, StreamChunk,
+    GroundingConfig, LlmClient, LlmResponse, Message, MessagePart, StreamChunk,
     ThinkingConfig, TokenUsage, ToolDefinition,
 };
 use crate::providers::claude_code::mcp_integration::McpIntegration;
 use crate::utils::errors::SagittaCodeError;
 use async_trait::async_trait;
-use futures_util::stream::{self, StreamExt};
 use futures_util::Stream;
 use reqwest::Client;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use uuid::Uuid;
 
 pub struct OpenAICompatibleClient {
     base_url: String,
@@ -182,13 +180,14 @@ impl OpenAICompatibleClient {
         })
     }
 
-    async fn generate_internal(
+    fn build_request(
         &self,
         messages: &[Message],
         tools: &[ToolDefinition],
-    ) -> Result<LlmResponse, SagittaCodeError> {
+        stream: bool,
+    ) -> Result<OpenAIChatRequest, SagittaCodeError> {
         // Log incoming tools
-        log::info!("OpenAICompatible: generate_internal called with {} tools", tools.len());
+        log::info!("OpenAICompatible: building request with {} tools, stream={}", tools.len(), stream);
         for tool in tools {
             log::info!("  Tool: {} - {}", tool.name, tool.description);
         }
@@ -209,7 +208,7 @@ impl OpenAICompatibleClient {
         let openai_messages = OpenAITranslator::messages_to_openai(messages);
 
         // Build OpenAI request
-        let openai_request = OpenAIChatRequest {
+        Ok(OpenAIChatRequest {
             model: self.model.clone(),
             messages: openai_messages,
             tools: if openai_tools.is_empty() {
@@ -228,8 +227,16 @@ impl OpenAICompatibleClient {
             frequency_penalty: None,
             presence_penalty: None,
             stop: None,
-            stream: false,
-        };
+            stream: stream,
+        })
+    }
+
+    async fn generate_internal(
+        &self,
+        messages: &[Message],
+        tools: &[ToolDefinition],
+    ) -> Result<LlmResponse, SagittaCodeError> {
+        let openai_request = self.build_request(messages, tools, false)?;
 
         // Log the full request being sent
         log::info!("OpenAICompatible: Sending request to {}/chat/completions", self.base_url);
@@ -318,47 +325,34 @@ impl LlmClient for OpenAICompatibleClient {
     {
         log::debug!("OpenAICompatibleClient::generate_stream called with {} messages and {} tools", messages.len(), tools.len());
         
-        // For now, simulate streaming by converting non-streaming response
-        // TODO: Implement real streaming with SSE
-        let response = self.generate(messages, tools).await?;
-
-        // Convert response to stream chunks
-        let mut chunks: Vec<Result<StreamChunk, SagittaCodeError>> = Vec::new();
-        let usage = response.usage.clone();
+        let request = self.build_request(messages, tools, true)?;
         
-        // Add chunks for message parts (text content and tool calls)
-        // Note: message.parts already contains tool calls from the translator
-        for (i, part) in response.message.parts.into_iter().enumerate() {
-            chunks.push(Ok(StreamChunk {
-                part,
-                is_final: false,
-                finish_reason: None,
-                token_usage: None,
-            }));
+        let response = self.http_client
+            .post(&format!("{}/chat/completions", self.base_url))
+            .json(&request)
+            .timeout(self.timeout)
+            .send()
+            .await
+            .map_err(|e| SagittaCodeError::NetworkError(e.to_string()))?;
+        
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(SagittaCodeError::LlmError(format!(
+                "OpenAI-compatible API error: {}",
+                error_text
+            )));
         }
         
-        // Don't add tool calls from response.tool_calls - they're already in message.parts
-        // The translator (openai_to_message) already converts OpenAI tool_calls to MessagePart::ToolCall
-        log::debug!("OpenAICompatibleClient::generate_stream: Added {} chunks from message parts", chunks.len());
+        // Get the byte stream from the response
+        let byte_stream = response.bytes_stream();
         
-        // Mark the last chunk as final
-        if let Some(last_chunk) = chunks.last_mut() {
-            if let Ok(chunk) = last_chunk {
-                chunk.is_final = true;
-                chunk.finish_reason = Some("stop".to_string());
-                chunk.token_usage = usage;
-            }
-        } else {
-            // If no chunks, create a final empty chunk
-            chunks.push(Ok(StreamChunk {
-                part: MessagePart::Text { text: "".to_string() },
-                is_final: true,
-                finish_reason: Some("stop".to_string()),
-                token_usage: usage,
-            }));
-        }
-
-        Ok(Box::pin(stream::iter(chunks)))
+        // Create SSE parser
+        let sse_parser = super::sse_parser::SseParser::new(byte_stream);
+        
+        // Create the stream adapter
+        let stream = OpenAIStreamAdapter::new(sse_parser);
+        
+        Ok(Box::pin(stream))
     }
 
     async fn generate_stream_with_thinking(
@@ -390,6 +384,164 @@ impl LlmClient for OpenAICompatibleClient {
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError>
     {
         self.generate_stream(messages, tools).await
+    }
+}
+
+use pin_project::pin_project;
+use std::task::{Context as TaskContext, Poll};
+use futures_util::stream::StreamExt;
+
+/// Stream adapter that converts SSE events to StreamChunks
+#[pin_project]
+struct OpenAIStreamAdapter<S> {
+    #[pin]
+    sse_stream: S,
+    stream_processor: super::stream_processor::StreamProcessor,
+    done: bool,
+}
+
+impl<S> OpenAIStreamAdapter<S> {
+    fn new(sse_stream: S) -> Self {
+        Self {
+            sse_stream,
+            stream_processor: super::stream_processor::StreamProcessor::new(),
+            done: false,
+        }
+    }
+}
+
+impl<S> Stream for OpenAIStreamAdapter<S>
+where
+    S: Stream<Item = Result<super::sse_parser::SseEvent, Box<dyn std::error::Error + Send + Sync>>>,
+{
+    type Item = Result<StreamChunk, SagittaCodeError>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Option<Self::Item>> {
+        let mut this = self.project();
+        
+        if *this.done {
+            return Poll::Ready(None);
+        }
+        
+        loop {
+            match this.sse_stream.as_mut().poll_next(cx) {
+                Poll::Ready(Some(Ok(event))) => {
+                    match event {
+                        super::sse_parser::SseEvent::Message(json) => {
+                            // Check if this is an error message
+                            if let Some(error) = json.get("error") {
+                                let error_msg = error.get("message")
+                                    .and_then(|m| m.as_str())
+                                    .unwrap_or("Unknown error");
+                                return Poll::Ready(Some(Err(SagittaCodeError::LlmError(
+                                    format!("OpenAI API error: {}", error_msg)
+                                ))));
+                            }
+                            
+                            // Process the delta
+                            if let Some(choices) = json.get("choices").and_then(|v| v.as_array()) {
+                                if let Some(choice) = choices.first() {
+                                    if let Some(delta) = choice.get("delta") {
+                                        let chunks = this.stream_processor.process_delta(delta);
+                                        
+                                        // If we got chunks, return the first one
+                                        if !chunks.is_empty() {
+                                            // Return the first chunk directly
+                                            let chunk = chunks.into_iter().next().unwrap();
+                                            return Poll::Ready(Some(Ok(chunk)));
+                                        }
+                                    }
+                                    
+                                    // Check for finish reason
+                                    if let Some(finish_reason) = choice.get("finish_reason")
+                                        .and_then(|v| v.as_str())
+                                        .filter(|s| !s.is_empty() && *s != "null")
+                                    {
+                                        // Get any remaining tool calls
+                                        let tool_calls = this.stream_processor.get_completed_tool_calls();
+                                        if !tool_calls.is_empty() {
+                                            // Emit tool calls before final chunk
+                                            for tool_call in tool_calls {
+                                                return Poll::Ready(Some(Ok(StreamChunk {
+                                                    part: MessagePart::ToolCall {
+                                                        tool_call_id: tool_call.id,
+                                                        name: tool_call.name,
+                                                        parameters: tool_call.arguments,
+                                                    },
+                                                    is_final: false,
+                                                    finish_reason: None,
+                                                    token_usage: None,
+                                                })));
+                                            }
+                                        }
+                                        
+                                        // Create final chunk
+                                        if let Some(final_chunk) = this.stream_processor.create_final_chunk(Some(finish_reason.to_string())) {
+                                            return Poll::Ready(Some(Ok(StreamChunk {
+                                                part: MessagePart::Text { 
+                                                    text: final_chunk.content 
+                                                },
+                                                is_final: true,
+                                                finish_reason: Some(finish_reason.to_string()),
+                                                token_usage: None, // TODO: Extract token usage if available
+                                            })));
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Continue processing
+                            continue;
+                        }
+                        super::sse_parser::SseEvent::Done => {
+                            *this.done = true;
+                            
+                            // Emit any remaining content or tool calls
+                            let tool_calls = this.stream_processor.get_completed_tool_calls();
+                            if !tool_calls.is_empty() {
+                                // Return tool calls one by one
+                                if let Some(tool_call) = tool_calls.into_iter().next() {
+                                    return Poll::Ready(Some(Ok(StreamChunk {
+                                        part: MessagePart::ToolCall {
+                                            tool_call_id: tool_call.id,
+                                            name: tool_call.name,
+                                            parameters: tool_call.arguments,
+                                        },
+                                        is_final: false,
+                                        finish_reason: None,
+                                        token_usage: None,
+                                    })));
+                                }
+                            }
+                            
+                            // Create final chunk if needed
+                            if let Some(final_chunk) = this.stream_processor.create_final_chunk(Some("stop".to_string())) {
+                                return Poll::Ready(Some(Ok(StreamChunk {
+                                    part: MessagePart::Text { 
+                                        text: final_chunk.content 
+                                    },
+                                    is_final: true,
+                                    finish_reason: Some("stop".to_string()),
+                                    token_usage: None,
+                                })));
+                            }
+                            
+                            return Poll::Ready(None);
+                        }
+                    }
+                }
+                Poll::Ready(Some(Err(e))) => {
+                    return Poll::Ready(Some(Err(SagittaCodeError::NetworkError(
+                        format!("SSE parse error: {}", e)
+                    ))));
+                }
+                Poll::Ready(None) => {
+                    *this.done = true;
+                    return Poll::Ready(None);
+                }
+                Poll::Pending => return Poll::Pending,
+            }
+        }
     }
 }
 
