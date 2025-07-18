@@ -1,6 +1,6 @@
 //! Provider factory for creating and managing provider instances
 
-use super::{ProviderType, ProviderManager, Provider, ClaudeCodeProvider, ProviderConfig};
+use super::{ProviderType, ProviderManager, Provider, ClaudeCodeProvider, ClaudeCodeRouterProvider, ProviderConfig};
 use super::openai_compatible::OpenAICompatibleProvider;
 use crate::utils::errors::SagittaCodeError;
 
@@ -35,8 +35,7 @@ impl ProviderFactory {
             },
 
             ProviderType::ClaudeCodeRouter => {
-                // TODO: Implement ClaudeCodeRouterProvider
-                Err(SagittaCodeError::ConfigError("Claude Code Router provider not yet implemented".to_string()))
+                Ok(Box::new(ClaudeCodeRouterProvider::new()))
             },
 
             ProviderType::MistralRs => {
@@ -57,6 +56,10 @@ impl ProviderFactory {
         // Register OpenAI Compatible provider
         let openai_provider = self.create_provider(ProviderType::OpenAICompatible)?;
         manager.register_provider(openai_provider);
+        
+        // Register Claude Code Router provider
+        let claude_router_provider = self.create_provider(ProviderType::ClaudeCodeRouter)?;
+        manager.register_provider(claude_router_provider);
         
         Ok(())
     }
