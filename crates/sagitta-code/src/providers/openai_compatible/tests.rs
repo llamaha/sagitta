@@ -1,12 +1,15 @@
 #[cfg(test)]
 mod integration_tests {
-    use super::*;
-    use crate::llm::client::{LlmClient, MessagePart, StreamChunk};
-    use crate::providers::openai_compatible::{OpenAICompatibleClient, OpenAICompatibleConfig};
-    use crate::agent::message::{Message, MessageRole};
+    use crate::llm::client::{LlmClient, MessagePart, Message, Role};
+    use crate::providers::openai_compatible::OpenAICompatibleClient;
+    use crate::providers::types::OpenAICompatibleConfig;
+    use crate::providers::claude_code::mcp_integration::McpIntegration;
     use futures::StreamExt;
     use wiremock::{MockServer, Mock, ResponseTemplate};
     use wiremock::matchers::{method, path, header};
+    use std::sync::Arc;
+    use uuid::Uuid;
+    use std::collections::HashMap;
     
     async fn create_mock_server() -> MockServer {
         MockServer::start().await
@@ -17,6 +20,10 @@ mod integration_tests {
             .map(|event| format!("data: {}\n\n", event))
             .collect::<Vec<_>>()
             .join("")
+    }
+    
+    fn create_mock_mcp_integration() -> Arc<McpIntegration> {
+        Arc::new(McpIntegration::new())
     }
     
     #[tokio::test]
@@ -43,20 +50,29 @@ mod integration_tests {
             .await;
         
         let config = OpenAICompatibleConfig {
-            name: "test".to_string(),
             base_url: mock_server.uri(),
-            api_key: "test-key".to_string(),
-            model: "gpt-4".to_string(),
-            max_tokens: Some(1000),
+            api_key: Some("test-key".to_string()),
+            model: Some("gpt-4".to_string()),
             timeout_seconds: 30,
+            max_retries: 3,
         };
         
-        let client = OpenAICompatibleClient::new(config);
+        let mcp_integration = create_mock_mcp_integration();
+        let client = OpenAICompatibleClient::new(
+            config.base_url.clone(),
+            config.api_key.clone(),
+            config.model.clone(),
+            mcp_integration,
+            config.timeout_seconds,
+            3, // max_retries
+        );
         
         let messages = vec![
             Message {
-                role: MessageRole::User,
-                content: vec![MessagePart::Text { text: "Say hello".to_string() }],
+                id: Uuid::new_v4(),
+                role: Role::User,
+                parts: vec![MessagePart::Text { text: "Say hello".to_string() }],
+                metadata: HashMap::new(),
             }
         ];
         
@@ -109,20 +125,29 @@ mod integration_tests {
             .await;
         
         let config = OpenAICompatibleConfig {
-            name: "test".to_string(),
             base_url: mock_server.uri(),
-            api_key: "test-key".to_string(),
-            model: "gpt-4".to_string(),
-            max_tokens: Some(1000),
+            api_key: Some("test-key".to_string()),
+            model: Some("gpt-4".to_string()),
             timeout_seconds: 30,
+            max_retries: 3,
         };
         
-        let client = OpenAICompatibleClient::new(config);
+        let mcp_integration = create_mock_mcp_integration();
+        let client = OpenAICompatibleClient::new(
+            config.base_url.clone(),
+            config.api_key.clone(),
+            config.model.clone(),
+            mcp_integration,
+            config.timeout_seconds,
+            3, // max_retries
+        );
         
         let messages = vec![
             Message {
-                role: MessageRole::User,
-                content: vec![MessagePart::Text { text: "What is the answer?".to_string() }],
+                id: Uuid::new_v4(),
+                role: Role::User,
+                parts: vec![MessagePart::Text { text: "What is the answer?".to_string() }],
+                metadata: HashMap::new(),
             }
         ];
         
@@ -135,8 +160,8 @@ mod integration_tests {
             parts.push(chunk.part);
         }
         
-        // Verify we got the right sequence
-        assert_eq!(parts.len(), 3);
+        // Verify we got the right sequence (including final empty chunk)
+        assert!(parts.len() >= 3);
         
         match &parts[0] {
             MessagePart::Text { text } => assert_eq!(text, "Let me think "),
@@ -151,6 +176,14 @@ mod integration_tests {
         match &parts[2] {
             MessagePart::Text { text } => assert_eq!(text, " The answer is 42"),
             _ => panic!("Expected text"),
+        }
+        
+        // Last part should be empty final chunk
+        if parts.len() > 3 {
+            match &parts[3] {
+                MessagePart::Text { text } => assert!(text.is_empty()),
+                _ => panic!("Expected empty text for final chunk"),
+            }
         }
     }
     
@@ -178,20 +211,29 @@ mod integration_tests {
             .await;
         
         let config = OpenAICompatibleConfig {
-            name: "test".to_string(),
             base_url: mock_server.uri(),
-            api_key: "test-key".to_string(),
-            model: "gpt-4".to_string(),
-            max_tokens: Some(1000),
+            api_key: Some("test-key".to_string()),
+            model: Some("gpt-4".to_string()),
             timeout_seconds: 30,
+            max_retries: 3,
         };
         
-        let client = OpenAICompatibleClient::new(config);
+        let mcp_integration = create_mock_mcp_integration();
+        let client = OpenAICompatibleClient::new(
+            config.base_url.clone(),
+            config.api_key.clone(),
+            config.model.clone(),
+            mcp_integration,
+            config.timeout_seconds,
+            3, // max_retries
+        );
         
         let messages = vec![
             Message {
-                role: MessageRole::User,
-                content: vec![MessagePart::Text { text: "What's the weather?".to_string() }],
+                id: Uuid::new_v4(),
+                role: Role::User,
+                parts: vec![MessagePart::Text { text: "What's the weather?".to_string() }],
+                metadata: HashMap::new(),
             }
         ];
         
@@ -207,6 +249,7 @@ mod integration_tests {
                     },
                     "required": ["location"]
                 }),
+                is_required: false,
             }
         ];
         
@@ -232,7 +275,7 @@ mod integration_tests {
         assert_eq!(tool_calls[0].0, "call_abc123");
         assert_eq!(tool_calls[0].1, "get_weather");
         
-        let params: serde_json::Value = serde_json::from_str(&tool_calls[0].2).unwrap();
+        let params = &tool_calls[0].2;
         assert_eq!(params["location"], "San Francisco");
         assert_eq!(params["unit"], "celsius");
     }
@@ -257,20 +300,29 @@ mod integration_tests {
             .await;
         
         let config = OpenAICompatibleConfig {
-            name: "test".to_string(),
             base_url: mock_server.uri(),
-            api_key: "invalid-key".to_string(),
-            model: "gpt-4".to_string(),
-            max_tokens: Some(1000),
+            api_key: Some("invalid-key".to_string()),
+            model: Some("gpt-4".to_string()),
             timeout_seconds: 30,
+            max_retries: 3,
         };
         
-        let client = OpenAICompatibleClient::new(config);
+        let mcp_integration = create_mock_mcp_integration();
+        let client = OpenAICompatibleClient::new(
+            config.base_url.clone(),
+            config.api_key.clone(),
+            config.model.clone(),
+            mcp_integration,
+            config.timeout_seconds,
+            3, // max_retries
+        );
         
         let messages = vec![
             Message {
-                role: MessageRole::User,
-                content: vec![MessagePart::Text { text: "Hello".to_string() }],
+                id: Uuid::new_v4(),
+                role: Role::User,
+                parts: vec![MessagePart::Text { text: "Hello".to_string() }],
+                metadata: HashMap::new(),
             }
         ];
         

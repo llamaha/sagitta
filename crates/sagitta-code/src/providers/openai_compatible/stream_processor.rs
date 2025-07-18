@@ -110,6 +110,7 @@ impl StreamProcessor {
                     
                     self.is_thinking = false;
                     remaining = &remaining[end_pos + 11..]; // Skip past </thinking>
+                    // Continue processing any remaining content
                 } else {
                     // No closing tag, add all to thinking buffer
                     self.thinking_buffer.push_str(remaining);
@@ -368,11 +369,16 @@ mod tests {
     fn test_final_chunk() {
         let mut processor = StreamProcessor::new();
         
-        // Add some content
-        processor.process_delta(&json!({"content": "Final message"}));
+        // Manually add content to buffer (simulating incomplete content)
+        processor.content_buffer.push_str("Incomplete content");
         
         // Create final chunk
         let final_chunk = processor.create_final_chunk(Some("stop".to_string())).unwrap();
-        assert_eq!(final_chunk.content, "Final message");
+        assert_eq!(final_chunk.content, "Incomplete content");
+        
+        // Test with no content
+        let mut processor2 = StreamProcessor::new();
+        let final_chunk2 = processor2.create_final_chunk(Some("stop".to_string()));
+        assert!(final_chunk2.is_none());
     }
 }

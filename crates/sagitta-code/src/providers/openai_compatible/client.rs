@@ -398,6 +398,7 @@ struct OpenAIStreamAdapter<S> {
     sse_stream: S,
     stream_processor: super::stream_processor::StreamProcessor,
     done: bool,
+    buffered_chunks: Vec<StreamChunk>,
 }
 
 impl<S> OpenAIStreamAdapter<S> {
@@ -406,6 +407,7 @@ impl<S> OpenAIStreamAdapter<S> {
             sse_stream,
             stream_processor: super::stream_processor::StreamProcessor::new(),
             done: false,
+            buffered_chunks: Vec::new(),
         }
     }
 }
@@ -421,6 +423,12 @@ where
         
         if *this.done {
             return Poll::Ready(None);
+        }
+        
+        // Return buffered chunks first
+        if !this.buffered_chunks.is_empty() {
+            let chunk = this.buffered_chunks.remove(0);
+            return Poll::Ready(Some(Ok(chunk)));
         }
         
         loop {
@@ -444,11 +452,14 @@ where
                                     if let Some(delta) = choice.get("delta") {
                                         let chunks = this.stream_processor.process_delta(delta);
                                         
-                                        // If we got chunks, return the first one
+                                        // Buffer all chunks
                                         if !chunks.is_empty() {
-                                            // Return the first chunk directly
-                                            let chunk = chunks.into_iter().next().unwrap();
-                                            return Poll::Ready(Some(Ok(chunk)));
+                                            this.buffered_chunks.extend(chunks);
+                                            // Return the first buffered chunk
+                                            if !this.buffered_chunks.is_empty() {
+                                                let chunk = this.buffered_chunks.remove(0);
+                                                return Poll::Ready(Some(Ok(chunk)));
+                                            }
                                         }
                                     }
                                     
@@ -485,6 +496,16 @@ where
                                                 finish_reason: Some(finish_reason.to_string()),
                                                 token_usage: None, // TODO: Extract token usage if available
                                             })));
+                                        } else {
+                                            // Even if no content, emit an empty final chunk to signal completion
+                                            return Poll::Ready(Some(Ok(StreamChunk {
+                                                part: MessagePart::Text { 
+                                                    text: String::new()
+                                                },
+                                                is_final: true,
+                                                finish_reason: Some(finish_reason.to_string()),
+                                                token_usage: None,
+                                            })));
                                         }
                                     }
                                 }
@@ -514,7 +535,7 @@ where
                                 }
                             }
                             
-                            // Create final chunk if needed
+                            // Create final chunk
                             if let Some(final_chunk) = this.stream_processor.create_final_chunk(Some("stop".to_string())) {
                                 return Poll::Ready(Some(Ok(StreamChunk {
                                     part: MessagePart::Text { 
@@ -524,9 +545,17 @@ where
                                     finish_reason: Some("stop".to_string()),
                                     token_usage: None,
                                 })));
+                            } else {
+                                // Even if no content, emit an empty final chunk to signal completion
+                                return Poll::Ready(Some(Ok(StreamChunk {
+                                    part: MessagePart::Text { 
+                                        text: String::new()
+                                    },
+                                    is_final: true,
+                                    finish_reason: Some("stop".to_string()),
+                                    token_usage: None,
+                                })));
                             }
-                            
-                            return Poll::Ready(None);
                         }
                     }
                 }
