@@ -55,6 +55,9 @@ impl ClaudeCodeProvider {
             additional_directories: vec![], // Provider config doesn't have this
             mcp_config: None, // Will be set up by client
             auto_ide: false, // Provider config doesn't have this
+            use_claude_code_router: config.get_option::<bool>("use_claude_code_router")
+                .unwrap_or_else(|_| None)
+                .unwrap_or(false),
         })
     }
 }
