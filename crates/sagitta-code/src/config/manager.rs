@@ -172,8 +172,8 @@ mod tests {
         let mut manager = ConfigManager::default();
         
         // Test setting current provider
-        manager.set_current_provider(ProviderType::MistralRs);
-        assert_eq!(manager.current_provider(), ProviderType::MistralRs);
+        manager.set_current_provider(ProviderType::OpenAICompatible);
+        assert_eq!(manager.current_provider(), ProviderType::OpenAICompatible);
         
         // Test getting provider configs
         assert!(manager.current_provider_config().is_some());
@@ -193,7 +193,7 @@ mod tests {
         
         // Create and save config
         let mut manager = ConfigManager::default();
-        manager.set_current_provider(ProviderType::MistralRs);
+        manager.set_current_provider(ProviderType::OpenAICompatible);
         assert!(manager.save_to_path(&config_path).is_ok());
         
         // Verify file was created
@@ -201,7 +201,7 @@ mod tests {
         
         // Load config and verify
         let loaded_manager = ConfigManager::load_from_path(&config_path).unwrap();
-        assert_eq!(loaded_manager.current_provider(), ProviderType::MistralRs);
+        assert_eq!(loaded_manager.current_provider(), ProviderType::OpenAICompatible);
     }
     
     #[test]

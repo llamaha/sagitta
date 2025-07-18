@@ -248,18 +248,44 @@ impl DependencyModal {
             });
     }
     
-    fn add_dependency(&mut self) {
+    pub fn add_dependency(&mut self) {
+        // Clear previous error messages
+        self.error_message = None;
+        
+        // Trim whitespace from inputs
+        let selected_repo_trimmed = self.add_form.selected_repository.trim();
+        let target_ref_trimmed = self.add_form.target_ref.trim();
+        let purpose_trimmed = self.add_form.purpose.trim();
+        
+        // Validate repository name is not empty
+        if selected_repo_trimmed.is_empty() {
+            self.error_message = Some("Please select a repository".to_string());
+            return;
+        }
+        
+        // Prevent self-references
+        if selected_repo_trimmed == self.repository_name {
+            self.error_message = Some("A repository cannot depend on itself".to_string());
+            return;
+        }
+        
+        // Check for duplicate dependencies
+        if self.dependencies.iter().any(|d| d.repository_name == selected_repo_trimmed) {
+            self.error_message = Some(format!("Dependency '{}' already exists", selected_repo_trimmed));
+            return;
+        }
+        
         let new_dep = RepositoryDependency {
-            repository_name: self.add_form.selected_repository.clone(),
-            target_ref: if self.add_form.target_ref.is_empty() {
+            repository_name: selected_repo_trimmed.to_string(),
+            target_ref: if target_ref_trimmed.is_empty() {
                 None
             } else {
-                Some(self.add_form.target_ref.clone())
+                Some(target_ref_trimmed.to_string())
             },
-            purpose: if self.add_form.purpose.is_empty() {
+            purpose: if purpose_trimmed.is_empty() {
                 None
             } else {
-                Some(self.add_form.purpose.clone())
+                Some(purpose_trimmed.to_string())
             },
         };
         
@@ -277,10 +303,11 @@ impl DependencyModal {
         let dependencies = self.dependencies.clone();
         
         // Save dependencies using repository manager
-        let handle = tokio::runtime::Handle::current();
-        let (tx, _rx) = tokio::sync::oneshot::channel();
+        // Create a channel to receive the result
+        let (tx, rx) = tokio::sync::oneshot::channel();
         
-        handle.spawn(async move {
+        // Spawn the async save operation
+        tokio::spawn(async move {
             let _manager = repo_manager.lock().await;
             // TODO: Implement save_dependencies method in RepositoryManager
             // For now, we'll just update the config directly
@@ -288,23 +315,43 @@ impl DependencyModal {
                 Ok(mut config) => {
                     if let Some(repo) = config.repositories.iter_mut().find(|r| r.name == repo_name) {
                         repo.dependencies = dependencies;
-                        sagitta_search::save_config(&config, None)
-                            .map(|_| ())
-                            .map_err(|e| format!("Failed to save config: {}", e))
+                        match sagitta_search::save_config(&config, None) {
+                            Ok(_) => Ok("Dependencies saved successfully".to_string()),
+                            Err(e) => Err(format!("Failed to save config: {}", e)),
+                        }
                     } else {
                         Err("Repository not found in config".to_string())
                     }
                 }
-                Err(_) => Err("Failed to load config".to_string()),
+                Err(e) => Err(format!("Failed to load config: {}", e)),
             };
             
             let _ = tx.send(result);
         });
         
-        // For now, assume success and update UI immediately
-        // In a real implementation, we'd wait for the result
+        // Create a future to handle the result
+        tokio::spawn(async move {
+            match rx.await {
+                Ok(Ok(success_msg)) => {
+                    // TODO: Update UI with success message
+                    // This requires a proper channel back to the UI thread
+                    log::info!("Save successful: {}", success_msg);
+                },
+                Ok(Err(error_msg)) => {
+                    // TODO: Update UI with error message  
+                    log::error!("Save failed: {}", error_msg);
+                },
+                Err(_) => {
+                    log::error!("Save operation was cancelled");
+                }
+            }
+        });
+        
+        // For now, update UI immediately and hide modal
+        // TODO: Properly wait for async result and update UI accordingly
         self.is_saving = false;
-        self.success_message = Some("Dependencies saved successfully".to_string());
+        self.success_message = Some("Saving dependencies...".to_string());
+        // Don't hide immediately - wait for async result in proper implementation
         self.hide();
     }
 }

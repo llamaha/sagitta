@@ -170,6 +170,17 @@ mod provider_settings_tests {
                             ui.text_edit_singleline(&mut String::from("http://localhost:1234"));
                         });
                     },
+                    ProviderType::OpenAICompatible => {
+                        ui.label("OpenAI Compatible Settings");
+                        ui.horizontal(|ui| {
+                            ui.label("Base URL:");
+                            ui.text_edit_singleline(&mut String::from("http://localhost:11434"));
+                        });
+                    },
+                    ProviderType::ClaudeCodeRouter => {
+                        ui.label("Claude Code Router Settings");
+                        ui.label("Router settings not implemented yet");
+                    },
                 }
                 });
             });
@@ -201,7 +212,7 @@ mod provider_settings_tests {
                 config.try_into().unwrap();
             
             assert_eq!(mistral_config.base_url, "http://localhost:1234");
-            assert_eq!(mistral_config.api_token, Some("test-key".to_string()));
+            assert_eq!(mistral_config.api_key, Some("test-key".to_string()));
             assert_eq!(mistral_config.model, Some("mistral-7b".to_string()));
             assert_eq!(mistral_config.timeout_seconds, 120);
         }
@@ -460,6 +471,12 @@ mod provider_ui_integration_tests {
                             },
                             ProviderType::MistralRs => {
                                 ui.label("Mistral.rs settings");
+                            },
+                            ProviderType::OpenAICompatible => {
+                                ui.label("OpenAI Compatible settings");
+                            },
+                            ProviderType::ClaudeCodeRouter => {
+                                ui.label("Claude Code Router settings");
                             },
                         }
                     });

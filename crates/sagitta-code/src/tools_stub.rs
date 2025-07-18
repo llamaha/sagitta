@@ -79,7 +79,16 @@ impl WorkingDirectoryManager {
         Ok(WorkingDirectoryManager { base_dir: path })
     }
     
-    pub fn set_repository_context(&self, _repo_path: Option<&std::path::Path>) -> Result<(), std::io::Error> {
+    pub fn set_repository_context(&self, repo_path: Option<&std::path::Path>) -> Result<(), std::io::Error> {
+        if let Some(path) = repo_path {
+            // Actually change the working directory
+            std::env::set_current_dir(path)?;
+            
+            // Write the repository path to the state file for MCP tools
+            self.write_repository_state_file(path)?;
+            
+            log::info!("WorkingDirectoryManager: Changed directory to: {}", path.display());
+        }
         Ok(())
     }
     
@@ -87,7 +96,33 @@ impl WorkingDirectoryManager {
         &self.base_dir
     }
     
-    pub fn change_directory(&self, _path: &std::path::Path) -> Result<(), std::io::Error> {
+    pub fn change_directory(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
+        // Actually change the working directory
+        std::env::set_current_dir(path)?;
+        
+        // Write the repository path to the state file for MCP tools
+        self.write_repository_state_file(path)?;
+        
+        log::info!("WorkingDirectoryManager: Changed directory to: {}", path.display());
+        Ok(())
+    }
+    
+    /// Write the current repository path to the state file for MCP tools
+    fn write_repository_state_file(&self, repo_path: &std::path::Path) -> Result<(), std::io::Error> {
+        // Create the state file path
+        let mut state_path = dirs::config_dir()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Could not find config directory"))?;
+        state_path.push("sagitta-code");
+        
+        // Create the directory if it doesn't exist
+        std::fs::create_dir_all(&state_path)?;
+        
+        state_path.push("current_repository.txt");
+        
+        // Write the repository path to the state file
+        std::fs::write(&state_path, repo_path.to_string_lossy().as_bytes())?;
+        
+        log::debug!("WorkingDirectoryManager: Wrote repository path to state file: {}", state_path.display());
         Ok(())
     }
 }

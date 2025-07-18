@@ -84,19 +84,7 @@ impl ProviderSetupDialog {
                 // Use default Claude Code configuration
                 ProviderConfig::default_for_provider(ProviderType::ClaudeCode)
             },
-            ProviderType::MistralRs => {
-                let mistral_config = crate::providers::types::MistralRsConfig {
-                    base_url: self.mistral_base_url.clone(),
-                    api_token: if self.mistral_api_key.trim().is_empty() { 
-                        None 
-                    } else { 
-                        Some(self.mistral_api_key.clone()) 
-                    },
-                    model: None,
-                    timeout_seconds: 120,
-                };
-                mistral_config.into()
-            },
+
             ProviderType::OpenAICompatible => {
                 // For now, treat OpenAICompatible the same as MistralRs
                 let openai_config = crate::providers::types::OpenAICompatibleConfig {
@@ -112,6 +100,16 @@ impl ProviderSetupDialog {
                 };
                 openai_config.into()
             },
+
+            ProviderType::ClaudeCodeRouter => {
+                // Use default Claude Code Router configuration
+                ProviderConfig::default_for_provider(ProviderType::ClaudeCodeRouter)
+            },
+
+            ProviderType::MistralRs => {
+                // Use default MistralRs configuration
+                ProviderConfig::default_for_provider(ProviderType::MistralRs)
+            },
         };
         
         (self.selected_provider, config)
@@ -126,13 +124,7 @@ impl ProviderSetupDialog {
         );
         
         // Mistral.rs - use current UI values
-        let mistral_config = crate::providers::types::MistralRsConfig {
-            base_url: self.mistral_base_url.clone(),
-            api_token: if self.mistral_api_key.trim().is_empty() { None } else { Some(self.mistral_api_key.clone()) },
-            model: None,
-            timeout_seconds: 120,
-        };
-        self.provider_configs.insert(ProviderType::MistralRs, mistral_config.into());
+
     }
     
     /// Validate the current configuration
@@ -143,7 +135,7 @@ impl ProviderSetupDialog {
                 // We assume it's properly configured if selected
                 Ok(())
             },
-            ProviderType::MistralRs | ProviderType::OpenAICompatible => {
+            ProviderType::OpenAICompatible => {
                 if self.mistral_base_url.trim().is_empty() {
                     return Err("Base URL is required".to_string());
                 }
@@ -153,6 +145,14 @@ impl ProviderSetupDialog {
                     return Err("Base URL must start with http:// or https://".to_string());
                 }
                 
+                Ok(())
+            },
+            ProviderType::ClaudeCodeRouter => {
+                // Claude Code Router - for now, no special validation needed
+                Ok(())
+            },
+            ProviderType::MistralRs => {
+                // MistralRs - for now, no special validation needed
                 Ok(())
             },
         }
@@ -246,25 +246,27 @@ impl ProviderSetupDialog {
                             .size(12.0)
                             .color(theme.hint_text_color()));
                         
-                        ui.add_space(8.0);
+                        ui.add_space(16.0);
                         
-                        // Mistral.rs option  
-                        let mistral_selected = ui.selectable_value(
+                        // OpenAI Compatible option
+                        let openai_selected = ui.selectable_value(
                             &mut self.selected_provider,
-                            ProviderType::MistralRs,
-                            "◈ Mistral.rs (Local)"
+                            ProviderType::OpenAICompatible,
+                            "◉ OpenAI Compatible"
                         ).clicked();
                         
-                        if mistral_selected {
+                        if openai_selected {
                             self.initialize_default_configs();
                         }
                         
-                        ui.label(RichText::new("• Local AI server with OpenAI-compatible API")
+                        ui.label(RichText::new("• Compatible with OpenAI API (Mistral.rs, Ollama, etc.)")
                             .size(12.0)
                             .color(theme.hint_text_color()));
-                        ui.label(RichText::new("• Run your own models locally")
+                        ui.label(RichText::new("• Requires base URL configuration")
                             .size(12.0)
                             .color(theme.hint_text_color()));
+                        
+                        ui.add_space(8.0);
                     });
                     
                     ui.add_space(12.0);
@@ -286,7 +288,7 @@ impl ProviderSetupDialog {
                                     .size(12.0)
                                     .color(theme.hint_text_color()));
                             },
-                            ProviderType::MistralRs | ProviderType::OpenAICompatible => {
+                            ProviderType::OpenAICompatible => {
                                 Grid::new("mistral_setup_grid")
                                     .num_columns(2)
                                     .spacing([8.0, 8.0])
@@ -303,6 +305,20 @@ impl ProviderSetupDialog {
                                         ui.end_row();
                                         
                                     });
+                            },
+                            ProviderType::ClaudeCodeRouter => {
+                                ui.label(RichText::new("📋 Claude Code Router is a placeholder for future implementation.")
+                                    .color(theme.hint_text_color()));
+                                ui.label(RichText::new("This will enable smart routing to multiple LLM providers.")
+                                    .size(12.0)
+                                    .color(theme.hint_text_color()));
+                            },
+                            ProviderType::MistralRs => {
+                                ui.label(RichText::new("📋 Mistral.rs is a placeholder for future implementation.")
+                                    .color(theme.hint_text_color()));
+                                ui.label(RichText::new("This will enable local Mistral model support.")
+                                    .size(12.0)
+                                    .color(theme.hint_text_color()));
                             },
                         }
                     });

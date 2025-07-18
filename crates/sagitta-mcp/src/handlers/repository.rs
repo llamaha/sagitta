@@ -288,12 +288,31 @@ pub async fn handle_repository_list(
             let last_updated = enhanced_repo.last_sync_time
                 .map(|dt| dt.to_rfc3339());
 
+            // Convert dependencies to DependencyInfo
+            let dependencies: Vec<crate::mcp::types::DependencyInfo> = enhanced_repo.dependencies.iter()
+                .map(|dep| {
+                    // Get additional info about the dependency repository
+                    let dep_repo = filtered_config.repositories.iter()
+                        .find(|r| r.name == dep.repository_name);
+                    
+                    crate::mcp::types::DependencyInfo {
+                        repository_name: dep.repository_name.clone(),
+                        target_ref: dep.target_ref.clone(),
+                        purpose: dep.purpose.clone(),
+                        is_available: dep_repo.is_some(),
+                        local_path: dep_repo.map(|r| r.local_path.to_string_lossy().to_string()),
+                        current_ref: dep_repo.and_then(|r| r.active_branch.clone()),
+                    }
+                })
+                .collect();
+
             RepositoryInfo {
                 name: enhanced_repo.name,
                 remote: enhanced_repo.url, // Corrected: enhanced_repo.url is already a String
                 description,
                 branch,
                 last_updated,
+                dependencies,
             }
         })
         .collect();

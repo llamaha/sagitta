@@ -548,8 +548,8 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 "type": "object",
                 "properties": {
                     "file_path": { "type": "string", "description": "The absolute path to the file to read" },
-                    "limit": { "type": "integer", "description": "Optional number of lines to read" },
-                    "offset": { "type": "integer", "description": "Optional line number to start reading from" }
+                    "start_line": { "type": "integer", "description": "Optional line number to start reading from (1-based)" },
+                    "end_line": { "type": "integer", "description": "Optional line number to stop reading at (inclusive)" }
                 },
                 "required": ["file_path"]
             }),

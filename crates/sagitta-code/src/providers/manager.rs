@@ -252,7 +252,7 @@ impl ProviderManager {
 mod tests {
     use super::*;
     use crate::providers::{ClaudeCodeProvider};
-    use crate::providers::mistral_rs::MistralRsProvider;
+    // MistralRs provider removed - use OpenAI compatible instead
     
     fn create_test_manager() -> ProviderManager {
         ProviderManager::new()

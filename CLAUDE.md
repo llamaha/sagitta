@@ -15,6 +15,7 @@ This file contains important guidelines for working with this codebase. Please f
   - Finding Go interfaces: `query="handler interface", elementType="interface", lang="go"`
 - Query for similar implementations when adding new features
 - Search for existing patterns before creating new ones
+- If running "cargo build" ALWAYS use "cargo build --release --all --features cuda".  Otherwise you break the semantic search features and we can't continue.
 
 ## Dependencies and Libraries
 

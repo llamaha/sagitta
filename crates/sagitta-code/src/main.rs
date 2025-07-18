@@ -94,8 +94,18 @@ mod gui_app {
         let app_creator = move |cc: &CreationContext| -> Result<Box<dyn eframe::App>, Box<dyn std::error::Error + Send + Sync>> {
             let (update_sender, update_receiver) = tokio::sync::mpsc::channel(10);
             
-            // Set up the app style
-            let visuals = egui::Visuals::dark();
+            // Set up the app style with theme-aware tooltip colors
+            let mut visuals = egui::Visuals::dark();
+            
+            // Get theme colors from the initialized app
+            let app_theme = app_instance.current_theme;
+            
+            // Configure tooltip colors to match the theme
+            // Configure tooltip shadow to match theme
+            // Note: Shadow fields may vary between egui versions
+            visuals.widgets.noninteractive.bg_fill = app_theme.panel_background();
+            visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, app_theme.text_color());
+            
             cc.egui_ctx.set_visuals(visuals);
             
             // Configure fonts for better emoji support
@@ -150,7 +160,7 @@ mod cli_app {
     use sagitta_search::qdrant_client_trait::QdrantClientTrait;
     use qdrant_client::Qdrant;
     // Qdrant collection imports removed - no longer needed after removing analyze_input tool
-    use sagitta_code::llm::client::LlmClient; // Corrected path
+
     // TODO: Phase 2 - Re-enable when claude_code module is implemented
     // use sagitta_code::llm::claude_code::client::ClaudeCodeClient;
 
