@@ -246,6 +246,11 @@ impl ConversationService {
         Ok(())
     }
     
+    /// Get the underlying conversation manager
+    pub fn manager(&self) -> Arc<dyn ConversationManager> {
+        self.manager.clone()
+    }
+    
     /// Get last refresh timestamp
     pub async fn last_refresh_time(&self) -> DateTime<Utc> {
         let last_refresh = self.last_refresh.read().await;

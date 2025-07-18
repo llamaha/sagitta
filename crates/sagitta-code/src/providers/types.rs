@@ -8,10 +8,12 @@ use std::collections::HashMap;
 pub enum ProviderType {
     /// Claude Code provider (original implementation)
     ClaudeCode,
-    /// Mistral.rs provider (OpenAI-compatible API)
-    MistralRs,
     /// Generic OpenAI-compatible provider
     OpenAICompatible,
+    /// Claude Code Router proxy provider
+    ClaudeCodeRouter,
+    /// Mistral.rs provider (in development)
+    MistralRs,
     // Future providers (commented out for now):
     // Gemini,
     // LlamaCpp,
@@ -22,8 +24,9 @@ impl ProviderType {
     pub fn display_name(&self) -> &'static str {
         match self {
             ProviderType::ClaudeCode => "Claude Code",
-            ProviderType::MistralRs => "Mistral.rs",
             ProviderType::OpenAICompatible => "OpenAI Compatible",
+            ProviderType::ClaudeCodeRouter => "Claude Code Router",
+            ProviderType::MistralRs => "Mistral.rs",
         }
     }
     
@@ -31,8 +34,9 @@ impl ProviderType {
     pub fn id(&self) -> &'static str {
         match self {
             ProviderType::ClaudeCode => "claude-code",
-            ProviderType::MistralRs => "mistral-rs",
             ProviderType::OpenAICompatible => "openai-compatible",
+            ProviderType::ClaudeCodeRouter => "claude-code-router",
+            ProviderType::MistralRs => "mistral-rs",
         }
     }
     
@@ -40,8 +44,9 @@ impl ProviderType {
     pub fn all() -> Vec<ProviderType> {
         vec![
             ProviderType::ClaudeCode,
-            ProviderType::MistralRs,
             ProviderType::OpenAICompatible,
+            ProviderType::ClaudeCodeRouter,
+            ProviderType::MistralRs,
         ]
     }
 }
@@ -83,8 +88,9 @@ impl ProviderConfig {
     pub fn default_for_provider(provider_type: ProviderType) -> Self {
         match provider_type {
             ProviderType::ClaudeCode => ClaudeCodeConfig::default().into(),
-            ProviderType::MistralRs => MistralRsConfig::default().into(),
             ProviderType::OpenAICompatible => OpenAICompatibleConfig::default().into(),
+            ProviderType::ClaudeCodeRouter => ClaudeCodeRouterConfig::default().into(),
+            ProviderType::MistralRs => MistralRsConfig::default().into(),
         }
     }
     
@@ -152,29 +158,7 @@ impl Default for ClaudeCodeConfig {
     }
 }
 
-/// Mistral.rs specific configuration options
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MistralRsConfig {
-    /// Base URL for the Mistral.rs server
-    pub base_url: String,
-    /// Optional API token for authentication
-    pub api_token: Option<String>,
-    /// Timeout for HTTP requests in seconds
-    pub timeout_seconds: u64,
-    /// Model name to use (optional, server default if not specified)
-    pub model: Option<String>,
-}
 
-impl Default for MistralRsConfig {
-    fn default() -> Self {
-        Self {
-            base_url: "http://localhost:1234".to_string(),
-            api_token: None,
-            timeout_seconds: 120, // 2 minutes
-            model: None,
-        }
-    }
-}
 
 /// OpenAI-compatible provider configuration options
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -203,6 +187,60 @@ impl Default for OpenAICompatibleConfig {
     }
 }
 
+/// Claude Code Router provider configuration options
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaudeCodeRouterConfig {
+    /// Base URL for the Claude Code Router (proxy server)
+    pub base_url: String,
+    /// Optional API key for authentication
+    pub api_key: Option<String>,
+    /// Path to the router configuration file
+    pub config_path: Option<String>,
+    /// Timeout for HTTP requests in seconds
+    pub timeout_seconds: u64,
+    /// Maximum number of retries on failure
+    pub max_retries: u32,
+}
+
+impl Default for ClaudeCodeRouterConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "http://localhost:3000".to_string(),
+            api_key: None,
+            config_path: None,
+            timeout_seconds: 120, // 2 minutes
+            max_retries: 3,
+        }
+    }
+}
+
+/// Mistral.rs provider configuration options
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MistralRsConfig {
+    /// Base URL for the Mistral.rs API
+    pub base_url: String,
+    /// Optional API key for authentication
+    pub api_key: Option<String>,
+    /// Optional model to use (uses server default if not specified)
+    pub model: Option<String>,
+    /// Timeout for HTTP requests in seconds
+    pub timeout_seconds: u64,
+    /// Maximum number of retries on failure
+    pub max_retries: u32,
+}
+
+impl Default for MistralRsConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "http://localhost:1234/v1".to_string(),
+            api_key: None,
+            model: None,
+            timeout_seconds: 120, // 2 minutes
+            max_retries: 3,
+        }
+    }
+}
+
 /// Converts a ClaudeCodeConfig to a generic ProviderConfig
 impl From<ClaudeCodeConfig> for ProviderConfig {
     fn from(config: ClaudeCodeConfig) -> Self {
@@ -217,23 +255,7 @@ impl From<ClaudeCodeConfig> for ProviderConfig {
     }
 }
 
-/// Converts a MistralRsConfig to a generic ProviderConfig
-impl From<MistralRsConfig> for ProviderConfig {
-    fn from(config: MistralRsConfig) -> Self {
-        let mut provider_config = ProviderConfig::new(ProviderType::MistralRs);
-        provider_config.set_option("base_url", &config.base_url).unwrap();
-        // Only set api_token if it's Some
-        if let Some(ref api_token) = config.api_token {
-            provider_config.set_option("api_token", api_token).unwrap();
-        }
-        provider_config.set_option("timeout_seconds", config.timeout_seconds).unwrap();
-        // Only set model if it's Some
-        if let Some(ref model) = config.model {
-            provider_config.set_option("model", model).unwrap();
-        }
-        provider_config
-    }
-}
+
 
 /// Converts a generic ProviderConfig to a ClaudeCodeConfig
 impl TryFrom<&ProviderConfig> for ClaudeCodeConfig {
@@ -263,34 +285,7 @@ impl TryFrom<ProviderConfig> for ClaudeCodeConfig {
     }
 }
 
-/// Converts a generic ProviderConfig to a MistralRsConfig
-impl TryFrom<&ProviderConfig> for MistralRsConfig {
-    type Error = ConfigError;
-    
-    fn try_from(config: &ProviderConfig) -> Result<Self, Self::Error> {
-        if config.provider_type != ProviderType::MistralRs {
-            return Err(ConfigError::InvalidValue(
-                format!("Expected MistralRs provider, got {:?}", config.provider_type)
-            ));
-        }
-        
-        Ok(MistralRsConfig {
-            base_url: config.get_required_option("base_url")?,
-            api_token: config.get_option("api_token")?,
-            timeout_seconds: config.get_option("timeout_seconds")?.unwrap_or(120),
-            model: config.get_option("model")?,
-        })
-    }
-}
 
-/// Converts an owned ProviderConfig to a MistralRsConfig
-impl TryFrom<ProviderConfig> for MistralRsConfig {
-    type Error = ConfigError;
-    
-    fn try_from(config: ProviderConfig) -> Result<Self, Self::Error> {
-        MistralRsConfig::try_from(&config)
-    }
-}
 
 /// Converts an OpenAICompatibleConfig to a generic ProviderConfig
 impl From<OpenAICompatibleConfig> for ProviderConfig {
@@ -338,6 +333,104 @@ impl TryFrom<ProviderConfig> for OpenAICompatibleConfig {
     
     fn try_from(config: ProviderConfig) -> Result<Self, Self::Error> {
         OpenAICompatibleConfig::try_from(&config)
+    }
+}
+
+/// Converts a ClaudeCodeRouterConfig to a generic ProviderConfig
+impl From<ClaudeCodeRouterConfig> for ProviderConfig {
+    fn from(config: ClaudeCodeRouterConfig) -> Self {
+        let mut provider_config = ProviderConfig::new(ProviderType::ClaudeCodeRouter);
+        provider_config.set_option("base_url", &config.base_url).unwrap();
+        // Only set api_key if it's Some
+        if let Some(ref api_key) = config.api_key {
+            provider_config.set_option("api_key", api_key).unwrap();
+        }
+        // Only set config_path if it's Some
+        if let Some(ref config_path) = config.config_path {
+            provider_config.set_option("config_path", config_path).unwrap();
+        }
+        provider_config.set_option("timeout_seconds", config.timeout_seconds).unwrap();
+        provider_config.set_option("max_retries", config.max_retries).unwrap();
+        provider_config
+    }
+}
+
+/// Converts a generic ProviderConfig to a ClaudeCodeRouterConfig
+impl TryFrom<&ProviderConfig> for ClaudeCodeRouterConfig {
+    type Error = ConfigError;
+    
+    fn try_from(config: &ProviderConfig) -> Result<Self, Self::Error> {
+        if config.provider_type != ProviderType::ClaudeCodeRouter {
+            return Err(ConfigError::InvalidValue(
+                format!("Expected ClaudeCodeRouter provider, got {:?}", config.provider_type)
+            ));
+        }
+        
+        Ok(ClaudeCodeRouterConfig {
+            base_url: config.get_required_option("base_url")?,
+            api_key: config.get_option("api_key")?,
+            config_path: config.get_option("config_path")?,
+            timeout_seconds: config.get_option("timeout_seconds")?.unwrap_or(120),
+            max_retries: config.get_option("max_retries")?.unwrap_or(3),
+        })
+    }
+}
+
+/// Converts an owned ProviderConfig to a ClaudeCodeRouterConfig
+impl TryFrom<ProviderConfig> for ClaudeCodeRouterConfig {
+    type Error = ConfigError;
+    
+    fn try_from(config: ProviderConfig) -> Result<Self, Self::Error> {
+        ClaudeCodeRouterConfig::try_from(&config)
+    }
+}
+
+/// Converts a MistralRsConfig to a generic ProviderConfig
+impl From<MistralRsConfig> for ProviderConfig {
+    fn from(config: MistralRsConfig) -> Self {
+        let mut provider_config = ProviderConfig::new(ProviderType::MistralRs);
+        provider_config.set_option("base_url", &config.base_url).unwrap();
+        // Only set api_key if it's Some
+        if let Some(ref api_key) = config.api_key {
+            provider_config.set_option("api_key", api_key).unwrap();
+        }
+        // Only set model if it's Some
+        if let Some(ref model) = config.model {
+            provider_config.set_option("model", model).unwrap();
+        }
+        provider_config.set_option("timeout_seconds", config.timeout_seconds).unwrap();
+        provider_config.set_option("max_retries", config.max_retries).unwrap();
+        provider_config
+    }
+}
+
+/// Converts a generic ProviderConfig to a MistralRsConfig
+impl TryFrom<&ProviderConfig> for MistralRsConfig {
+    type Error = ConfigError;
+    
+    fn try_from(config: &ProviderConfig) -> Result<Self, Self::Error> {
+        if config.provider_type != ProviderType::MistralRs {
+            return Err(ConfigError::InvalidValue(
+                format!("Expected MistralRs provider, got {:?}", config.provider_type)
+            ));
+        }
+        
+        Ok(MistralRsConfig {
+            base_url: config.get_required_option("base_url")?,
+            api_key: config.get_option("api_key")?,
+            model: config.get_option("model")?,
+            timeout_seconds: config.get_option("timeout_seconds")?.unwrap_or(120),
+            max_retries: config.get_option("max_retries")?.unwrap_or(3),
+        })
+    }
+}
+
+/// Converts an owned ProviderConfig to a MistralRsConfig
+impl TryFrom<ProviderConfig> for MistralRsConfig {
+    type Error = ConfigError;
+    
+    fn try_from(config: ProviderConfig) -> Result<Self, Self::Error> {
+        MistralRsConfig::try_from(&config)
     }
 }
 

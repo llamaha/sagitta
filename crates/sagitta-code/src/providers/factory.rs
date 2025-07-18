@@ -1,7 +1,6 @@
 //! Provider factory for creating and managing provider instances
 
-use super::{ProviderType, ProviderConfig, ProviderManager, Provider, ClaudeCodeProvider};
-use super::mistral_rs::MistralRsProvider;
+use super::{ProviderType, ProviderManager, Provider, ClaudeCodeProvider, ProviderConfig};
 use super::openai_compatible::OpenAICompatibleProvider;
 use crate::utils::errors::SagittaCodeError;
 
@@ -30,11 +29,19 @@ impl ProviderFactory {
             ProviderType::ClaudeCode => {
                 Ok(Box::new(ClaudeCodeProvider::new()))
             },
-            ProviderType::MistralRs => {
-                Ok(Box::new(MistralRsProvider::new()))
-            },
+
             ProviderType::OpenAICompatible => {
                 Ok(Box::new(OpenAICompatibleProvider::new()))
+            },
+
+            ProviderType::ClaudeCodeRouter => {
+                // TODO: Implement ClaudeCodeRouterProvider
+                Err(SagittaCodeError::ConfigError("Claude Code Router provider not yet implemented".to_string()))
+            },
+
+            ProviderType::MistralRs => {
+                // TODO: Implement MistralRs provider
+                Err(SagittaCodeError::ConfigError("MistralRs provider not yet implemented".to_string()))
             },
         }
     }
@@ -45,9 +52,7 @@ impl ProviderFactory {
         let claude_provider = self.create_provider(ProviderType::ClaudeCode)?;
         manager.register_provider(claude_provider);
         
-        // Register Mistral.rs provider
-        let mistral_provider = self.create_provider(ProviderType::MistralRs)?;
-        manager.register_provider(mistral_provider);
+
         
         // Register OpenAI Compatible provider
         let openai_provider = self.create_provider(ProviderType::OpenAICompatible)?;
@@ -74,15 +79,7 @@ mod tests {
         assert!(!provider.requires_api_key());
     }
     
-    #[test]
-    fn test_create_mistral_rs_provider() {
-        let factory = create_test_factory();
-        let provider = factory.create_provider(ProviderType::MistralRs).unwrap();
-        
-        assert_eq!(provider.provider_type(), ProviderType::MistralRs);
-        assert_eq!(provider.display_name(), "Mistral.rs");
-        assert!(!provider.requires_api_key());
-    }
+
     
     #[test]
     fn test_create_manager_with_all_providers() {
@@ -91,7 +88,7 @@ mod tests {
         
         let provider_types = manager.get_provider_types();
         assert!(provider_types.contains(&ProviderType::ClaudeCode));
-        assert!(provider_types.contains(&ProviderType::MistralRs));
+
         assert!(provider_types.contains(&ProviderType::OpenAICompatible));
     }
     
@@ -108,31 +105,11 @@ mod tests {
         
         // Test invalid provider type
         let mut invalid_config = config.clone();
-        invalid_config.provider_type = ProviderType::MistralRs;
+        invalid_config.provider_type = ProviderType::OpenAICompatible;
         assert!(provider.validate_config(&invalid_config).is_err());
     }
     
-    #[test]
-    fn test_mistral_rs_config_validation() {
-        let factory = create_test_factory();
-        let provider = factory.create_provider(ProviderType::MistralRs).unwrap();
-        
-        let config = provider.default_config();
-        match provider.validate_config(&config) {
-            Ok(_) => {},
-            Err(e) => panic!("Mistral.rs validation failed: {:?}", e),
-        }
-        
-        // Test invalid URL
-        let mut invalid_config = config.clone();
-        invalid_config.set_option("base_url", "invalid-url").unwrap();
-        assert!(provider.validate_config(&invalid_config).is_err());
-        
-        // Test empty URL
-        let mut empty_config = config.clone();
-        empty_config.set_option("base_url", "").unwrap();
-        assert!(provider.validate_config(&empty_config).is_err());
-    }
+
     
     #[test]
     fn test_create_openai_compatible_provider() {

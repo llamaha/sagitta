@@ -33,7 +33,7 @@ impl ClaudeMdModal {
         Self {
             is_open: false,
             template_content: String::new(),
-            auto_create_enabled: true,
+            auto_create_enabled: false,
             status_message: None,
             is_modified: false,
             config,
@@ -84,7 +84,7 @@ impl ClaudeMdModal {
             // If we can't get the lock immediately, use the default template
             log::warn!("CLAUDE.md modal: Could not acquire config lock, using default template");
             self.template_content = include_str!("../../templates/CLAUDE.md").to_string();
-            self.auto_create_enabled = true;
+            self.auto_create_enabled = false;
         }
     }
     

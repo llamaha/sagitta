@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use sagitta_search::config::{AppConfig, get_repo_base_path};
 
 use crate::config::{SagittaCodeConfig, save_config as save_sagitta_code_config};
-use crate::providers::types::{ProviderType, ProviderConfig};
+use crate::providers::types::ProviderType;
 // TODO: Re-enable when claude_code module is implemented in Phase 2
 // use crate::llm::claude_code::models::CLAUDE_CODE_MODELS;
 
@@ -62,9 +62,7 @@ pub struct SettingsPanel {
     
     // Provider Settings
     pub current_provider: ProviderType,
-    pub mistral_rs_base_url: String,
-    pub mistral_rs_api_key: String,
-    pub mistral_rs_model: String,
+
     
     // Test connection state
     pub test_connection_status: Option<String>,
@@ -137,18 +135,7 @@ impl SettingsPanel {
             
             // Provider Settings
             current_provider: initial_sagitta_code_config.current_provider,
-            mistral_rs_base_url: initial_sagitta_code_config.provider_configs
-                .get(&ProviderType::MistralRs)
-                .and_then(|config| config.get_option::<String>("base_url").ok().flatten())
-                .unwrap_or_else(|| "http://localhost:1234".to_string()),
-            mistral_rs_api_key: initial_sagitta_code_config.provider_configs
-                .get(&ProviderType::MistralRs)
-                .and_then(|config| config.get_option::<String>("api_token").ok().flatten())
-                .unwrap_or_default(),
-            mistral_rs_model: initial_sagitta_code_config.provider_configs
-                .get(&ProviderType::MistralRs)
-                .and_then(|config| config.get_option::<String>("model").ok().flatten())
-                .unwrap_or_else(|| "default".to_string()),
+
             
             // Test connection state
             test_connection_status: None,
@@ -397,13 +384,17 @@ impl SettingsPanel {
                                 egui::ComboBox::from_id_salt("current_provider_combo")
                                     .selected_text(match self.current_provider {
                                         ProviderType::ClaudeCode => "Claude Code",
-                                        ProviderType::MistralRs => "Mistral.rs",
+
                                         ProviderType::OpenAICompatible => "OpenAI Compatible",
+                                        ProviderType::ClaudeCodeRouter => "Claude Code Router",
+                                        ProviderType::MistralRs => "Mistral.rs",
                                     })
                                     .show_ui(ui, |ui| {
                                         ui.selectable_value(&mut self.current_provider, ProviderType::ClaudeCode, "Claude Code");
-                                        ui.selectable_value(&mut self.current_provider, ProviderType::MistralRs, "Mistral.rs");
+
                                         ui.selectable_value(&mut self.current_provider, ProviderType::OpenAICompatible, "OpenAI Compatible");
+                                        ui.selectable_value(&mut self.current_provider, ProviderType::ClaudeCodeRouter, "Claude Code Router");
+                                        ui.selectable_value(&mut self.current_provider, ProviderType::MistralRs, "Mistral.rs");
                                     });
                             });
                             
@@ -450,33 +441,19 @@ impl SettingsPanel {
                                         ui.label("Claude Code settings are configured in the section above.");
                                     });
                                 },
-                                ProviderType::MistralRs | ProviderType::OpenAICompatible => {
-                                    let title = if self.current_provider == ProviderType::MistralRs {
-                                        "Mistral.rs Provider Settings"
-                                    } else {
-                                        "OpenAI Compatible Provider Settings"
-                                    };
-                                    ui.collapsing(title, |ui| {
-                                        Grid::new("mistral_rs_settings_grid")
-                                            .num_columns(2)
-                                            .spacing([8.0, 8.0])
-                                            .show(ui, |ui| {
-                                                ui.label("Base URL:");
-                                                ui.add(TextEdit::singleline(&mut self.mistral_rs_base_url)
-                                                    .hint_text("http://localhost:1234"));
-                                                ui.end_row();
-
-                                                ui.label("API Key (Optional):");
-                                                ui.add(TextEdit::singleline(&mut self.mistral_rs_api_key)
-                                                    .password(true)
-                                                    .hint_text("Leave empty if no auth required"));
-                                                ui.end_row();
-
-                                                ui.label("Model:");
-                                                ui.add(TextEdit::singleline(&mut self.mistral_rs_model)
-                                                    .hint_text("default"));
-                                                ui.end_row();
-                                            });
+                                ProviderType::OpenAICompatible => {
+                                    ui.collapsing("OpenAI Compatible Provider Settings", |ui| {
+                                        ui.label("OpenAI Compatible settings will be implemented here.");
+                                    });
+                                },
+                                ProviderType::ClaudeCodeRouter => {
+                                    ui.collapsing("Claude Code Router Provider Settings", |ui| {
+                                        ui.label("Claude Code Router settings will be implemented here.");
+                                    });
+                                },
+                                ProviderType::MistralRs => {
+                                    ui.collapsing("Mistral.rs Provider Settings", |ui| {
+                                        ui.label("Mistral.rs settings will be implemented here.");
                                     });
                                 },
                             }
@@ -839,21 +816,6 @@ impl SettingsPanel {
         updated_config.current_provider = self.current_provider;
         
         // Update provider-specific configurations
-        use crate::providers::types::MistralRsConfig;
-        
-        // Update or create MistralRs config
-        let mistral_rs_config = MistralRsConfig {
-            base_url: self.mistral_rs_base_url.clone(),
-            api_token: if self.mistral_rs_api_key.is_empty() { None } else { Some(self.mistral_rs_api_key.clone()) },
-            timeout_seconds: 120, // Default timeout
-            model: if self.mistral_rs_model.is_empty() { None } else { Some(self.mistral_rs_model.clone()) },
-        };
-        
-        // Convert to ProviderConfig and insert
-        updated_config.provider_configs.insert(
-            ProviderType::MistralRs,
-            mistral_rs_config.into(), // Use the From trait to convert
-        );
         
         // Preserve all other fields
         // and all other config sections (sagitta, ui, logging) from the original
@@ -887,9 +849,7 @@ impl SettingsPanel {
         let provider_type = self.current_provider.clone();
         let claude_model = self.claude_code_model.clone();
         let claude_path = self.claude_code_path.clone();
-        let mistral_base_url = self.mistral_rs_base_url.clone();
-        let mistral_api_key = self.mistral_rs_api_key.clone();
-        let mistral_model = self.mistral_rs_model.clone();
+
         
         // Spawn async task to test the connection
         tokio::spawn(async move {
@@ -897,9 +857,6 @@ impl SettingsPanel {
                 provider_type,
                 claude_model,
                 claude_path,
-                mistral_base_url,
-                mistral_api_key,
-                mistral_model,
             ).await;
             
             // Send the result through the channel
@@ -923,16 +880,19 @@ impl SettingsPanel {
         provider_type: ProviderType,
         claude_model: String,
         claude_path: String,
-        mistral_base_url: String,
-        mistral_api_key: String,
-        mistral_model: String,
     ) -> Result<String, String> {
         match provider_type {
             ProviderType::ClaudeCode => {
                 Self::test_claude_code_connection(claude_model, claude_path).await
             },
-            ProviderType::MistralRs | ProviderType::OpenAICompatible => {
-                Self::test_mistral_rs_connection(mistral_base_url, mistral_api_key, mistral_model).await
+            ProviderType::OpenAICompatible => {
+                Ok("OpenAI Compatible connection test not implemented yet".to_string())
+            },
+            ProviderType::ClaudeCodeRouter => {
+                Ok("Claude Code Router connection test not implemented yet".to_string())
+            },
+            ProviderType::MistralRs => {
+                Ok("Mistral.rs connection test not implemented yet".to_string())
             },
         }
     }
@@ -986,74 +946,7 @@ impl SettingsPanel {
             model, version_info.trim()))
     }
     
-    async fn test_mistral_rs_connection(base_url: String, api_key: String, model: String) -> Result<String, String> {
-        use reqwest::Client;
-        use std::time::Duration;
-        use serde_json::json;
-        
-        log::info!("Testing Mistral.rs connection to: {} with model: {}", base_url, model);
-        
-        let client = Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()
-            .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
-        
-        // First, try to get the models list to verify the server is responding
-        let models_url = format!("{}/v1/models", base_url);
-        let mut request = client.get(&models_url);
-        
-        if !api_key.is_empty() {
-            request = request.header("Authorization", format!("Bearer {}", api_key));
-        }
-        
-        let response = request.send().await
-            .map_err(|e| format!("Failed to connect to Mistral.rs server at {}: {}", base_url, e))?;
-        
-        if !response.status().is_success() {
-            return Err(format!("Mistral.rs server returned error {}: {}", 
-                response.status(), response.text().await.unwrap_or_default()));
-        }
-        
-        let models_response: serde_json::Value = response.json().await
-            .map_err(|e| format!("Failed to parse models response: {}", e))?;
-        
-        log::info!("Available models: {}", models_response);
-        
-        // Try a simple chat completion request
-        let chat_url = format!("{}/v1/chat/completions", base_url);
-        let mut request = client.post(&chat_url);
-        
-        if !api_key.is_empty() {
-            request = request.header("Authorization", format!("Bearer {}", api_key));
-        }
-        
-        let test_body = json!({
-            "model": model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "Hello, can you respond with just 'OK' to confirm you're working?"
-                }
-            ],
-            "max_tokens": 10
-        });
-        
-        let response = request.json(&test_body).send().await
-            .map_err(|e| format!("Failed to send test request: {}", e))?;
-        
-        if !response.status().is_success() {
-            return Err(format!("Mistral.rs test request failed {}: {}", 
-                response.status(), response.text().await.unwrap_or_default()));
-        }
-        
-        let completion_response: serde_json::Value = response.json().await
-            .map_err(|e| format!("Failed to parse completion response: {}", e))?;
-        
-        log::info!("Mistral.rs test response: {}", completion_response);
-        
-        Ok(format!("Mistral.rs connection successful! Server: {}, Model: {}", 
-            base_url, model))
-    }
+
 
     /// Apply provider changes and restart the application
     fn apply_provider_changes(&mut self) {

@@ -386,7 +386,16 @@ impl RepoPanel {
     
     /// Set the sync orchestrator (usually done after initialization)
     pub fn set_sync_orchestrator(&mut self, sync_orchestrator: Arc<SyncOrchestrator>) {
-        self.sync_orchestrator = Some(sync_orchestrator);
+        self.sync_orchestrator = Some(sync_orchestrator.clone());
+        
+        // Also set the sync orchestrator on the repository manager for auto-sync functionality
+        let repo_manager_clone = Arc::clone(&self.repo_manager);
+        let sync_orchestrator_clone = sync_orchestrator;
+        
+        tokio::spawn(async move {
+            let mut repo_manager = repo_manager_clone.lock().await;
+            repo_manager.set_sync_orchestrator(sync_orchestrator_clone);
+        });
     }
     
     /// Set the active tab

@@ -41,8 +41,8 @@ use regex;
 /// Convert raw tool names (including MCP format) to human-friendly display names
 fn get_human_friendly_tool_name(raw_name: &str) -> String {
     match raw_name {
-        // MCP tool patterns
-        name if name.contains("__query") => "Semantic Code Search".to_string(),
+        // MCP tool patterns - more specific patterns first
+        name if name.contains("__query") || name.contains("semantic_code_search") => "Semantic Code Search".to_string(),
         name if name.contains("__repository_view_file") => "View Repository File".to_string(),
         name if name.contains("__repository_search_file") => "Search Repository Files".to_string(),
         name if name.contains("__repository_list_branches") => "List Repository Branches".to_string(),
@@ -52,13 +52,29 @@ fn get_human_friendly_tool_name(raw_name: &str) -> String {
         name if name.contains("__repository_remove") => "Remove Repository".to_string(),
         name if name.contains("__repository_sync") => "Sync Repository".to_string(),
         name if name.contains("__repository_switch_branch") => "Switch Repository Branch".to_string(),
+        name if name.contains("__search_file") => "Search Files".to_string(),
         name if name.contains("__ping") => "Ping".to_string(),
         
+        // MCP file operations
+        name if name.contains("__read_file") => "File Read".to_string(),
+        name if name.contains("__write_file") => "File Write".to_string(),
+        name if name.contains("__edit_file") => "File Edit".to_string(),
+        name if name.contains("__multi_edit_file") => "Multi File Edit".to_string(),
+        name if name.contains("__shell_execute") => "Shell Execute".to_string(),
+        
+        // MCP todo operations
+        name if name.contains("__todo_read") => "Todo Read".to_string(),
+        name if name.contains("__todo_write") => "Todo Write".to_string(),
+        
+        // Native tool names (non-MCP)
+        "read_file" => "File Read".to_string(),
+        "write_file" => "File Write".to_string(),
+        
         // Native Claude tools
-        "Read" => "Read File".to_string(),
-        "Write" => "Write File".to_string(),
-        "Edit" => "Edit File".to_string(),
-        "MultiEdit" => "Multi Edit File".to_string(),
+        "Read" => "File Read".to_string(),
+        "Write" => "File Write".to_string(),
+        "Edit" => "File Edit".to_string(),
+        "MultiEdit" => "Multi File Edit".to_string(),
         "Bash" => "Run Command".to_string(),
         "WebSearch" => "Search Web".to_string(),
         "WebFetch" => "Fetch Web Content".to_string(),
@@ -97,6 +113,60 @@ fn get_human_friendly_tool_name(raw_name: &str) -> String {
     }
 }
 
+/// Get appropriate emoji icon for tool type
+fn get_tool_icon(raw_name: &str) -> &'static str {
+    match raw_name {
+        // MCP repository tools
+        name if name.contains("__repository_list") => "📂",
+        name if name.contains("__repository_add") => "📁",
+        name if name.contains("__repository_remove") => "🗑️",
+        name if name.contains("__repository_sync") => "🔄",
+        name if name.contains("__repository_switch_branch") => "🌿",
+        name if name.contains("__repository_list_branches") => "🌲",
+        name if name.contains("__repository_view_file") || name.contains("__repository_search_file") => "🔍",
+        name if name.contains("__repository_map") => "🗺️",
+        
+        // MCP search and query tools
+        name if name.contains("__query") || name.contains("semantic_code_search") => "🔎",
+        name if name.contains("__search_file") => "📄",
+        
+        // MCP connectivity
+        name if name.contains("__ping") => "📡",
+        
+        // MCP file operations
+        name if name.contains("__read_file") => "📖",
+        name if name.contains("__write_file") => "✏️",
+        name if name.contains("__edit_file") => "📝",
+        name if name.contains("__multi_edit_file") => "📋",
+        name if name.contains("__shell_execute") => "💻",
+        
+        // MCP todo operations
+        name if name.contains("__todo_read") => "📋",
+        name if name.contains("__todo_write") => "📝",
+        
+        // Native Claude tools
+        "Read" => "📖",
+        "Write" => "✏️", 
+        "Edit" => "📝",
+        "MultiEdit" => "📋",
+        "Bash" => "💻",
+        "WebSearch" => "🌐",
+        "WebFetch" => "🌍",
+        "TodoRead" => "📋",
+        "TodoWrite" => "📝",
+        "NotebookRead" => "📓",
+        "NotebookEdit" => "📝",
+        "Task" => "🤖",
+        "Glob" => "🔍",
+        "Grep" => "🔍",
+        "LS" => "📁",
+        "exit_plan_mode" => "🚪",
+        
+        // Default fallback
+        _ => "🔧",
+    }
+}
+
 /// Format tool parameters for display in the UI
 // Format tool parameters for inline display (excludes edit details)
 fn format_tool_parameters_for_inline(tool_name: &str, args: &serde_json::Value) -> Vec<(String, String)> {
@@ -105,18 +175,48 @@ fn format_tool_parameters_for_inline(tool_name: &str, args: &serde_json::Value) 
     if let Some(obj) = args.as_object() {
         // Special handling for common tools
         match tool_name {
-            name if name.contains("__query") => {
+            name if name.contains("__query") || name.contains("semantic_code_search") => {
                 // Check both camelCase (MCP style) and snake_case parameter names
                 if let Some(query) = obj.get("queryText").and_then(|v| v.as_str())
                     .or_else(|| obj.get("query").and_then(|v| v.as_str())) {
-                    params.push(("query".to_string(), format!("\"{}\"", query)));
+                    // Allow longer query text display for better readability
+                    let display_query = if query.len() > 120 {
+                        format!("{}...", &query[..117])
+                    } else {
+                        query.to_string()
+                    };
+                    params.push(("query".to_string(), format!("\"{}\"", display_query)));
                 }
-                if let Some(repo) = obj.get("repository").and_then(|v| v.as_str()) {
+                if let Some(repo) = obj.get("repositoryName").and_then(|v| v.as_str())
+                    .or_else(|| obj.get("repository").and_then(|v| v.as_str())) {
                     params.push(("repo".to_string(), repo.to_string()));
                 }
+                if let Some(element_type) = obj.get("elementType").and_then(|v| v.as_str()) {
+                    params.push(("type".to_string(), element_type.to_string()));
+                }
+                if let Some(lang) = obj.get("lang").and_then(|v| v.as_str()) {
+                    params.push(("lang".to_string(), lang.to_string()));
+                }
+                if let Some(limit) = obj.get("limit").and_then(|v| v.as_i64()) {
+                    params.push(("limit".to_string(), limit.to_string()));
+                }
             },
-            name if name == "Read" || name == "Write" || name.contains("__read_file") 
-                || name.contains("__write_file") || name.contains("__view_file") => {
+            name if name == "Read" || name.contains("__read_file") || name.contains("__view_file") => {
+                // Check both camelCase (MCP style) and snake_case parameter names
+                if let Some(path) = obj.get("filePath").and_then(|v| v.as_str())
+                    .or_else(|| obj.get("file_path").and_then(|v| v.as_str())) {
+                    params.push(("file".to_string(), path.to_string()));
+                }
+                if let Some(start) = obj.get("startLine").and_then(|v| v.as_i64())
+                    .or_else(|| obj.get("start_line").and_then(|v| v.as_i64())) {
+                    params.push(("start".to_string(), start.to_string()));
+                }
+                if let Some(end) = obj.get("endLine").and_then(|v| v.as_i64())
+                    .or_else(|| obj.get("end_line").and_then(|v| v.as_i64())) {
+                    params.push(("end".to_string(), end.to_string()));
+                }
+            },
+            name if name == "Write" || name.contains("__write_file") => {
                 // Check both camelCase (MCP style) and snake_case parameter names
                 if let Some(path) = obj.get("filePath").and_then(|v| v.as_str())
                     .or_else(|| obj.get("file_path").and_then(|v| v.as_str())) {
@@ -141,9 +241,9 @@ fn format_tool_parameters_for_inline(tool_name: &str, args: &serde_json::Value) 
             },
             "Bash" => {
                 if let Some(cmd) = obj.get("command").and_then(|v| v.as_str()) {
-                    // Truncate very long commands for inline display
-                    let display_cmd = if cmd.len() > 40 {
-                        format!("{}...", &cmd[..37])
+                    // Truncate very long commands for inline display (increased limit)
+                    let display_cmd = if cmd.len() > 80 {
+                        format!("{}...", &cmd[..77])
                     } else {
                         cmd.to_string()
                     };
@@ -173,9 +273,9 @@ fn format_tool_parameters_for_inline(tool_name: &str, args: &serde_json::Value) 
             },
             "WebFetch" => {
                 if let Some(url) = obj.get("url").and_then(|v| v.as_str()) {
-                    // Truncate very long URLs for inline display
-                    let display_url = if url.len() > 30 {
-                        format!("{}...", &url[..27])
+                    // Truncate very long URLs for inline display (increased limit)
+                    let display_url = if url.len() > 60 {
+                        format!("{}...", &url[..57])
                     } else {
                         url.to_string()
                     };
@@ -198,8 +298,8 @@ fn format_tool_parameters_for_inline(tool_name: &str, args: &serde_json::Value) 
                     
                     match value {
                         serde_json::Value::String(s) => {
-                            let display_value = if s.len() > 30 {
-                                format!("\"{}...\"", &s[..27])
+                            let display_value = if s.len() > 100 {
+                                format!("\"{}...\"", &s[..97])
                             } else {
                                 format!("\"{}\"", s)
                             };
@@ -227,22 +327,43 @@ fn format_tool_parameters(tool_name: &str, args: &serde_json::Value) -> Vec<(Str
     if let Some(obj) = args.as_object() {
         // Special handling for common tools
         match tool_name {
-            name if name.contains("__query") => {
+            name if name.contains("__query") || name.contains("semantic_code_search") => {
                 // Check both camelCase (MCP style) and snake_case parameter names
                 if let Some(query) = obj.get("queryText").and_then(|v| v.as_str())
                     .or_else(|| obj.get("query").and_then(|v| v.as_str())) {
-                    params.push(("Query".to_string(), query.to_string()));
+                    params.push(("QueryText".to_string(), query.to_string()));
                 }
-                if let Some(repo) = obj.get("repository").and_then(|v| v.as_str()) {
+                if let Some(repo) = obj.get("repositoryName").and_then(|v| v.as_str())
+                    .or_else(|| obj.get("repository").and_then(|v| v.as_str())) {
                     params.push(("Repository".to_string(), repo.to_string()));
+                }
+                if let Some(element_type) = obj.get("elementType").and_then(|v| v.as_str()) {
+                    params.push(("Type".to_string(), element_type.to_string()));
+                }
+                if let Some(lang) = obj.get("lang").and_then(|v| v.as_str()) {
+                    params.push(("Language".to_string(), lang.to_string()));
                 }
                 if let Some(limit) = obj.get("limit").and_then(|v| v.as_i64()) {
                     params.push(("Limit".to_string(), limit.to_string()));
                 }
             },
-            name if name == "Read" || name == "Write" || name == "Edit" 
-                || name.contains("__read_file") || name.contains("__write_file") 
-                || name.contains("__edit_file") || name.contains("__view_file") => {
+            name if name == "Read" || name.contains("__read_file") || name.contains("__view_file") => {
+                // Check both camelCase (MCP style) and snake_case parameter names
+                if let Some(path) = obj.get("filePath").and_then(|v| v.as_str())
+                    .or_else(|| obj.get("file_path").and_then(|v| v.as_str())) {
+                    params.push(("File".to_string(), path.to_string()));
+                }
+                if let Some(start) = obj.get("startLine").and_then(|v| v.as_i64())
+                    .or_else(|| obj.get("start_line").and_then(|v| v.as_i64())) {
+                    params.push(("Start Line".to_string(), start.to_string()));
+                }
+                if let Some(end) = obj.get("endLine").and_then(|v| v.as_i64())
+                    .or_else(|| obj.get("end_line").and_then(|v| v.as_i64())) {
+                    params.push(("End Line".to_string(), end.to_string()));
+                }
+            },
+            name if name == "Write" || name == "Edit" 
+                || name.contains("__write_file") || name.contains("__edit_file") => {
                 // Check both camelCase (MCP style) and snake_case parameter names
                 if let Some(path) = obj.get("filePath").and_then(|v| v.as_str())
                     .or_else(|| obj.get("file_path").and_then(|v| v.as_str())) {
@@ -575,6 +696,7 @@ pub struct ChatMessage {
     pub text: String,
     pub timestamp: chrono::DateTime<chrono::Utc>,
     pub id: Option<String>,
+    pub tool_calls: Vec<ToolCall>,
 }
 
 impl ChatMessage {
@@ -584,6 +706,7 @@ impl ChatMessage {
             text,
             timestamp: chrono::Utc::now(),
             id: None,
+            tool_calls: Vec::new(),
         }
     }
     
@@ -600,7 +723,7 @@ impl From<ChatMessage> for StreamingMessage {
             content: msg.text,
             status: MessageStatus::Complete,
             thinking_content: None,
-            tool_calls: Vec::new(),
+            tool_calls: msg.tool_calls,
             timestamp: msg.timestamp,
             message_type: MessageType::Normal,
             thinking_stream_content: String::new(),
@@ -1156,8 +1279,9 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
             String::new()
         };
         
-        // Format header text with tool icon and name
-        let header_text = format!("{status_icon} 🔧 {friendly_name}{inline_params}");
+        // Format header text with tool icon and name  
+        let tool_icon = get_tool_icon(&tool_call.name);
+        let header_text = format!("{tool_icon} {friendly_name}{inline_params}");
         
         // Apply tool color to the header for better visual distinction
         let header_text_colored = egui::RichText::new(header_text)
@@ -1310,15 +1434,33 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
                                 .max_height(1000.0)  // Increased height for better readability
                                 .min_scrolled_height(min_height)
                                 .id_salt(format!("tool_result_{}", tool_call.id))
-                                .auto_shrink([false, false])  // Don't auto-shrink to preserve content visibility
+                                .auto_shrink([true, true])  // Allow auto-shrink for proper sizing
                                 .show(ui, |ui| {
                                     ui.set_max_width(tool_card_width - 24.0);
                                     
-                                    // Check if this is a shell command result for special rendering (skip for errors)
+                                    // Check tool type for special rendering (skip for errors)
                                     if !matches!(tool_call.status, MessageStatus::Error(_)) && is_shell_command_result(&tool_call.name, &result_json) {
                                         render_terminal_output(ui, &result_json, app_theme);
                                     } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_code_change_result(&tool_call.name, &result_json) {
                                         render_diff_output(ui, &result_json, app_theme);
+                                    } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_file_read_result(&tool_call.name, &result_json) {
+                                        if let Some((key, value)) = render_file_read_output(ui, &result_json, app_theme) {
+                                            clicked_tool_result = Some((key, value));
+                                        }
+                                    } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_file_write_result(&tool_call.name, &result_json) {
+                                        if let Some((key, value)) = render_file_write_output(ui, &result_json, app_theme) {
+                                            clicked_tool_result = Some((key, value));
+                                        }
+                                    } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_search_result(&tool_call.name, &result_json) {
+                                        if let Some((key, value)) = render_search_output(ui, &result_json, app_theme) {
+                                            clicked_tool_result = Some((key, value));
+                                        }
+                                    } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_repository_result(&tool_call.name, &result_json) {
+                                        render_repository_output(ui, &result_json, app_theme);
+                                    } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_todo_result(&tool_call.name, &result_json) {
+                                        render_todo_output(ui, &result_json, app_theme);
+                                    } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_ping_result(&tool_call.name, &result_json) {
+                                        render_ping_output(ui, &result_json, app_theme);
                                     } else {
                                         // Default rendering with markdown support
                                         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
@@ -1335,11 +1477,29 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
                             // Small content - render directly without scroll area
                             ui.set_max_width(tool_card_width - 24.0);
                             
-                            // Check if this is a shell command result for special rendering (skip for errors)
+                            // Check tool type for special rendering (skip for errors)
                             if !matches!(tool_call.status, MessageStatus::Error(_)) && is_shell_command_result(&tool_call.name, &result_json) {
                                 render_terminal_output(ui, &result_json, app_theme);
                             } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_code_change_result(&tool_call.name, &result_json) {
                                 render_diff_output(ui, &result_json, app_theme);
+                            } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_file_read_result(&tool_call.name, &result_json) {
+                                if let Some((key, value)) = render_file_read_output(ui, &result_json, app_theme) {
+                                    clicked_tool_result = Some((key, value));
+                                }
+                            } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_file_write_result(&tool_call.name, &result_json) {
+                                if let Some((key, value)) = render_file_write_output(ui, &result_json, app_theme) {
+                                    clicked_tool_result = Some((key, value));
+                                }
+                            } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_search_result(&tool_call.name, &result_json) {
+                                if let Some((key, value)) = render_search_output(ui, &result_json, app_theme) {
+                                    clicked_tool_result = Some((key, value));
+                                }
+                            } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_repository_result(&tool_call.name, &result_json) {
+                                render_repository_output(ui, &result_json, app_theme);
+                            } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_todo_result(&tool_call.name, &result_json) {
+                                render_todo_output(ui, &result_json, app_theme);
+                            } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_ping_result(&tool_call.name, &result_json) {
+                                render_ping_output(ui, &result_json, app_theme);
                             } else {
                                 // Default rendering with markdown support
                                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
@@ -1443,8 +1603,9 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
             }
         };
         
-        // Format header text with tool icon and name
-        let header_text = format!("{status_icon} 🔧 {friendly_name}{inline_params}");
+        // Format header text with tool icon and name (removed status_icon to fix double icon issue)
+        let tool_icon = get_tool_icon(&tool_card.tool_name);
+        let header_text = format!("{tool_icon} {friendly_name}{inline_params}");
         
         // Apply tool color to the header for better visual distinction
         let header_text_colored = egui::RichText::new(header_text)
@@ -1573,6 +1734,9 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
                         let min_height = if tool_card.tool_name.contains("query") || tool_card.tool_name.contains("search") {
                             // For search results, ensure adequate height
                             600.0
+                        } else if tool_card.tool_name.contains("shell") || tool_card.tool_name.contains("execute") {
+                            // For shell execution, use same height as search tools for better output visibility
+                            600.0
                         } else if actual_content_size > 0 {
                             // For file content, ensure a reasonable minimum height
                             400.0
@@ -1585,15 +1749,33 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
                             .max_height(1000.0)  // Increased height for better readability
                             .min_scrolled_height(min_height)
                             .id_salt(format!("tool_result_{}", tool_card.run_id))
-                            .auto_shrink([false, false])  // Don't auto-shrink to preserve content visibility
+                            .auto_shrink([true, true])  // Allow auto-shrink for proper sizing
                             .show(ui, |ui| {
                                 ui.set_max_width(tool_card_width - 24.0);
                                 
-                                // Check if this is a shell command result for special rendering
+                                // Check tool type for special rendering
                                 if is_shell_command_result(&tool_card.tool_name, result) {
                                     render_terminal_output(ui, result, app_theme);
                                 } else if is_code_change_result(&tool_card.tool_name, result) {
                                     render_diff_output(ui, result, app_theme);
+                                } else if is_file_read_result(&tool_card.tool_name, result) {
+                                    if let Some(action) = render_file_read_output(ui, result, app_theme) {
+                                        clicked_tool_result = Some(action);
+                                    }
+                                } else if is_file_write_result(&tool_card.tool_name, result) {
+                                    if let Some(action) = render_file_write_output(ui, result, app_theme) {
+                                        clicked_tool_result = Some(action);
+                                    }
+                                } else if is_search_result(&tool_card.tool_name, result) {
+                                    if let Some(action) = render_search_output(ui, result, app_theme) {
+                                        clicked_tool_result = Some(action);
+                                    }
+                                } else if is_repository_result(&tool_card.tool_name, result) {
+                                    render_repository_output(ui, result, app_theme);
+                                } else if is_todo_result(&tool_card.tool_name, result) {
+                                    render_todo_output(ui, result, app_theme);
+                                } else if is_ping_result(&tool_card.tool_name, result) {
+                                    render_ping_output(ui, result, app_theme);
                                 } else {
                                     // Default rendering with markdown support
                                     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
@@ -1610,11 +1792,29 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
                         // Small content - render directly without scroll area
                         ui.set_max_width(tool_card_width - 24.0);
                         
-                        // Check if this is a shell command result for special rendering
+                        // Check tool type for special rendering
                         if is_shell_command_result(&tool_card.tool_name, result) {
                             render_terminal_output(ui, result, app_theme);
                         } else if is_code_change_result(&tool_card.tool_name, result) {
                             render_diff_output(ui, result, app_theme);
+                        } else if is_file_read_result(&tool_card.tool_name, result) {
+                            if let Some(action) = render_file_read_output(ui, result, app_theme) {
+                                clicked_tool_result = Some(action);
+                            }
+                        } else if is_file_write_result(&tool_card.tool_name, result) {
+                            if let Some(action) = render_file_write_output(ui, result, app_theme) {
+                                clicked_tool_result = Some(action);
+                            }
+                        } else if is_search_result(&tool_card.tool_name, result) {
+                            if let Some(action) = render_search_output(ui, result, app_theme) {
+                                clicked_tool_result = Some(action);
+                            }
+                        } else if is_repository_result(&tool_card.tool_name, result) {
+                            render_repository_output(ui, result, app_theme);
+                        } else if is_todo_result(&tool_card.tool_name, result) {
+                            render_todo_output(ui, result, app_theme);
+                        } else if is_ping_result(&tool_card.tool_name, result) {
+                            render_ping_output(ui, result, app_theme);
                         } else {
                             // Default rendering with markdown support
                             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
@@ -1879,7 +2079,7 @@ fn render_code_block_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_wi
 }
 
 /// Render syntax highlighted code
-fn render_syntax_highlighted_code(ui: &mut Ui, text: &str, language: &str, _bg_color: &Color32, max_width: f32) {
+pub fn render_syntax_highlighted_code(ui: &mut Ui, text: &str, language: &str, _bg_color: &Color32, max_width: f32) {
     let syntax_set = get_syntax_set();
     let theme_set = get_theme_set();
     
@@ -2459,6 +2659,10 @@ fn is_reasoning_engine_summary_message(text: &str) -> bool {
 const DIFF_COLLAPSING_THRESHOLD_LINES: usize = 10;
 const EXPANDED_DIFF_SCROLL_AREA_MAX_HEIGHT: f32 = 360.0;
 const MIN_ALLOCATED_HEIGHT_FOR_DIFF_FRAME: f32 = 400.0;
+
+/// Constants for shell output rendering
+const SHELL_OUTPUT_SCROLL_AREA_MAX_HEIGHT: f32 = 360.0;
+const SHELL_OUTPUT_COLLAPSING_THRESHOLD_LINES: usize = 8;
 
 /// Helper function to wrap text at specified line length
 fn wrap_text_at_line_length(text: &str, max_line_length: usize) -> String {
@@ -3405,8 +3609,21 @@ fn render_terminal_output(ui: &mut egui::Ui, result: &serde_json::Value, app_the
             output = "(No output)".to_string();
         }
         
-        // Render with monospace font
-        ui.label(egui::RichText::new(output).monospace().color(app_theme.text_color()));
+        // Count lines to determine if we need scrolling
+        let line_count = output.lines().count();
+        
+        if line_count > SHELL_OUTPUT_COLLAPSING_THRESHOLD_LINES {
+            // Use scroll area for long output
+            egui::ScrollArea::vertical()
+                .max_height(SHELL_OUTPUT_SCROLL_AREA_MAX_HEIGHT)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    ui.label(egui::RichText::new(output).monospace().color(app_theme.text_color()));
+                });
+        } else {
+            // Render directly for short output
+            ui.label(egui::RichText::new(output).monospace().color(app_theme.text_color()));
+        }
     });
 }
 
@@ -3441,6 +3658,395 @@ fn render_diff_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme: 
             };
             
             ui.label(egui::RichText::new(line).monospace().color(text_color));
+        }
+    });
+}
+
+/// Check if this is a file read result
+fn is_file_read_result(tool_name: &str, result: &serde_json::Value) -> bool {
+    // Don't use content field check as file writes also have content
+    tool_name.contains("read_file") || 
+    tool_name.contains("view_file") ||
+    tool_name == "Read"
+}
+
+/// Check if this is a file write result
+fn is_file_write_result(tool_name: &str, result: &serde_json::Value) -> bool {
+    tool_name.contains("write_file") || 
+    tool_name == "Write" ||
+    result.get("bytes_written").is_some()
+}
+
+/// Check if this is a search result
+fn is_search_result(tool_name: &str, result: &serde_json::Value) -> bool {
+    tool_name.contains("search") || 
+    tool_name.contains("query") ||
+    tool_name.contains("semantic_code_search") ||
+    tool_name == "WebSearch" ||
+    result.get("results").is_some() ||
+    result.get("matches").is_some()
+}
+
+/// Check if this is a repository operation result
+fn is_repository_result(tool_name: &str, result: &serde_json::Value) -> bool {
+    tool_name.contains("repository") || 
+    tool_name.contains("repo") ||
+    tool_name == "list_repositories" ||
+    result.get("repositories").is_some()
+}
+
+/// Check if this is a todo result
+fn is_todo_result(tool_name: &str, result: &serde_json::Value) -> bool {
+    tool_name.contains("todo") || 
+    tool_name == "TodoWrite" ||
+    result.get("todos").is_some()
+}
+
+/// Check if this is a ping result
+fn is_ping_result(tool_name: &str, _result: &serde_json::Value) -> bool {
+    tool_name.contains("ping")
+}
+
+/// Render file read output with nice formatting
+fn render_file_read_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme: AppTheme) -> Option<(String, String)> {
+    ui.group(|ui| {
+        // File read header
+        ui.label(egui::RichText::new("📄 File Read").strong().color(app_theme.accent_color()));
+        
+        if let Some(file_path) = result.get("file_path").and_then(|v| v.as_str()) {
+            ui.label(egui::RichText::new(format!("`{file_path}`")).color(app_theme.hint_text_color()).small());
+        }
+        
+        ui.separator();
+        
+        // Get file content and metadata
+        let content = result.get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("No content available");
+        
+        let mut info_parts = Vec::new();
+        
+        if let Some(line_count) = result.get("line_count").and_then(|v| v.as_i64()) {
+            info_parts.push(format!("{} lines", line_count));
+        }
+        
+        if let Some(file_size) = result.get("file_size").and_then(|v| v.as_i64()) {
+            info_parts.push(format!("{} bytes", file_size));
+        }
+        
+        if let Some(start_line) = result.get("start_line").and_then(|v| v.as_i64()) {
+            if let Some(end_line) = result.get("end_line").and_then(|v| v.as_i64()) {
+                info_parts.push(format!("Lines {}-{}", start_line, end_line));
+            }
+        }
+        
+        if !info_parts.is_empty() {
+            ui.label(egui::RichText::new(info_parts.join(" | ")).color(app_theme.hint_text_color()).small());
+            ui.add_space(4.0);
+        }
+        
+        // Render content with syntax highlighting
+        let line_count = content.lines().count();
+        
+        // Try to determine file language from path
+        let language = if let Some(file_path) = result.get("file_path").and_then(|v| v.as_str()) {
+            if let Some(ext) = std::path::Path::new(file_path).extension().and_then(|e| e.to_str()) {
+                ext
+            } else {
+                "txt"
+            }
+        } else {
+            "txt"
+        };
+        
+        if line_count > 20 {
+            egui::ScrollArea::vertical()
+                .max_height(400.0)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    render_syntax_highlighted_code(ui, content, language, &Color32::TRANSPARENT, ui.available_width());
+                });
+        } else {
+            render_syntax_highlighted_code(ui, content, language, &Color32::TRANSPARENT, ui.available_width());
+        }
+        
+        ui.add_space(4.0);
+        
+        // Add action buttons
+        let mut action = None;
+        ui.horizontal(|ui| {
+            // View Full File link
+            if ui.link(egui::RichText::new("View Full File").color(app_theme.hint_text_color()).small()).clicked() {
+                // Create a new action to read the full file
+                if let Some(file_path) = result.get("file_path").and_then(|v| v.as_str()) {
+                    let action_data = serde_json::json!({
+                        "file_path": file_path,
+                        "full_file": true
+                    });
+                    action = Some(("__READ_FULL_FILE__".to_string(), action_data.to_string()));
+                }
+            }
+            
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Copy button as icon only in top right
+                if ui.button("📋").on_hover_text("Copy content").clicked() {
+                    ui.output_mut(|o| o.copied_text = content.to_string());
+                    // Note: Would show success toast if we had access to toasts
+                }
+            });
+        });
+        
+        action
+    }).inner
+}
+
+/// Render file write output with nice formatting
+fn render_file_write_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme: AppTheme) -> Option<(String, String)> {
+    ui.group(|ui| {
+        // File write header
+        ui.label(egui::RichText::new("💾 File Written").strong().color(app_theme.accent_color()));
+        
+        if let Some(file_path) = result.get("file_path").and_then(|v| v.as_str()) {
+            ui.label(egui::RichText::new(format!("`{file_path}`")).color(app_theme.hint_text_color()).small());
+        }
+        
+        ui.separator();
+        
+        let mut info_parts = Vec::new();
+        
+        if let Some(bytes_written) = result.get("bytes_written").and_then(|v| v.as_i64()) {
+            info_parts.push(format!("{} bytes written", bytes_written));
+        }
+        
+        if let Some(created) = result.get("created").and_then(|v| v.as_bool()) {
+            if created {
+                info_parts.push("File created".to_string());
+            } else {
+                info_parts.push("File updated".to_string());
+            }
+        }
+        
+        if !info_parts.is_empty() {
+            ui.label(egui::RichText::new(info_parts.join(" | ")).color(app_theme.success_color()).small());
+        } else {
+            ui.label(egui::RichText::new("File written successfully").color(app_theme.success_color()).small());
+        }
+        
+        // Add action buttons
+        ui.add_space(4.0);
+        let mut action = None;
+        ui.horizontal(|ui| {
+            // View Full File link - only show if we have content
+            if result.get("content").is_some() {
+                if ui.link(egui::RichText::new("View Full File").color(app_theme.hint_text_color()).small()).clicked() {
+                    // Return a special marker for file content modal request
+                    action = Some(("__VIEW_FULL_FILE__".to_string(), result.to_string()));
+                }
+            }
+        });
+        
+        action
+    })
+    .inner
+}
+
+/// Render search results with nice formatting
+fn render_search_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme: AppTheme) -> Option<(String, String)> {
+    ui.group(|ui| {
+        // Search header
+        ui.label(egui::RichText::new("🔍 Search Results").strong().color(app_theme.accent_color()));
+        
+        if let Some(query) = result.get("queryText").and_then(|v| v.as_str()) {
+            ui.label(egui::RichText::new(format!("`{query}`")).color(app_theme.hint_text_color()).small());
+        }
+        
+        ui.separator();
+        
+        // Handle different search result formats
+        if let Some(results) = result.get("results").and_then(|v| v.as_array()) {
+            ui.label(egui::RichText::new(format!("Found {} results", results.len())).color(app_theme.success_color()).small());
+            ui.add_space(4.0);
+            
+            for (i, result_item) in results.iter().enumerate().take(5) {
+                ui.group(|ui| {
+                    if let Some(file_path) = result_item.get("filePath").and_then(|v| v.as_str()) {
+                        ui.label(egui::RichText::new(format!("{}. {}", i + 1, file_path)).color(app_theme.text_color()).small());
+                        
+                        // Show line range if available
+                        if let (Some(start), Some(end)) = (
+                            result_item.get("startLine").and_then(|v| v.as_i64()),
+                            result_item.get("endLine").and_then(|v| v.as_i64())
+                        ) {
+                            ui.label(egui::RichText::new(format!("   Lines {}-{}", start, end)).color(app_theme.hint_text_color()).small());
+                        }
+                        
+                        // Show element type and language if available
+                        let mut meta_parts = Vec::new();
+                        if let Some(element_type) = result_item.get("elementType").and_then(|v| v.as_str()) {
+                            meta_parts.push(element_type.to_string());
+                        }
+                        if let Some(language) = result_item.get("language").and_then(|v| v.as_str()) {
+                            meta_parts.push(language.to_string());
+                        }
+                        if let Some(score) = result_item.get("score").and_then(|v| v.as_f64()) {
+                            meta_parts.push(format!("score: {:.3}", score));
+                        }
+                        
+                        // Add context info metadata
+                        if let Some(context_info) = result_item.get("contextInfo") {
+                            if let Some(identifiers) = context_info.get("identifiers").and_then(|v| v.as_array()) {
+                                meta_parts.push(format!("identifiers: {}", identifiers.len()));
+                            }
+                            if let Some(outgoing_calls) = context_info.get("outgoing_calls").and_then(|v| v.as_array()) {
+                                meta_parts.push(format!("calls: {}", outgoing_calls.len()));
+                            }
+                        }
+                        
+                        if !meta_parts.is_empty() {
+                            ui.label(egui::RichText::new(format!("   [{}]", meta_parts.join(", "))).color(app_theme.hint_text_color()).small());
+                        }
+                        
+                        // Show signature and description if available (avoid duplication)
+                        if let Some(context_info) = result_item.get("contextInfo") {
+                            let signature = context_info.get("signature").and_then(|v| v.as_str()).unwrap_or("");
+                            let preview = result_item.get("preview").and_then(|v| v.as_str()).unwrap_or("");
+                            
+                            // Signature removed per requirements (commented out below)
+                            // if !signature.is_empty() && signature != preview {
+                            //     ui.label(egui::RichText::new(format!("   {}", signature)).monospace().color(app_theme.hint_text_color()).small());
+                            // }
+                            
+                            if let Some(description) = context_info.get("description").and_then(|v| v.as_str()) {
+                                if !description.is_empty() {
+                                    ui.label(egui::RichText::new(format!("   {}", description)).color(app_theme.hint_text_color()).small().italics());
+                                }
+                            }
+                        }
+                        
+                        // Preview removed per requirements
+                        // if let Some(preview) = result_item.get("preview").and_then(|v| v.as_str()) {
+                        //     let preview_text = if preview.len() > 80 {
+                        //         format!("{}...", &preview[..77])
+                        //     } else {
+                        //         preview.to_string()
+                        //     };
+                        //     ui.label(egui::RichText::new(format!("   {}", preview_text)).monospace().color(app_theme.hint_text_color()).small());
+                        // }
+                    }
+                });
+                ui.add_space(2.0);
+            }
+            
+            if results.len() > 5 {
+                ui.label(egui::RichText::new(format!("... and {} more results", results.len() - 5)).color(app_theme.hint_text_color()).small());
+            }
+        } else if let Some(matches) = result.get("matchingFiles").and_then(|v| v.as_array()) {
+            ui.label(egui::RichText::new(format!("Found {} files", matches.len())).color(app_theme.success_color()).small());
+            ui.add_space(4.0);
+            
+            for (i, file) in matches.iter().enumerate().take(10) {
+                if let Some(file_path) = file.as_str() {
+                    ui.label(egui::RichText::new(format!("{}. {}", i + 1, file_path)).color(app_theme.text_color()).small());
+                }
+            }
+            
+            if matches.len() > 10 {
+                ui.label(egui::RichText::new(format!("... and {} more", matches.len() - 10)).color(app_theme.hint_text_color()).small());
+            }
+        } else {
+            ui.label(egui::RichText::new("No results found").color(app_theme.hint_text_color()).small());
+        }
+        
+        // Add small View JSON link
+        ui.add_space(8.0);
+        let mut action = None;
+        ui.horizontal(|ui| {
+            if ui.link(egui::RichText::new("View JSON").color(app_theme.hint_text_color()).small()).clicked() {
+                let json_str = serde_json::to_string_pretty(result).unwrap_or_else(|_| "Failed to serialize JSON".to_string());
+                // Return special marker to open JSON modal (similar to View Full File)
+                action = Some(("__VIEW_JSON__".to_string(), json_str));
+            }
+        });
+        action
+    })
+    .inner
+}
+
+/// Render repository operation results with nice formatting
+fn render_repository_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme: AppTheme) {
+    ui.group(|ui| {
+        // Repository header
+        ui.label(egui::RichText::new("📂 Repository").strong().color(app_theme.accent_color()));
+        
+        ui.separator();
+        
+        if let Some(repositories) = result.get("repositories").and_then(|v| v.as_array()) {
+            ui.label(egui::RichText::new(format!("{} repositories", repositories.len())).color(app_theme.success_color()).small());
+            ui.add_space(4.0);
+            
+            // Show repositories in a horizontal, compact format similar to old behavior
+            let repo_names: Vec<String> = repositories.iter()
+                .filter_map(|repo| repo.get("name").and_then(|v| v.as_str()))
+                .map(|name| name.to_string())
+                .collect();
+                
+            if !repo_names.is_empty() {
+                let repo_list = repo_names.join(" • ");
+                ui.label(egui::RichText::new(repo_list).color(app_theme.text_color()).small());
+            }
+        } else if let Some(message) = result.get("message").and_then(|v| v.as_str()) {
+            ui.label(egui::RichText::new(message).color(app_theme.success_color()).small());
+        } else {
+            ui.label(egui::RichText::new("Repository operation completed").color(app_theme.success_color()).small());
+        }
+    });
+}
+
+/// Render todo results with nice formatting
+fn render_todo_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme: AppTheme) {
+    ui.group(|ui| {
+        // Todo header
+        ui.label(egui::RichText::new("📝 Todo List").strong().color(app_theme.accent_color()));
+        
+        ui.separator();
+        
+        if let Some(todos) = result.get("todos").and_then(|v| v.as_array()) {
+            let pending_count = todos.iter().filter(|t| t.get("status").and_then(|s| s.as_str()) == Some("pending")).count();
+            let completed_count = todos.iter().filter(|t| t.get("status").and_then(|s| s.as_str()) == Some("completed")).count();
+            
+            ui.label(egui::RichText::new(format!("{} total | {} pending | {} completed", todos.len(), pending_count, completed_count)).color(app_theme.success_color()).small());
+            ui.add_space(4.0);
+            
+            for todo in todos.iter() {
+                if let Some(content) = todo.get("content").and_then(|v| v.as_str()) {
+                    let status = todo.get("status").and_then(|v| v.as_str()).unwrap_or("unknown");
+                    let status_icon = match status {
+                        "completed" => "✓",
+                        "pending" => "◯",
+                        "in_progress" => "⏳",
+                        _ => "?",
+                    };
+                    ui.label(egui::RichText::new(format!("{} {}", status_icon, content)).color(app_theme.text_color()).small());
+                }
+            }
+        } else {
+            ui.label(egui::RichText::new("Todo operation completed").color(app_theme.success_color()).small());
+        }
+    });
+}
+
+/// Render ping results with nice formatting
+fn render_ping_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme: AppTheme) {
+    ui.group(|ui| {
+        // Ping header
+        ui.label(egui::RichText::new("📡 Ping").strong().color(app_theme.accent_color()));
+        
+        ui.separator();
+        
+        if let Some(message) = result.get("message").and_then(|v| v.as_str()) {
+            ui.label(egui::RichText::new(message).color(app_theme.success_color()).small());
+        } else {
+            ui.label(egui::RichText::new("Server is responsive").color(app_theme.success_color()).small());
         }
     });
 }

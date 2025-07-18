@@ -32,6 +32,10 @@ pub struct AppState {
     pub current_theme: AppTheme,
     pub show_hotkeys_modal: bool,
     pub show_tools_modal: bool,
+    pub show_json_modal: bool,
+    pub json_modal_content: Option<String>,
+    pub show_file_content_modal: bool,
+    pub file_content_modal_data: Option<(String, String)>, // (file_path, content)
     pub show_new_conversation_confirmation: bool,
     pub clicked_tool_info: Option<(String, String)>, // (tool_name, tool_args)
     pub toasts: Toasts,
@@ -130,6 +134,10 @@ impl AppState {
             current_theme: AppTheme::default(),
             show_hotkeys_modal: false,
             show_tools_modal: false,
+            show_json_modal: false,
+            json_modal_content: None,
+            show_file_content_modal: false,
+            file_content_modal_data: None,
             show_new_conversation_confirmation: false,
             clicked_tool_info: None,
             toasts: Toasts::default(),
@@ -143,7 +151,7 @@ impl AppState {
             
             // Provider context state
             current_provider: ProviderType::default(),
-            available_providers: vec![ProviderType::ClaudeCode, ProviderType::MistralRs],
+            available_providers: vec![ProviderType::ClaudeCode, ProviderType::OpenAICompatible],
             pending_provider_change: None,
             pending_agent_replacement: None,
             show_provider_quick_switch: false,
@@ -226,8 +234,10 @@ impl AppState {
     pub fn provider_display_name(provider_type: ProviderType) -> &'static str {
         match provider_type {
             ProviderType::ClaudeCode => "Claude Code",
-            ProviderType::MistralRs => "Mistral.rs",
+
             ProviderType::OpenAICompatible => "OpenAI Compatible",
+            ProviderType::ClaudeCodeRouter => "Claude Code Router",
+            ProviderType::MistralRs => "Mistral.rs",
         }
     }
 

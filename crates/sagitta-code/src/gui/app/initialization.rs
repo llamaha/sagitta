@@ -387,6 +387,16 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
                 );
             } else {
                 log::info!("Conversation service initialized successfully with shared instances");
+                
+                // Set the conversation manager and app event sender on the task panel
+                if let Some(ref conversation_service) = app.conversation_service {
+                    let conversation_manager = conversation_service.manager();
+                    app.task_panel.set_conversation_manager(conversation_manager);
+                    app.task_panel.set_app_event_sender(app.app_event_sender.clone());
+                    log::info!("Task panel conversation manager and app event sender set successfully");
+                } else {
+                    log::warn!("Conversation service not available, task panel will not have conversation manager");
+                }
             }
             
             // Initial conversation data load
@@ -419,6 +429,8 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
             } else {
                 log::warn!("Title updater not available, auto title updates disabled");
             }
+            
+            // Auto-sync services will be initialized after this function returns
 
             // Don't add any initial message - let the welcome screen show in the chat view
             // when there are no conversation items

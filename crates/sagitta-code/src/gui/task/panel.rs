@@ -16,6 +16,7 @@ use crate::llm::fast_model::FastModelProvider;
 use chrono::Utc;
 
 /// Task management panel
+#[derive(Clone)]
 pub struct TaskPanel {
     state: Arc<Mutex<TaskPanelState>>,
     task_manager: Option<Arc<dyn TaskManager>>,
@@ -25,6 +26,7 @@ pub struct TaskPanel {
     is_open: bool,
     show_task_creation_dialog: bool,
     task_creation_form: TaskCreationForm,
+    app_event_sender: Option<tokio::sync::mpsc::UnboundedSender<crate::gui::app::AppEvent>>,
 }
 
 /// Task creation form state
@@ -54,7 +56,20 @@ impl TaskPanel {
             is_open: false,
             show_task_creation_dialog: false,
             task_creation_form: TaskCreationForm::default(),
+            app_event_sender: None,
         }
+    }
+
+    /// Set the conversation manager
+    pub fn set_conversation_manager(&mut self, conversation_manager: Arc<dyn ConversationManager>) {
+        self.conversation_manager = Some(conversation_manager);
+        log::info!("TaskPanel: Conversation manager set successfully");
+    }
+    
+    /// Set the app event sender
+    pub fn set_app_event_sender(&mut self, sender: tokio::sync::mpsc::UnboundedSender<crate::gui::app::AppEvent>) {
+        self.app_event_sender = Some(sender);
+        log::info!("TaskPanel: App event sender set successfully");
     }
 
     /// Initialize the fast model provider
@@ -158,41 +173,7 @@ impl TaskPanel {
                 
                 if start_next_clicked {
                     // "Start Next" or "Start Now" button was clicked
-                    let state_arc = Arc::clone(&self.state);
-                    let task_manager = self.task_manager.clone();
-                    let conversation_manager = self.conversation_manager.clone();
-                    
-                    tokio::spawn(async move {
-                        let mut guard = state_arc.lock().await;
-                        if let Some(task) = guard.task_queue.start_next_task() {
-                            drop(guard); // Release the lock before async operations
-                            
-                            // Create a new conversation for this task if conversation manager is available
-                            if let Some(conv_manager) = conversation_manager {
-                                let conversation_title = format!("Task: {}", task.task.title);
-                                let workspace_id = task.task.workspace_id.unwrap_or_else(|| uuid::Uuid::new_v4());
-                                
-                                match conv_manager.create_conversation(conversation_title, Some(workspace_id)).await {
-                                    Ok(conversation_id) => {
-                                        // Update the task with the conversation ID
-                                        let mut guard = state_arc.lock().await;
-                                        if let Some(active_task) = &mut guard.task_queue.active_task {
-                                            active_task.conversation_id = Some(conversation_id);
-                                        }
-                                        log::info!("Started task '{}' with conversation {}", task.task.title, conversation_id);
-                                    }
-                                    Err(e) => {
-                                        // If conversation creation fails, fail the task
-                                        let mut guard = state_arc.lock().await;
-                                        guard.task_queue.fail_active_task(format!("Failed to create conversation: {}", e));
-                                        log::error!("Failed to start task '{}': {}", task.task.title, e);
-                                    }
-                                }
-                            } else {
-                                log::info!("Started task '{}' (no conversation manager available)", task.task.title);
-                            }
-                        }
-                    });
+                    self.execute_next_task();
                 }
                 
                 render_queue_toolbar(ui, &mut state);
@@ -606,6 +587,82 @@ impl TaskPanel {
         }
         
         Ok(())
+    }
+    
+    /// Execute the next task in the queue
+    pub fn execute_next_task(&self) {
+        let state_arc = Arc::clone(&self.state);
+        let task_manager = self.task_manager.clone();
+        let conversation_manager = self.conversation_manager.clone();
+        let app_event_sender = self.app_event_sender.clone();
+        
+        // Send a CheckAndExecuteTask event instead of directly executing
+        // This allows the main app to check if a conversation is active
+        if let Some(sender) = &self.app_event_sender {
+            if let Err(e) = sender.send(crate::gui::app::AppEvent::CheckAndExecuteTask) {
+                log::error!("Failed to send CheckAndExecuteTask event: {}", e);
+            }
+        } else {
+            // Fallback to original behavior if no event sender
+            tokio::spawn(async move {
+                let mut guard = state_arc.lock().await;
+                if let Some(task) = guard.task_queue.start_next_task() {
+                    let task_title = task.task.title.clone();
+                    let task_description = task.task.description.clone();
+                    let workspace_id = task.task.workspace_id.unwrap_or_else(|| uuid::Uuid::new_v4());
+                    
+                    drop(guard); // Release the lock before async operations
+                    
+                    // Create a new conversation for this task if conversation manager is available
+                    if let Some(conv_manager) = conversation_manager {
+                        let conversation_title = format!("Task: {}", task_title);
+                        
+                        match conv_manager.create_conversation(conversation_title, Some(workspace_id)).await {
+                            Ok(conversation_id) => {
+                                // Update the task with the conversation ID
+                                let mut guard = state_arc.lock().await;
+                                if let Some(active_task) = &mut guard.task_queue.active_task {
+                                    active_task.conversation_id = Some(conversation_id);
+                                }
+                                drop(guard);
+                                
+                                log::info!("Started task '{}' with conversation {}", task_title, conversation_id);
+                                
+                                // Create the task message
+                                let task_message = if let Some(desc) = task_description {
+                                    format!("Please help me with this task: {}\n\nDetails: {}", task_title, desc)
+                                } else {
+                                    format!("Please help me with this task: {}", task_title)
+                                };
+                                
+                                // Send the ExecuteTask event to trigger conversation switch and message send
+                                if let Some(sender) = app_event_sender {
+                                    if let Err(e) = sender.send(crate::gui::app::AppEvent::ExecuteTask { 
+                                        conversation_id, 
+                                        task_message: task_message.clone() 
+                                    }) {
+                                        log::error!("Failed to send ExecuteTask event: {}", e);
+                                    } else {
+                                        log::info!("Sent ExecuteTask event for conversation {} with message: {}", 
+                                                 conversation_id, task_message);
+                                    }
+                                } else {
+                                    log::warn!("TaskPanel: No app event sender available to execute task");
+                                }
+                            }
+                            Err(e) => {
+                                // If conversation creation fails, fail the task
+                                let mut guard = state_arc.lock().await;
+                                guard.task_queue.fail_active_task(format!("Failed to create conversation: {}", e));
+                                log::error!("Failed to start task '{}': {}", task_title, e);
+                            }
+                        }
+                    } else {
+                        log::info!("Started task '{}' (no conversation manager available)", task_title);
+                    }
+                }
+            });
+        }
     }
 }
 

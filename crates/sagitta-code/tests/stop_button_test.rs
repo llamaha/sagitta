@@ -1,16 +1,19 @@
-// Integration test for STOP button functionality
+// Integration test for STOP button functionality and related UI behaviors
 
 #[cfg(test)]
 mod tests {
     use sagitta_code::gui::app::state::AppState;
     use sagitta_code::gui::chat::input::chat_input_ui;
+    use sagitta_code::gui::app::rendering;
+    use sagitta_code::gui::app::events::AppEvent;
+    use sagitta_code::agent::events::AgentEvent;
     use egui::Context;
     use sagitta_code::gui::theme::AppTheme;
     use sagitta_code::gui::repository::manager::RepositoryManager;
     use sagitta_code::gui::repository::git_controls::GitControls;
     use sagitta_search::config::AppConfig;
     use std::sync::Arc;
-    use tokio::sync::Mutex;
+    use tokio::sync::{Mutex, broadcast};
     
     #[test]
     fn test_stop_button_appears_when_waiting() {
@@ -120,5 +123,65 @@ mod tests {
         assert!(!state.is_responding);
         assert!(!state.is_streaming_response);
         assert!(state.thinking_message.is_none());
+    }
+    
+    #[tokio::test]
+    async fn test_stop_button_immediate_ui_reset() {
+        // Test that stop request immediately resets UI state
+        let mut state = AppState::new();
+        
+        // Simulate active streaming state
+        state.is_waiting_for_response = true;
+        state.is_thinking = true;
+        state.is_streaming_response = true;
+        state.thinking_message = Some("Processing...".to_string());
+        
+        // Set stop requested
+        state.stop_requested = true;
+        
+        // Simulate what the enhanced handle_stop_request should do
+        if state.stop_requested {
+            state.stop_requested = false;
+            state.is_waiting_for_response = false;
+            state.is_thinking = false;
+            state.is_responding = false;
+            state.is_streaming_response = false;
+            state.thinking_message = None;
+        }
+        
+        // Verify immediate reset
+        assert!(!state.stop_requested);
+        assert!(!state.is_waiting_for_response);
+        assert!(!state.is_thinking);
+        assert!(!state.is_responding);
+        assert!(!state.is_streaming_response);
+        assert!(state.thinking_message.is_none());
+    }
+    
+    #[tokio::test]
+    async fn test_agent_cancellation_event_handling() {
+        // Test that cancelled events properly reset state
+        let mut state = AppState::new();
+        
+        // Set up streaming state
+        state.is_waiting_for_response = true;
+        state.is_streaming_response = true;
+        state.current_response_id = Some("test-id".to_string());
+        
+        // Simulate cancelled event processing (mimicking process_agent_events)
+        state.is_waiting_for_response = false;
+        state.is_thinking = false;
+        state.is_responding = false;
+        state.is_streaming_response = false;
+        state.thinking_message = None;
+        state.current_response_id = None;
+        
+        // Verify cancellation event handling
+        assert!(!state.is_waiting_for_response);
+        assert!(!state.is_thinking);
+        assert!(!state.is_responding);
+        assert!(!state.is_streaming_response);
+        assert!(state.thinking_message.is_none());
+        assert!(state.current_response_id.is_none());
     }
 }

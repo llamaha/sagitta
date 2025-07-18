@@ -190,6 +190,17 @@ pub fn chat_input_ui(
                 }
             }
             
+            // Show status indicator on the same line
+            if is_in_loop {
+                ui.separator();
+                ui.small(RichText::new("🔄 Reasoning loop...").color(warning_color));
+                ui.spinner();
+            } else if is_waiting {
+                ui.separator();
+                ui.small(RichText::new("Sagitta Code is thinking...").color(hint_color));
+                ui.spinner();
+            }
+            
             // Show token usage and character count if available
             if let Some(token_usage) = current_token_usage {
                 ui.add_space(16.0);
@@ -289,15 +300,10 @@ pub fn chat_input_ui(
         
         ui.add_space(2.0); // Reduced spacing
         
-        // Status indicator (typing, waiting, etc.)
-        ui.horizontal(|ui| {
-            if is_in_loop {
+        // Loop control buttons (shown when in loop)
+        if is_in_loop {
+            ui.horizontal(|ui| {
                 ui.add_space(4.0);
-                ui.small(RichText::new("🔄 Sagitta Code is in reasoning loop...").color(warning_color));
-                ui.spinner();
-                
-                // Loop control buttons
-                ui.add_space(8.0);
                 if ui.small_button(RichText::new("⏹ Stop Loop").color(error_color))
                     .on_hover_text("Break out of the reasoning loop")
                     .clicked() 
@@ -312,12 +318,8 @@ pub fn chat_input_ui(
                 {
                     *show_loop_inject_input = !*show_loop_inject_input;
                 }
-            } else if is_waiting {
-                ui.add_space(4.0);
-                ui.small(RichText::new("Sagitta Code is thinking...").color(hint_color));
-                ui.spinner();
-            }
-        });
+            });
+        }
         
         // Loop injection input (shown when requested)
         if *show_loop_inject_input {
@@ -357,13 +359,10 @@ pub fn chat_input_ui(
         ui.add_space(4.0);
         
         // Main input area with proper theme styling
-        // Add horizontal constraint to prevent overflow
-        ui.horizontal(|ui| {
-            ui.add_space(margin); // Left margin
-            
-            ui.allocate_ui_with_layout(
-                Vec2::new(ui.available_width() - margin, ui.available_height()),
-                Layout::left_to_right(Align::TOP),
+        // Align with repository dropdown (no additional margin)
+        ui.allocate_ui_with_layout(
+            Vec2::new(ui.available_width(), ui.available_height()),
+            Layout::left_to_right(Align::TOP),
                 |ui| {
                     Frame::NONE
                         .fill(input_bg_color)
@@ -411,10 +410,13 @@ pub fn chat_input_ui(
                                 }
                             }
                             
-                            // Handle Enter key for submission
-                            if input_enabled && response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)) && !new_line_added
+                            // Handle Enter key for submission (but not if Ctrl+Enter was pressed)
+                            if input_enabled && response.has_focus() && !new_line_added
                                 && !input_buffer.trim().is_empty() {
-                                    *on_submit = true;
+                                    // Check for Enter key press without modifier keys
+                                    if ui.input(|i| i.key_pressed(Key::Enter) && !i.modifiers.ctrl && !i.modifiers.command) {
+                                        *on_submit = true;
+                                    }
                                 }
                         });
                 } else {
@@ -451,15 +453,17 @@ pub fn chat_input_ui(
                         *should_focus_input = false;
                     }
                     
-                    // Handle Enter key for submission
-                    if input_enabled && response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)) && !new_line_added
+                    // Handle Enter key for submission (but not if Ctrl+Enter was pressed)
+                    if input_enabled && response.has_focus() && !new_line_added
                         && !input_buffer.trim().is_empty() {
-                            *on_submit = true;
+                            // Check for Enter key press without modifier keys
+                            if ui.input(|i| i.key_pressed(Key::Enter) && !i.modifiers.ctrl && !i.modifiers.command) {
+                                *on_submit = true;
+                            }
                         }
                 }
             });
                 });
-        });
         
         ui.add_space(4.0);
         

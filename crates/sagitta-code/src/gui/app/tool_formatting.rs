@@ -86,6 +86,7 @@ impl ToolResultFormatter {
             name if name.contains("__repository_view_file") => self.format_mcp_file_view_result(value),
             name if name.contains("__query") => self.format_mcp_search_result(value),
             name if name.contains("__repository_map") => self.format_mcp_repo_map_result(value),
+            name if name.contains("__repository_list_branches") => self.format_mcp_repo_list_branches_result(value),
             name if name.contains("__repository_list") => self.format_mcp_repo_list_result(value),
             name if name.contains("__repository_search_file") => self.format_mcp_file_search_result(value),
             _ => {
@@ -808,6 +809,61 @@ impl ToolResultFormatter {
             }
         } else {
             result.push_str("No repositories found.\n");
+        }
+        
+        result
+    }
+    
+    /// Format MCP repository list branches results
+    fn format_mcp_repo_list_branches_result(&self, value: &serde_json::Value) -> String {
+        let mut result = String::new();
+        
+        // Get repository name if available
+        if let Some(repo_name) = value.get("repositoryName").and_then(|v| v.as_str()) {
+            result.push_str(&format!("🌳 **Branches for `{repo_name}`**\n\n"));
+        } else {
+            result.push_str("🌳 **Repository Branches**\n\n");
+        }
+        
+        // Format branches
+        if let Some(branches) = value.get("branches").and_then(|v| v.as_array()) {
+            if !branches.is_empty() {
+                result.push_str("**Branches:**\n");
+                for branch in branches {
+                    if let Some(name) = branch.get("name").and_then(|v| v.as_str()) {
+                        let is_current = branch.get("current").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let prefix = if is_current { "• **" } else { "• " };
+                        let suffix = if is_current { "** (current)" } else { "" };
+                        result.push_str(&format!("{prefix}{name}{suffix}"));
+                        
+                        // Add last commit info if available
+                        if let Some(last_commit) = branch.get("lastCommit") {
+                            if let Some(message) = last_commit.get("message").and_then(|v| v.as_str()) {
+                                let first_line = message.lines().next().unwrap_or(message);
+                                result.push_str(&format!(" - {}", first_line));
+                            }
+                        }
+                        result.push('\n');
+                    }
+                }
+                result.push('\n');
+            }
+        }
+        
+        // Format tags
+        if let Some(tags) = value.get("tags").and_then(|v| v.as_array()) {
+            if !tags.is_empty() {
+                result.push_str("**Tags:**\n");
+                for tag in tags {
+                    if let Some(tag_name) = tag.as_str() {
+                        result.push_str(&format!("• {tag_name}\n"));
+                    }
+                }
+            }
+        }
+        
+        if result.trim().ends_with("**Repository Branches**") || result.trim().ends_with('*') {
+            result.push_str("No branches or tags found.\n");
         }
         
         result

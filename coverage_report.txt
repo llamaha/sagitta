@@ -1,0 +1,2331 @@
+   Compiling code-parsers v0.2.0 (/home/adam/repos/sagitta/crates/code-parsers)
+   Compiling git-manager v0.2.0 (/home/adam/repos/sagitta/crates/git-manager)
+   Compiling repo-mapper v0.2.0 (/home/adam/repos/sagitta/crates/repo-mapper)
+   Compiling sagitta-embed v0.2.0 (/home/adam/repos/sagitta/crates/sagitta-embed)
+   Compiling sagitta-search v0.2.0 (/home/adam/repos/sagitta/crates/sagitta-search)
+warning: unused import: `git_edge_cases::validate_ref_name`
+ --> crates/sagitta-search/src/repo_helpers/git_edge_cases_tests.rs:3:51
+  |
+3 |     use crate::repo_helpers::{prepare_repository, git_edge_cases::validate_ref_name, repo_indexing::PrepareRepositoryParams};
+  |                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `Oid`
+ --> crates/sagitta-search/src/repo_helpers/git_edge_cases_tests.rs:9:39
+  |
+9 |     use git2::{Repository, Signature, Oid};
+  |                                       ^^^
+
+warning: unused import: `std::process::Command`
+  --> crates/sagitta-search/src/repo_helpers/git_edge_cases_integration_tests.rs:12:9
+   |
+12 |     use std::process::Command;
+   |         ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `PathBuf`
+  --> crates/sagitta-search/src/repo_helpers/git_edge_cases_integration_tests.rs:13:27
+   |
+13 |     use std::path::{Path, PathBuf};
+   |                           ^^^^^^^
+
+warning: unused import: `SyncResult`
+ --> crates/sagitta-search/src/repo_helpers/qdrant_wipe_recovery_test.rs:3:53
+  |
+3 |     use crate::sync::{sync_repository, SyncOptions, SyncResult};
+  |                                                     ^^^^^^^^^^
+
+warning: unused imports: `PathBuf` and `Path`
+   --> crates/sagitta-search/src/sync.rs:725:21
+    |
+725 |     use std::path::{PathBuf, Path};
+    |                     ^^^^^^^  ^^^^
+
+warning: unused import: `git2::Repository`
+   --> crates/sagitta-search/src/sync.rs:727:9
+    |
+727 |     use git2::Repository;
+    |         ^^^^^^^^^^^^^^^^
+
+warning: unused import: `tokio::runtime::Runtime`
+   --> crates/sagitta-search/src/sync.rs:731:9
+    |
+731 |     use tokio::runtime::Runtime;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `SyncProgressReporter`, `SyncProgress`, and `SyncStage`
+   --> crates/sagitta-search/src/sync.rs:732:32
+    |
+732 |     use crate::sync_progress::{SyncProgress, SyncStage, SyncProgressReporter}; // Added
+    |                                ^^^^^^^^^^^^  ^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::sync::Mutex`
+   --> crates/sagitta-search/src/sync.rs:733:9
+    |
+733 |     use std::sync::Mutex; // Added for Mock
+    |         ^^^^^^^^^^^^^^^^
+
+warning: unused import: `qdrant_client::qdrant::Distance`
+   --> crates/sagitta-search/src/sync.rs:734:9
+    |
+734 |     use qdrant_client::qdrant::Distance;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `IndexingConfig` and `PerformanceConfig`
+   --> crates/sagitta-search/src/test_utils.rs:236:25
+    |
+236 |     use crate::config::{IndexingConfig, PerformanceConfig};
+    |                         ^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `EnhancedRepositoryInfo` and `FilesystemStatus`
+   --> crates/sagitta-search/src/test_utils.rs:237:77
+    |
+237 |     use crate::{get_enhanced_repository_list, get_enhanced_repository_info, EnhancedRepositoryInfo, FilesystemStatus, SyncState};
+    |                                                                             ^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::path::PathBuf`
+   --> crates/sagitta-search/src/test_utils.rs:238:9
+    |
+238 |     use std::path::PathBuf;
+    |         ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `PerformanceConfig`
+   --> crates/sagitta-search/src/lib.rs:151:63
+    |
+151 |         use crate::config::{AppConfig, EmbeddingEngineConfig, PerformanceConfig};
+    |                                                               ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `sagitta_embed::processor::ProcessingConfig`
+   --> crates/sagitta-search/src/lib.rs:629:13
+    |
+629 |         use sagitta_embed::processor::ProcessingConfig;
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   Compiling sagitta-mcp v0.2.0 (/home/adam/repos/sagitta/crates/sagitta-mcp)
+   Compiling sagitta-cli v0.2.0 (/home/adam/repos/sagitta/crates/sagitta-cli)
+warning: unused import: `super`
+   --> crates/sagitta-search/src/test_utils.rs:234:9
+    |
+234 |     use super::*;
+    |         ^^^^^
+
+warning: unused variable: `expected_collection_name`
+   --> crates/sagitta-search/src/repo_add.rs:349:13
+    |
+349 |         let expected_collection_name = crate::repo_helpers::get_branch_aware_collection_name(
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_expected_collection_name`
+    |
+    = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `expected_collection_name`
+   --> crates/sagitta-search/src/repo_add.rs:437:13
+    |
+437 |         let expected_collection_name = crate::repo_helpers::get_branch_aware_collection_name(
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_expected_collection_name`
+
+warning: unused variable: `expected_collection_name`
+   --> crates/sagitta-search/src/repo_add.rs:533:13
+    |
+533 |         let expected_collection_name = crate::repo_helpers::get_branch_aware_collection_name(
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_expected_collection_name`
+
+warning: variable does not need to be mutable
+    --> crates/sagitta-search/src/repo_helpers/repo_indexing.rs:1424:13
+     |
+1424 |         let mut mock_client = MockQdrantClientTrait::new();
+     |             ----^^^^^^^^^^^
+     |             |
+     |             help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` on by default
+
+warning: unused variable: `temp_dir`
+    --> crates/sagitta-search/src/repo_helpers/repo_indexing.rs:1467:13
+     |
+1467 |         let temp_dir = tempdir().map_err(|e| SagittaError::Other(format!("Failed to create temp dir: {}", e)))?;
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_temp_dir`
+
+warning: variable does not need to be mutable
+  --> crates/sagitta-search/src/repo_helpers/git_edge_cases_tests.rs:75:13
+   |
+75 |         let mut mock_client = ManualMockQdrantClient::new();
+   |             ----^^^^^^^^^^^
+   |             |
+   |             help: remove this `mut`
+
+warning: unused variable: `second_commit`
+   --> crates/sagitta-search/src/repo_helpers/git_edge_cases_tests.rs:129:13
+    |
+129 |         let second_commit = repo.commit(
+    |             ^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_second_commit`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-search/src/repo_helpers/git_edge_cases_tests.rs:143:13
+    |
+143 |         let mut mock_client = ManualMockQdrantClient::new();
+    |             ----^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: unused variable: `repo`
+   --> crates/sagitta-search/src/repo_helpers/git_edge_cases_tests.rs:191:13
+    |
+191 |         let repo = init_repo_with_commit(&work_repo_path).unwrap();
+    |             ^^^^ help: if this is intentional, prefix it with an underscore: `_repo`
+
+warning: unused variable: `clone_path`
+   --> crates/sagitta-search/src/repo_helpers/git_edge_cases_tests.rs:216:13
+    |
+216 |         let clone_path = temp_dir.path().join("cloned_repo");
+    |             ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_clone_path`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-search/src/repo_helpers/git_edge_cases_tests.rs:208:13
+    |
+208 |         let mut mock_client = ManualMockQdrantClient::new();
+    |             ----^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-search/src/repo_helpers/git_edge_cases_tests.rs:258:13
+    |
+258 |         let mut mock_client = ManualMockQdrantClient::new();
+    |             ----^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-search/src/repo_helpers/git_edge_cases_tests.rs:330:13
+    |
+330 |         let mut mock_client = ManualMockQdrantClient::new();
+    |             ----^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> crates/sagitta-search/src/repo_helpers/git_edge_cases_integration_tests.rs:79:13
+   |
+79 |         let mut mock_client = ManualMockQdrantClient::new();
+   |             ----^^^^^^^^^^^
+   |             |
+   |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-search/src/repo_helpers/git_edge_cases_integration_tests.rs:125:13
+    |
+125 |         let mut mock_client = ManualMockQdrantClient::new();
+    |             ----^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-search/src/repo_helpers/git_edge_cases_integration_tests.rs:207:13
+    |
+207 |         let mut mock_client = ManualMockQdrantClient::new();
+    |             ----^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-search/src/repo_helpers/git_edge_cases_integration_tests.rs:249:13
+    |
+249 |         let mut mock_client = ManualMockQdrantClient::new();
+    |             ----^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-search/src/repo_helpers/git_edge_cases_integration_tests.rs:301:13
+    |
+301 |         let mut mock_client = ManualMockQdrantClient::new();
+    |             ----^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-search/src/repo_helpers/git_edge_cases_integration_tests.rs:355:13
+    |
+355 |         let mut mock_client = ManualMockQdrantClient::new();
+    |             ----^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-search/src/repo_helpers/git_edge_cases_integration_tests.rs:396:13
+    |
+396 |         let mut mock_client = ManualMockQdrantClient::new();
+    |             ----^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-search/src/repo_helpers/git_edge_cases_integration_tests.rs:435:13
+    |
+435 |         let mut mock_client = ManualMockQdrantClient::new();
+    |             ----^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-search/src/repo_helpers/git_edge_cases_integration_tests.rs:490:13
+    |
+490 |         let mut mock_client = ManualMockQdrantClient::new();
+    |             ----^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-search/src/repo_helpers/git_edge_cases_integration_tests.rs:509:13
+    |
+509 |         let mut repo_config = handle_repo_add(
+    |             ----^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-search/src/repo_helpers/git_edge_cases_integration_tests.rs:559:13
+    |
+559 |         let mut mock_client = ManualMockQdrantClient::new();
+    |             ----^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-search/src/repo_helpers/collection_validation.rs:123:13
+    |
+123 |         let mut client = ManualMockQdrantClient::new();
+    |             ----^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-search/src/repo_helpers/collection_validation.rs:139:13
+    |
+139 |         let mut repo_config = RepositoryConfig {
+    |             ----^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-search/src/repo_helpers/collection_validation.rs:172:13
+    |
+172 |         let mut client = ManualMockQdrantClient::new();
+    |             ----^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: unused variable: `collection_name`
+  --> crates/sagitta-search/src/repo_helpers/qdrant_wipe_recovery_test.rs:77:13
+   |
+77 |         let collection_name = "test_test_repo_br_6b86b273"; // Hash of "main"
+   |             ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_collection_name`
+
+warning: variable does not need to be mutable
+  --> crates/sagitta-search/src/repo_helpers/qdrant_wipe_recovery_test.rs:74:13
+   |
+74 |         let mut client = ManualMockQdrantClient::new();
+   |             ----^^^^^^
+   |             |
+   |             help: remove this `mut`
+
+warning: unused variable: `commit_hash`
+   --> crates/sagitta-search/src/repo_helpers/qdrant_wipe_recovery_test.rs:140:13
+    |
+140 |         let commit_hash = create_test_repo_with_commit(&repo_path);
+    |             ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_commit_hash`
+
+warning: unused variable: `collection_name`
+   --> crates/sagitta-search/src/repo_helpers/qdrant_wipe_recovery_test.rs:195:13
+    |
+195 |         let collection_name = "test_test_repo_br_6b86b273"; // Hash of "main"
+    |             ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_collection_name`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-search/src/repo_helpers/qdrant_wipe_recovery_test.rs:193:13
+    |
+193 |         let mut client = ManualMockQdrantClient::new();
+    |             ----^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: unused variable: `collection_name`
+   --> crates/sagitta-search/src/repo_helpers/qdrant_wipe_recovery_test.rs:288:13
+    |
+288 |         let collection_name = "test_test_repo_br_6b86b273";
+    |             ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_collection_name`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-search/src/repo_helpers/qdrant_wipe_recovery_test.rs:286:13
+    |
+286 |         let mut client = ManualMockQdrantClient::new();
+    |             ----^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: struct `MockError` is never constructed
+   --> crates/sagitta-search/src/error.rs:563:12
+    |
+563 |     struct MockError(String);
+    |            ^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` on by default
+
+warning: function `create_temp_file` is never used
+   --> crates/sagitta-search/src/edit/mod.rs:341:8
+    |
+341 |     fn create_temp_file(content: &str) -> tempfile::NamedTempFile { // Use full path here
+    |        ^^^^^^^^^^^^^^^^
+
+warning: function `read_temp_file` is never used
+   --> crates/sagitta-search/src/edit/mod.rs:349:8
+    |
+349 |     fn read_temp_file(file: &tempfile::NamedTempFile) -> String { // Use full path here
+    |        ^^^^^^^^^^^^^^
+
+warning: function `create_test_file` is never used
+   --> crates/sagitta-search/src/edit/mod.rs:353:8
+    |
+353 |     fn create_test_file(dir: &Path, filename: &str, content: &str) -> PathBuf {
+    |        ^^^^^^^^^^^^^^^^
+
+warning: function `read_test_file` is never used
+   --> crates/sagitta-search/src/edit/mod.rs:359:8
+    |
+359 |     fn read_test_file(file_path: &Path) -> String {
+    |        ^^^^^^^^^^^^^^
+
+warning: function `test_config_with_empty_repo_list` is never used
+   --> crates/sagitta-search/src/repo_add.rs:295:8
+    |
+295 |     fn test_config_with_empty_repo_list() -> AppConfig {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Path`
+ --> crates/sagitta-search/tests/cli_e2e.rs:5:17
+  |
+5 | use std::path::{Path, PathBuf};
+  |                 ^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `std::process::Stdio`
+  --> crates/sagitta-search/tests/cli_e2e.rs:11:5
+   |
+11 | use std::process::Stdio;
+   |     ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::time::Duration`
+  --> crates/sagitta-search/tests/cli_e2e.rs:13:5
+   |
+13 | use std::time::Duration;
+   |     ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `anyhow::Result`
+ --> crates/sagitta-cli/tests/formatters_test.rs:8:5
+  |
+8 | use anyhow::Result;
+  |     ^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `std::io::Cursor`
+ --> crates/sagitta-cli/tests/formatters_test.rs:9:5
+  |
+9 | use std::io::Cursor;
+  |     ^^^^^^^^^^^^^^^
+
+warning: unused import: `OrphanedRepository`
+ --> crates/sagitta-cli/tests/orphaned_test.rs:2:51
+  |
+2 | use sagitta_search::{AppConfig, RepositoryConfig, OrphanedRepository};
+  |                                                   ^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused imports: `RepositoryConfig`, `get_config_path_or_default`, `load_config`, and `save_config`
+  --> crates/sagitta-cli/tests/cli_integration.rs:14:41
+   |
+14 | use sagitta_search::config::{AppConfig, RepositoryConfig, save_config, load_config, get_config_path_or_default};
+   |                                         ^^^^^^^^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: variable does not need to be mutable
+  --> crates/sagitta-search/tests/cli_e2e.rs:30:9
+   |
+30 |     let mut cmd = Command::cargo_bin("sagitta-cli").expect("Failed to find cargo binary for sagitta-cli");
+   |         ----^^^
+   |         |
+   |         help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` on by default
+
+warning: constant `FAST_EMBED_BATCH_SIZE` is never used
+  --> crates/sagitta-search/tests/cli_e2e.rs:22:7
+   |
+22 | const FAST_EMBED_BATCH_SIZE: i32 = 8; // Smaller embedding batch size
+   |       ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+warning: function `get_test_onnx_model_path` is never used
+  --> crates/sagitta-search/tests/cli_e2e.rs:36:4
+   |
+36 | fn get_test_onnx_model_path() -> PathBuf {
+   |    ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `get_test_onnx_tokenizer_path` is never used
+  --> crates/sagitta-search/tests/cli_e2e.rs:41:4
+   |
+41 | fn get_test_onnx_tokenizer_path() -> PathBuf {
+   |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `count_before_force_with_change`
+   --> crates/sagitta-cli/tests/cli_integration.rs:734:9
+    |
+734 |     let count_before_force_with_change = get_qdrant_point_count(&client, &collection_name, None, Some("main"), None).await?;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_count_before_force_with_change`
+    |
+    = note: `#[warn(unused_variables)]` on by default
+
+warning: unused import: `get_config_path_or_default`
+   --> crates/sagitta-cli/src/cli/repo_commands/config.rs:107:58
+    |
+107 |     use sagitta_search::config::{AppConfig, save_config, get_config_path_or_default, IndexingConfig, load_config};
+    |                                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `crate::cli::simple`
+   --> crates/sagitta-cli/src/cli/repo_commands/config.rs:111:9
+    |
+111 |     use crate::cli::simple;
+    |         ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::path::PathBuf`
+   --> crates/sagitta-cli/src/cli/repo_commands/config.rs:112:9
+    |
+112 |     use std::path::PathBuf;
+    |         ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::time::Duration`
+   --> crates/sagitta-cli/src/progress.rs:423:9
+    |
+423 |     use std::time::Duration;
+    |         ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `tokio::time::sleep`
+   --> crates/sagitta-cli/src/progress.rs:424:9
+    |
+424 |     use tokio::time::sleep;
+    |         ^^^^^^^^^^^^^^^^^^
+
+warning: `sagitta-cli` (test "formatters_test") generated 2 warnings (run `cargo fix --test "formatters_test"` to apply 2 suggestions)
+   Compiling sagitta-code v0.2.0 (/home/adam/repos/sagitta/crates/sagitta-code)
+warning: unused import: `axum::Extension`
+    --> crates/sagitta-mcp/src/handlers/repository.rs:1078:9
+     |
+1078 |     use axum::Extension;
+     |         ^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `crate::middleware::auth_middleware::AuthenticatedUser`
+    --> crates/sagitta-mcp/src/handlers/repository.rs:1079:9
+     |
+1079 |     use crate::middleware::auth_middleware::AuthenticatedUser;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `sagitta-search` (test "cli_e2e") generated 7 warnings (run `cargo fix --test "cli_e2e"` to apply 4 suggestions)
+warning: unused variable: `model_path`
+   --> crates/sagitta-cli/src/cli/repo_commands/config.rs:181:13
+    |
+181 |         let model_path = "/test/model.onnx".to_string();
+    |             ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_model_path`
+    |
+    = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `tokenizer_path`
+   --> crates/sagitta-cli/src/cli/repo_commands/config.rs:182:13
+    |
+182 |         let tokenizer_path = "/test/tokenizer".to_string();
+    |             ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_tokenizer_path`
+
+warning: unused variable: `qdrant_url`
+   --> crates/sagitta-cli/src/cli/repo_commands/config.rs:183:13
+    |
+183 |         let qdrant_url = "http://new-qdrant".to_string();
+    |             ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_qdrant_url`
+
+warning: unused variable: `cli_args`
+   --> crates/sagitta-cli/src/cli/repo_commands/config.rs:189:13
+    |
+189 |         let cli_args = CliArgs { 
+    |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_cli_args`
+
+warning: unused variable: `cli_args`
+   --> crates/sagitta-cli/src/cli/repo_commands/config.rs:230:13
+    |
+230 |         let cli_args = CliArgs { 
+    |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_cli_args`
+
+warning: unused import: `ProjectContext`
+  --> crates/sagitta-code/src/agent/conversation/clustering.rs:14:55
+   |
+14 | use super::types::{Conversation, ConversationSummary, ProjectContext};
+   |                                                       ^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `ProviderConfig`
+ --> crates/sagitta-code/src/providers/factory.rs:3:74
+  |
+3 | use super::{ProviderType, ProviderManager, Provider, ClaudeCodeProvider, ProviderConfig};
+  |                                                                          ^^^^^^^^^^^^^^
+
+warning: unused import: `std::path::PathBuf`
+ --> crates/sagitta-code/src/providers/claude_code/provider.rs:2:5
+  |
+2 | use std::path::PathBuf;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Role`
+ --> crates/sagitta-code/src/providers/openai_compatible/client.rs:4:68
+  |
+4 |     GroundingConfig, LlmClient, LlmResponse, Message, MessagePart, Role, StreamChunk,
+  |                                                                    ^^^^
+
+warning: unused import: `std::collections::HashMap`
+  --> crates/sagitta-code/src/providers/openai_compatible/client.rs:14:5
+   |
+14 | use std::collections::HashMap;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `uuid::Uuid`
+  --> crates/sagitta-code/src/providers/openai_compatible/client.rs:18:5
+   |
+18 | use uuid::Uuid;
+   |     ^^^^^^^^^^
+
+warning: unused import: `std::time::Duration`
+   --> crates/sagitta-code/src/gui/settings/panel.rs:892:13
+    |
+892 |         use std::time::Duration;
+    |             ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `CommitInfo`
+ --> crates/sagitta-code/src/gui/git_history/graph.rs:1:20
+  |
+1 | use super::types::{CommitInfo, GitHistoryState, GraphNode, GraphEdge};
+  |                    ^^^^^^^^^^
+
+warning: unused import: `HashSet`
+ --> crates/sagitta-code/src/gui/git_history/graph.rs:2:33
+  |
+2 | use std::collections::{HashMap, HashSet};
+  |                                 ^^^^^^^
+
+warning: `sagitta-cli` (test "orphaned_test") generated 1 warning (run `cargo fix --test "orphaned_test"` to apply 1 suggestion)
+warning: unused import: `get_config_path_or_default`
+  --> crates/sagitta-mcp/tests/dependency_integration_test.rs:16:81
+   |
+16 | use sagitta_search::config::{AppConfig, RepositoryConfig, RepositoryDependency, get_config_path_or_default, save_config};
+   |                                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused variable: `server`
+  --> crates/sagitta-mcp/tests/tools_list_test.rs:70:9
+   |
+70 |     let server = Server::new(config).await.expect("Failed to create server");
+   |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_server`
+   |
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: `sagitta-cli` (test "cli_integration") generated 2 warnings (run `cargo fix --test "cli_integration"` to apply 1 suggestion)
+warning: unreachable statement
+  --> crates/sagitta-code/src/llm/fast_model.rs:58:13
+   |
+56 |             return Err(SagittaCodeError::LlmError("Fast model not available until Phase 2".to_string()));
+   |             -------------------------------------------------------------------------------------------- any code following this expression is unreachable
+57 |             
+58 |             log::info!("FastModelProvider: Initialized with model {}", self.config.conversation.fast_model);
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unreachable statement
+   |
+   = note: `#[warn(unreachable_code)]` on by default
+   = note: this warning originates in the macro `$crate::log` which comes from the expansion of the macro `log::info` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unexpected `cfg` condition value: `disabled_tests_tools_removed`
+ --> crates/sagitta-code/src/agent/core/tests.rs:3:7
+  |
+3 | #[cfg(feature = "disabled_tests_tools_removed")]
+  |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: expected values for `feature` are: `catppuccin`, `coreml`, `cuda`, `default`, `directml`, `gui`, and `rocm`
+  = help: consider adding `disabled_tests_tools_removed` as a feature in `Cargo.toml`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+  = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unused import: `chrono::Duration`
+   --> crates/sagitta-code/src/agent/conversation/clustering.rs:974:9
+    |
+974 |     use chrono::Duration;
+    |         ^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `async_trait::async_trait`
+  --> crates/sagitta-code/src/agent/cancellation_tests.rs:10:9
+   |
+10 |     use async_trait::async_trait;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unexpected `cfg` condition value: `disabled_tests_tools_removed`
+   --> crates/sagitta-code/src/providers/claude_code/mcp_integration.rs:123:7
+    |
+123 | #[cfg(feature = "disabled_tests_tools_removed")]
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: expected values for `feature` are: `catppuccin`, `coreml`, `cuda`, `default`, `directml`, `gui`, and `rocm`
+    = help: consider adding `disabled_tests_tools_removed` as a feature in `Cargo.toml`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unused import: `Provider`
+ --> crates/sagitta-code/src/providers/claude_code/tests.rs:3:24
+  |
+3 | use crate::providers::{Provider, ProviderConfig};
+  |                        ^^^^^^^^
+
+warning: private item shadows public glob re-export
+  --> crates/sagitta-code/src/gui/app.rs:49:1
+   |
+49 | mod tests;
+   | ^^^^^^^^^^
+   |
+note: the name `tests` in the type namespace is supposed to be publicly re-exported here
+  --> crates/sagitta-code/src/gui/app.rs:53:9
+   |
+53 | pub use conversation::*;
+   |         ^^^^^^^^^^^^^^^
+note: but the private item here shadows it
+  --> crates/sagitta-code/src/gui/app.rs:49:1
+   |
+49 | mod tests;
+   | ^^^^^^^^^^
+   = note: `#[warn(hidden_glob_reexports)]` on by default
+
+warning: unused import: `create_controlled_collapsing_header`
+ --> crates/sagitta-code/src/gui/chat/collapsing_tests.rs:6:56
+  |
+6 |     use super::super::view::collapsing_header_helper::{create_controlled_collapsing_header, get_tool_card_state};
+  |                                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `ClaudeCodeConfig`
+   --> crates/sagitta-code/src/gui/settings/panel.rs:971:96
+    |
+971 |     use crate::config::types::{SagittaCodeConfig, UiConfig, LoggingConfig, ConversationConfig, ClaudeCodeConfig};
+    |                                                                                                ^^^^^^^^^^^^^^^^
+
+warning: unused import: `FileChangeEvent`
+  --> crates/sagitta-code/src/services/sync_orchestrator_test.rs:13:66
+   |
+13 | use super::file_watcher::{FileWatcherService, FileWatcherConfig, FileChangeEvent};
+   |                                                                  ^^^^^^^^^^^^^^^
+
+warning: `sagitta-mcp` (test "dependency_integration_test") generated 1 warning (run `cargo fix --test "dependency_integration_test"` to apply 1 suggestion)
+warning: unused variable: `llm_client_test`
+    --> crates/sagitta-code/src/gui/app/events.rs:3013:9
+     |
+3013 |     let llm_client_test = create_llm_client(&current_config, None)
+     |         ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_llm_client_test`
+     |
+     = note: `#[warn(unused_variables)]` on by default
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-code/src/gui/app/initialization.rs:131:9
+    |
+131 |     let mut manager = factory.create_manager()
+    |         ----^^^^^^^
+    |         |
+    |         help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` on by default
+
+warning: `sagitta-mcp` (test "tools_list_test") generated 1 warning
+warning: function `create_test_repo_config` is never used
+    --> crates/sagitta-mcp/src/handlers/repository.rs:1186:8
+     |
+1186 |     fn create_test_repo_config(name: &str) -> RepositoryConfig {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` on by default
+
+warning: function `create_test_app_config` is never used
+    --> crates/sagitta-mcp/src/handlers/repository.rs:1205:8
+     |
+1205 |     fn create_test_app_config(repositories: Vec<RepositoryConfig>, temp_dir_path_str: String) -> Arc<RwLock<AppConfig>> {
+     |        ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `is_access_denied` is never used
+    --> crates/sagitta-mcp/src/handlers/repository.rs:1260:8
+     |
+1260 |     fn is_access_denied(err: &ErrorObject) -> bool {
+     |        ^^^^^^^^^^^^^^^^
+
+warning: `sagitta-search` (lib test) generated 57 warnings (run `cargo fix --lib -p sagitta-search --tests` to apply 39 suggestions)
+warning: use of deprecated associated function `egui::ComboBox::from_id_source`: Renamed id_salt
+   --> crates/sagitta-code/src/gui/repository/dependency_modal.rs:179:33
+    |
+179 |                 egui::ComboBox::from_id_source("dep_repo_combo")
+    |                                 ^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: unused import: `StreamExt`
+  --> crates/sagitta-code/src/providers/openai_compatible/client.rs:10:34
+   |
+10 | use futures_util::stream::{self, StreamExt};
+   |                                  ^^^^^^^^^
+
+warning: unused variable: `mcp_integration`
+  --> crates/sagitta-code/src/providers/claude_code/provider.rs:74:9
+   |
+74 |         mcp_integration: Arc<McpIntegration>
+   |         ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_mcp_integration`
+
+warning: unused variable: `i`
+   --> crates/sagitta-code/src/providers/openai_compatible/client.rs:331:14
+    |
+331 |         for (i, part) in response.message.parts.into_iter().enumerate() {
+    |              ^ help: if this is intentional, prefix it with an underscore: `_i`
+
+warning: variable does not need to be mutable
+    --> crates/sagitta-code/src/gui/app/panels.rs:1895:13
+     |
+1895 |         let mut model_changed = false;
+     |             ----^^^^^^^^^^^^^
+     |             |
+     |             help: remove this `mut`
+
+warning: `sagitta-mcp` (lib test) generated 5 warnings (run `cargo fix --lib -p sagitta-mcp --tests` to apply 2 suggestions)
+warning: unused variable: `current_provider`
+  --> crates/sagitta-code/src/gui/chat/input.rs:32:5
+   |
+32 |     current_provider: &crate::providers::types::ProviderType,
+   |     ^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_current_provider`
+
+warning: unused variable: `available_providers`
+  --> crates/sagitta-code/src/gui/chat/input.rs:33:5
+   |
+33 |     available_providers: &[crate::providers::types::ProviderType],
+   |     ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_available_providers`
+
+warning: unused variable: `on_provider_change`
+  --> crates/sagitta-code/src/gui/chat/input.rs:34:5
+   |
+34 |     on_provider_change: &mut Option<crate::providers::types::ProviderType>,
+   |     ^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_on_provider_change`
+
+warning: unused variable: `frame_response`
+    --> crates/sagitta-code/src/gui/chat/view.rs:1165:9
+     |
+1165 |     let frame_response = Frame::NONE
+     |         ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_frame_response`
+
+warning: unused variable: `frame_response`
+    --> crates/sagitta-code/src/gui/chat/view.rs:1482:9
+     |
+1482 |     let frame_response = Frame::NONE
+     |         ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_frame_response`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-code/src/gui/repository/git_controls.rs:361:13
+    |
+361 |         let mut response = ui.colored_label(color, icon);
+    |             ----^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: unused variable: `repo_manager`
+   --> crates/sagitta-code/src/gui/repository/dependency_modal.rs:124:9
+    |
+124 |         repo_manager: Arc<Mutex<RepositoryManager>>,
+    |         ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_repo_manager`
+
+warning: unused variable: `task_manager`
+   --> crates/sagitta-code/src/gui/task/panel.rs:595:13
+    |
+595 |         let task_manager = self.task_manager.clone();
+    |             ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_task_manager`
+
+warning: unreachable pattern
+   --> crates/sagitta-code/src/gui/conversation/sidebar/rendering.rs:458:17
+    |
+458 |                 _ => {}
+    |                 ^ no value can reach this
+    |
+note: multiple earlier patterns match some of the same values
+   --> crates/sagitta-code/src/gui/conversation/sidebar/rendering.rs:458:17
+    |
+404 |                 SidebarAction::SwitchToConversation(id) => {
+    |                 --------------------------------------- matches some of the same values
+...
+413 |                 SidebarAction::CreateNewConversation => {
+    |                 ------------------------------------ matches some of the same values
+...
+434 |                 SidebarAction::RefreshConversations => {
+    |                 ----------------------------------- matches some of the same values
+...
+437 |                 SidebarAction::RequestDeleteConversation(_id) => {
+    |                 --------------------------------------------- matches some of the same values
+...
+458 |                 _ => {}
+    |                 ^ ...and 3 other patterns collectively make this unreachable
+    = note: `#[warn(unreachable_patterns)]` on by default
+
+warning: unused variable: `overall_metrics`
+    --> crates/sagitta-code/src/agent/conversation/analytics.rs:1349:13
+     |
+1349 |         let overall_metrics = manager.calculate_overall_metrics(&conversation_refs).await.unwrap();
+     |             ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_overall_metrics`
+
+warning: unused variable: `conversation`
+   --> crates/sagitta-code/src/agent/conversation/navigation.rs:850:13
+    |
+850 |         let conversation = Conversation {
+    |             ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_conversation`
+
+warning: unused variable: `persistence`
+   --> crates/sagitta-code/src/agent/conversation/persistence/disk.rs:341:13
+    |
+341 |         let persistence = DiskConversationPersistence::new(storage_path.clone()).await.unwrap();
+    |             ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_persistence`
+
+warning: fields `llm_client`, `tool_registry`, `config`, `state`, `pending_tool_calls`, and `context_manager` are never read
+  --> crates/sagitta-code/src/agent/core.rs:47:5
+   |
+45 | pub struct Agent {
+   |            ----- fields in this struct
+46 |     /// The LLM client
+47 |     llm_client: Arc<dyn LlmClient>,
+   |     ^^^^^^^^^^
+...
+50 |     tool_registry: Arc<crate::tools::registry::ToolRegistry>,
+   |     ^^^^^^^^^^^^^
+...
+65 |     config: SagittaCodeConfig,
+   |     ^^^^^^
+66 |     state: Arc<tokio::sync::Mutex<AgentState>>,
+   |     ^^^^^
+...
+69 |     pending_tool_calls: Arc<tokio::sync::Mutex<HashMap<String, (ToolCall, u32, AgentMessage)>>>, // Review if new engine handles this
+   |     ^^^^^^^^^^^^^^^^^^
+...
+82 |     context_manager: Arc<ConversationContextManager>,
+   |     ^^^^^^^^^^^^^^^
+   |
+   = note: `Agent` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` on by default
+
+warning: methods `suggest_checkpoint_title`, `create_automatic_checkpoint`, and `create_recovery_checkpoint` are never used
+   --> crates/sagitta-code/src/agent/conversation/checkpoints.rs:672:14
+    |
+286 | impl ConversationCheckpointManager {
+    | ---------------------------------- methods in this implementation
+...
+672 |     async fn suggest_checkpoint_title(&self, _agent_state: &str, _message_id: Uuid) -> Result<String> {
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^
+...
+677 |     async fn create_automatic_checkpoint(
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+696 |     async fn create_recovery_checkpoint(
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `build_similarity_matrix` and `calculate_conversation_similarity` are never used
+   --> crates/sagitta-code/src/agent/conversation/clustering.rs:413:14
+    |
+150 | impl ConversationClusteringManager {
+    | ---------------------------------- methods in this implementation
+...
+413 |     async fn build_similarity_matrix(&self, conversations: &[ConversationSummary]) -> Result<Vec<Vec<f32>>> {
+    |              ^^^^^^^^^^^^^^^^^^^^^^^
+...
+598 |     async fn calculate_conversation_similarity(
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: associated items `extract_searchable_text`, `calculate_similarity_score`, `find_matching_snippets`, `update_tag_index`, and `update_workspace_index` are never used
+   --> crates/sagitta-code/src/agent/conversation/search/text.rs:49:8
+    |
+40  | impl TextConversationSearchEngine {
+    | --------------------------------- associated items in this implementation
+...
+49  |     fn extract_searchable_text(conversation: &Conversation) -> String {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^
+...
+87  |     fn calculate_similarity_score(query: &str, text: &str) -> f32 {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+116 |     fn find_matching_snippets(query: &str, text: &str, max_snippets: usize) -> Vec<String> {
+    |        ^^^^^^^^^^^^^^^^^^^^^^
+...
+146 |     async fn update_tag_index(&self, conversation_id: Uuid, tags: &[String]) {
+    |              ^^^^^^^^^^^^^^^^
+...
+164 |     async fn update_workspace_index(&self, conversation_id: Uuid, workspace_id: Option<Uuid>) {
+    |              ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `apply_filters` and `group_results_by_conversation` are never used
+   --> crates/sagitta-code/src/agent/conversation/search/semantic.rs:174:8
+    |
+33  | impl SemanticConversationSearchEngine {
+    | ------------------------------------- methods in this implementation
+...
+174 |     fn apply_filters(
+    |        ^^^^^^^^^^^^^
+...
+225 |     fn group_results_by_conversation(
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `analyze_content` is never used
+   --> crates/sagitta-code/src/agent/conversation/tagging/suggester.rs:490:14
+    |
+60  | impl TagSuggester {
+    | ----------------- method in this implementation
+...
+490 |     async fn analyze_content(&self, messages: &[AgentMessage]) -> Vec<String> {
+    |              ^^^^^^^^^^^^^^^
+
+warning: method `apply_keyword_rule` is never used
+   --> crates/sagitta-code/src/agent/conversation/tagging/rules.rs:457:8
+    |
+176 | impl RuleBasedTagger {
+    | -------------------- method in this implementation
+...
+457 |     fn apply_keyword_rule(&self, rule: &TagRule, conversation: &Conversation) -> Option<TagSuggestion> {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: fields `tool_executor` and `continue_reasoning_after_tool` are never read
+  --> crates/sagitta-code/src/agent/streaming.rs:32:5
+   |
+18 | pub struct StreamingProcessor {
+   |            ------------------ fields in this struct
+...
+32 |     tool_executor: Arc<tokio::sync::Mutex<crate::tools::executor::SagittaCodeToolExecutorInternal>>,
+   |     ^^^^^^^^^^^^^
+...
+38 |     continue_reasoning_after_tool: Arc<Mutex<bool>>,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `StreamingProcessor` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+
+warning: constant `CONFIG_FILENAME` is never used
+ --> crates/sagitta-code/src/config/loader.rs:8:7
+  |
+8 | const CONFIG_FILENAME: &str = "sagitta_code_config.json";
+  |       ^^^^^^^^^^^^^^^
+
+warning: constant `CLAUDE_CODE_TIMEOUT` is never used
+  --> crates/sagitta-code/src/providers/claude_code/client.rs:23:7
+   |
+23 | const CLAUDE_CODE_TIMEOUT: Duration = Duration::from_secs(600);
+   |       ^^^^^^^^^^^^^^^^^^^
+
+warning: field `config` is never read
+  --> crates/sagitta-code/src/providers/claude_code/client.rs:27:5
+   |
+26 | pub struct ClaudeCodeClient {
+   |            ---------------- field in this struct
+27 |     config: ClaudeCodeConfig,
+   |     ^^^^^^
+
+warning: fields `mcp_integration` and `timeout` are never read
+  --> crates/sagitta-code/src/providers/openai_compatible/client.rs:25:5
+   |
+20 | pub struct OpenAICompatibleClient {
+   |            ---------------------- fields in this struct
+...
+25 |     mcp_integration: Arc<McpIntegration>,
+   |     ^^^^^^^^^^^^^^^
+26 |     timeout: Duration,
+   |     ^^^^^^^
+
+warning: static `SAGITTA_CODE_LOG_COLLECTOR` is never used
+  --> crates/sagitta-code/src/utils/logging.rs:35:8
+   |
+35 | static SAGITTA_CODE_LOG_COLLECTOR: SagittaCodeLogCollector = SagittaCodeLogCollector;
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: trait `StringExt` is never used
+  --> crates/sagitta-code/src/gui/app.rs:59:7
+   |
+59 | trait StringExt {
+   |       ^^^^^^^^^
+
+warning: field `tool_formatter` is never read
+   --> crates/sagitta-code/src/gui/app.rs:116:5
+    |
+79  | pub struct SagittaCodeApp {
+    |            -------------- field in this struct
+...
+116 |     tool_formatter: ToolResultFormatter,
+    |     ^^^^^^^^^^^^^^
+
+warning: methods `make_chat_message_from_agent_message`, `handle_tool_call`, `handle_tool_call_result`, `try_create_tagging_pipeline`, `force_refresh_conversation_data`, and `try_create_title_generator` are never used
+   --> crates/sagitta-code/src/gui/app.rs:231:8
+    |
+129 | impl SagittaCodeApp {
+    | ------------------- methods in this implementation
+...
+231 |     fn make_chat_message_from_agent_message(&self, agent_msg: &AgentMessage) -> super::chat::view::ChatMessage {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+236 |     fn handle_tool_call(&mut self, tool_call: ToolCall) {
+    |        ^^^^^^^^^^^^^^^^
+...
+241 |     fn handle_tool_call_result(&mut self, tool_call_id: String, tool_name: String, result: crate::tools::types::ToolResult) {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^
+...
+451 |     async fn try_create_tagging_pipeline(&self, conversation_manager: Arc<dyn ConversationManager>) -> Result<TaggingPipeline> {
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+553 |     fn force_refresh_conversation_data(&mut self) {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+569 |     async fn try_create_title_generator(&self) -> Result<TitleGenerator> {
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `build_dependency_context` is never used
+    --> crates/sagitta-code/src/gui/app/rendering.rs:1684:4
+     |
+1684 | fn build_dependency_context(enabled_dependencies: &[String]) -> String {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `create_qdrant_client` is never used
+   --> crates/sagitta-code/src/gui/app/initialization.rs:179:14
+    |
+179 | pub async fn create_qdrant_client(core_config: &sagitta_search::AppConfig) -> Result<Arc<dyn QdrantClientTrait>> {
+    |              ^^^^^^^^^^^^^^^^^^^^
+
+warning: field `tagging_pipeline` is never read
+  --> crates/sagitta-code/src/gui/app/conversation_title_updater.rs:16:5
+   |
+13 | pub struct ConversationTitleUpdater {
+   |            ------------------------ field in this struct
+...
+16 |     tagging_pipeline: Option<TaggingPipeline>,
+   |     ^^^^^^^^^^^^^^^^
+
+warning: static `SYNTAX_SET` is never used
+   --> crates/sagitta-code/src/gui/chat/view.rs:388:8
+    |
+388 | static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
+    |        ^^^^^^^^^^
+
+warning: static `THEME_SET` is never used
+   --> crates/sagitta-code/src/gui/chat/view.rs:389:8
+    |
+389 | static THEME_SET: OnceLock<ThemeSet> = OnceLock::new();
+    |        ^^^^^^^^^
+
+warning: function `get_syntax_set` is never used
+   --> crates/sagitta-code/src/gui/chat/view.rs:395:4
+    |
+395 | fn get_syntax_set() -> &'static SyntaxSet {
+    |    ^^^^^^^^^^^^^^
+
+warning: function `get_theme_set` is never used
+   --> crates/sagitta-code/src/gui/chat/view.rs:399:4
+    |
+399 | fn get_theme_set() -> &'static ThemeSet {
+    |    ^^^^^^^^^^^^^
+
+warning: method `format_time` is never used
+   --> crates/sagitta-code/src/gui/chat/view.rs:643:8
+    |
+632 | impl ChatMessage {
+    | ---------------- method in this implementation
+...
+643 |     fn format_time(&self) -> String {
+    |        ^^^^^^^^^^^
+
+warning: function `group_consecutive_messages` is never used
+   --> crates/sagitta-code/src/gui/chat/view.rs:784:4
+    |
+784 | fn group_consecutive_messages(messages: &[StreamingMessage]) -> Vec<Vec<&StreamingMessage>> {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `render_tool_calls_compact` is never used
+    --> crates/sagitta-code/src/gui/chat/view.rs:1458:4
+     |
+1458 | fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools...
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `render_message_content_compact` is never used
+    --> crates/sagitta-code/src/gui/chat/view.rs:1757:4
+     |
+1757 | fn render_message_content_compact(ui: &mut Ui, message: &StreamingMessage, bg_color: &Color32, max_width: f32, app_theme: AppTheme) -> Op...
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `render_code_block_compact` is never used
+    --> crates/sagitta-code/src/gui/chat/view.rs:1925:4
+     |
+1925 | fn render_code_block_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `render_syntax_highlighted_code` is never used
+    --> crates/sagitta-code/src/gui/chat/view.rs:1986:4
+     |
+1986 | fn render_syntax_highlighted_code(ui: &mut Ui, text: &str, language: &str, _bg_color: &Color32, max_width: f32) {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `syntect_style_to_color` is never used
+    --> crates/sagitta-code/src/gui/chat/view.rs:2026:4
+     |
+2026 | fn syntect_style_to_color(style: &SyntectStyle) -> Color32 {
+     |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `render_internal_diff_display_logic` is never used
+    --> crates/sagitta-code/src/gui/chat/view.rs:2035:4
+     |
+2035 | fn render_internal_diff_display_logic(ui: &mut Ui, old_content: &str, new_content: &str, language: Option<&str>, _bg_color: &Color32, max...
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `render_code_diff` is never used
+    --> crates/sagitta-code/src/gui/chat/view.rs:2058:4
+     |
+2058 | fn render_code_diff(ui: &mut Ui, old_content: &str, new_content: &str, language: Option<&str>, bg_color: &Color32, max_width: f32, app_th...
+     |    ^^^^^^^^^^^^^^^^
+
+warning: function `render_diff_lines` is never used
+    --> crates/sagitta-code/src/gui/chat/view.rs:2079:4
+     |
+2079 | fn render_diff_lines<'a>(
+     |    ^^^^^^^^^^^^^^^^^
+
+warning: function `detect_diff_content` is never used
+    --> crates/sagitta-code/src/gui/chat/view.rs:2190:4
+     |
+2190 | fn detect_diff_content(content: &str) -> Option<(String, String, Option<String>)> {
+     |    ^^^^^^^^^^^^^^^^^^^
+
+warning: function `is_tool_result_message` is never used
+    --> crates/sagitta-code/src/gui/chat/view.rs:2357:4
+     |
+2357 | fn is_tool_result_message(text: &str) -> bool {
+     |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `extract_execution_time` is never used
+    --> crates/sagitta-code/src/gui/chat/view.rs:2418:4
+     |
+2418 | fn extract_execution_time(result_data: &str) -> Option<u64> {
+     |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `extract_tool_result_summary` is never used
+    --> crates/sagitta-code/src/gui/chat/view.rs:2447:4
+     |
+2447 | fn extract_tool_result_summary(text: &str) -> String {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `is_reasoning_engine_summary_message` is never used
+    --> crates/sagitta-code/src/gui/chat/view.rs:2556:4
+     |
+2556 | fn is_reasoning_engine_summary_message(text: &str) -> bool {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `DIFF_COLLAPSING_THRESHOLD_LINES` is never used
+    --> crates/sagitta-code/src/gui/chat/view.rs:2563:7
+     |
+2563 | const DIFF_COLLAPSING_THRESHOLD_LINES: usize = 10;
+     |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `EXPANDED_DIFF_SCROLL_AREA_MAX_HEIGHT` is never used
+    --> crates/sagitta-code/src/gui/chat/view.rs:2564:7
+     |
+2564 | const EXPANDED_DIFF_SCROLL_AREA_MAX_HEIGHT: f32 = 360.0;
+     |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `MIN_ALLOCATED_HEIGHT_FOR_DIFF_FRAME` is never used
+    --> crates/sagitta-code/src/gui/chat/view.rs:2565:7
+     |
+2565 | const MIN_ALLOCATED_HEIGHT_FOR_DIFF_FRAME: f32 = 400.0;
+     |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `wrap_text_at_line_length` is never used
+    --> crates/sagitta-code/src/gui/chat/view.rs:2572:4
+     |
+2572 | fn wrap_text_at_line_length(text: &str, max_line_length: usize) -> String {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `render_mixed_content_compact` is never used
+    --> crates/sagitta-code/src/gui/chat/view.rs:2596:4
+     |
+2596 | fn render_mixed_content_compact(ui: &mut Ui, content: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) -> Option<(String, S...
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `format_conversation_for_copying` is never used
+    --> crates/sagitta-code/src/gui/chat/view.rs:3348:4
+     |
+3348 | fn format_conversation_for_copying(messages: &[StreamingMessage]) -> String {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `save_core_config` is never used
+   --> crates/sagitta-code/src/gui/repository/manager.rs:317:14
+    |
+82  | impl RepositoryManager {
+    | ---------------------- method in this implementation
+...
+317 |     async fn save_core_config(&self) -> Result<()> {
+    |              ^^^^^^^^^^^^^^^^
+
+warning: constant `FIELD_LANGUAGE` is never used
+  --> crates/sagitta-code/src/gui/repository/query.rs:27:7
+   |
+27 | const FIELD_LANGUAGE: &str = "language";
+   |       ^^^^^^^^^^^^^^
+
+warning: constant `FIELD_ELEMENT_TYPE` is never used
+  --> crates/sagitta-code/src/gui/repository/query.rs:28:7
+   |
+28 | const FIELD_ELEMENT_TYPE: &str = "element_type";
+   |       ^^^^^^^^^^^^^^^^^^
+
+warning: constant `FIELD_BRANCH` is never used
+  --> crates/sagitta-code/src/gui/repository/query.rs:29:7
+   |
+29 | const FIELD_BRANCH: &str = "branch";
+   |       ^^^^^^^^^^^^
+
+warning: method `render_advanced_controls` is never used
+   --> crates/sagitta-code/src/gui/repository/git_controls.rs:431:8
+    |
+89  | impl GitControls {
+    | ---------------- method in this implementation
+...
+431 |     fn render_advanced_controls(&mut self, ui: &mut Ui, _theme: AppTheme) {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: fields `conversation_id`, `task_id`, `started_at`, `last_activity`, `has_errors`, and `test_status` are never read
+  --> crates/sagitta-code/src/gui/task/completion_detector.rs:24:5
+   |
+23 | struct MonitoredConversation {
+   |        --------------------- fields in this struct
+24 |     conversation_id: Uuid,
+   |     ^^^^^^^^^^^^^^^
+25 |     task_id: Uuid,
+   |     ^^^^^^^
+26 |     started_at: DateTime<Utc>,
+   |     ^^^^^^^^^^
+27 |     last_activity: DateTime<Utc>,
+   |     ^^^^^^^^^^^^^
+28 |     has_errors: bool,
+   |     ^^^^^^^^^^
+29 |     test_status: Option<TestStatus>,
+   |     ^^^^^^^^^^^
+   |
+   = note: `MonitoredConversation` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: variants `Running`, `Passed`, and `Failed` are never constructed
+  --> crates/sagitta-code/src/gui/task/completion_detector.rs:36:5
+   |
+34 | enum TestStatus {
+   |      ---------- variants in this enum
+35 |     NotRun,
+36 |     Running,
+   |     ^^^^^^^
+37 |     Passed,
+   |     ^^^^^^
+38 |     Failed,
+   |     ^^^^^^
+   |
+   = note: `TestStatus` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: method `color_picker` is never used
+    --> crates/sagitta-code/src/gui/theme_customizer.rs:1059:8
+     |
+31   | impl ThemeCustomizer {
+     | -------------------- method in this implementation
+...
+1059 |     fn color_picker(&mut self, ui: &mut Ui, label: &str, color: &mut Color32) -> bool {
+     |        ^^^^^^^^^^^^
+
+warning: field `node_positions` is never read
+  --> crates/sagitta-code/src/gui/conversation/tree.rs:26:5
+   |
+12 | pub struct ConversationTree {
+   |            ---------------- field in this struct
+...
+26 |     node_positions: HashMap<NodeId, Position>,
+   |     ^^^^^^^^^^^^^^
+
+warning: field `task_id` is never read
+  --> crates/sagitta-code/src/tasks/scheduler.rs:25:5
+   |
+24 | struct ScheduledTask {
+   |        ------------- field in this struct
+25 |     task_id: Uuid,
+   |     ^^^^^^^
+   |
+   = note: `ScheduledTask` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: field `error_type` is never read
+  --> crates/sagitta-code/src/services/sync_orchestrator.rs:86:5
+   |
+84 | struct SyncAttemptResult {
+   |        ----------------- field in this struct
+85 |     files_processed: usize,
+86 |     error_type: Option<SyncErrorType>,
+   |     ^^^^^^^^^^
+
+warning: unused implementer of `futures_util::Future` that must be used
+   --> crates/sagitta-code/src/gui/app/rendering.rs:330:13
+    |
+330 |             agent.request_loop_break();
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: futures do nothing unless you `.await` or poll them
+    = note: `#[warn(unused_must_use)]` on by default
+
+warning: unused `std::result::Result` that must be used
+   --> crates/sagitta-code/src/gui/app/initialization.rs:242:5
+    |
+242 |     app.repo_panel.refresh_repositories(); // Initial refresh
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: this `Result` may be an `Err` variant, which should be handled
+help: use `let _ = ...` to ignore the resulting value
+    |
+242 |     let _ = app.repo_panel.refresh_repositories(); // Initial refresh
+    |     +++++++
+
+warning: creating a shared reference to mutable static
+   --> crates/sagitta-code/src/gui/theme.rs:204:9
+    |
+204 |         CUSTOM_THEME_COLORS.clone().unwrap_or_default()
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^ shared reference to mutable static
+    |
+    = note: for more information, see <https://doc.rust-lang.org/nightly/edition-guide/rust-2024/static-mut-references.html>
+    = note: shared references to mutable statics are dangerous; it's undefined behavior if the static is mutated or if a mutable reference is created for it while the shared reference lives
+    = note: `#[warn(static_mut_refs)]` on by default
+
+warning: unused variable: `path_str`
+   --> crates/sagitta-code/src/config/paths.rs:157:21
+    |
+157 |                 let path_str = path.to_string_lossy();
+    |                     ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_path_str`
+
+warning: unused variable: `grounding_config`
+  --> crates/sagitta-code/src/llm/test_client.rs:95:140
+   |
+95 | ...: &ThinkingConfig, grounding_config: &GroundingConfig) -> Result<LlmResponse, SagittaCodeError> {
+   |                       ^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_grounding_config`
+
+warning: unused variable: `grounding_config`
+   --> crates/sagitta-code/src/llm/test_client.rs:129:147
+    |
+129 | ...: &ThinkingConfig, grounding_config: &GroundingConfig) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Se...
+    |                       ^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_grounding_config`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-code/src/providers/factory.rs:131:13
+    |
+131 |         let mut invalid_config = ProviderConfig::new(ProviderType::OpenAICompatible);
+    |             ----^^^^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: unused variable: `thinking_content`
+  --> crates/sagitta-code/src/providers/claude_code/tests.rs:18:13
+   |
+18 |         let thinking_content = "This is my thinking process about the request.";
+   |             ^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_thinking_content`
+
+warning: unused variable: `i`
+   --> crates/sagitta-code/src/utils/logging.rs:274:13
+    |
+274 |         for i in 0..1100 {
+    |             ^ help: if this is intentional, prefix it with an underscore: `_i`
+
+warning: unused variable: `i`
+   --> crates/sagitta-code/src/utils/logging.rs:388:13
+    |
+388 |         for i in 0..5 {
+    |             ^ help: if this is intentional, prefix it with an underscore: `_i`
+
+warning: `sagitta-cli` (lib test) generated 10 warnings (run `cargo fix --lib -p sagitta-cli --tests` to apply 5 suggestions)
+warning: unused variable: `new_conversation_id`
+    --> crates/sagitta-code/src/gui/app/events.rs:2662:13
+     |
+2662 |         let new_conversation_id = Uuid::new_v4();
+     |             ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_new_conversation_id`
+
+warning: unused variable: `app`
+    --> crates/sagitta-code/src/gui/app/events.rs:2711:13
+     |
+2711 |         let app = create_test_app();
+     |             ^^^ help: if this is intentional, prefix it with an underscore: `_app`
+
+warning: unused variable: `formatter`
+    --> crates/sagitta-code/src/gui/app/tool_formatting.rs:1255:13
+     |
+1255 |         let formatter = ToolResultFormatter::new();
+     |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_formatter`
+
+warning: unused variable: `state`
+   --> crates/sagitta-code/src/gui/app/state.rs:775:13
+    |
+775 |         let state = AppState::new();
+    |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_state`
+
+warning: unused variable: `app`
+   --> crates/sagitta-code/src/gui/app/initialization.rs:510:13
+    |
+510 |         let app = SagittaCodeApp::new(repo_manager, sagitta_config, app_config);
+    |             ^^^ help: if this is intentional, prefix it with an underscore: `_app`
+
+warning: unused variable: `original_theme`
+   --> crates/sagitta-code/src/gui/app/initialization.rs:691:13
+    |
+691 |         let original_theme = app.state.current_theme;
+    |             ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_original_theme`
+
+warning: unused variable: `temp_dir`
+   --> crates/sagitta-code/src/gui/app/initialization.rs:764:13
+    |
+764 |         let temp_dir = TempDir::new().unwrap();
+    |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_temp_dir`
+
+warning: unused variable: `ctx`
+  --> crates/sagitta-code/src/gui/app/tests/hotkey_tests.rs:10:13
+   |
+10 |         let ctx = Context::default();
+   |             ^^^ help: if this is intentional, prefix it with an underscore: `_ctx`
+
+warning: unused variable: `is_waiting`
+   --> crates/sagitta-code/src/gui/chat/input.rs:563:13
+    |
+563 |         let is_waiting = false;
+    |             ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_is_waiting`
+
+warning: unused variable: `theme`
+   --> crates/sagitta-code/src/gui/chat/input.rs:564:13
+    |
+564 |         let theme = AppTheme::Dark; // Use the new simplified theme
+    |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_theme`
+
+warning: unused variable: `input_buffer`
+   --> crates/sagitta-code/src/gui/chat/input.rs:639:13
+    |
+639 |         let input_buffer = String::new();
+    |             ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_input_buffer`
+
+warning: unused variable: `on_submit`
+   --> crates/sagitta-code/src/gui/chat/input.rs:640:13
+    |
+640 |         let on_submit = false;
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_on_submit`
+
+warning: unused variable: `show_hotkeys_modal`
+   --> crates/sagitta-code/src/gui/chat/input.rs:641:13
+    |
+641 |         let show_hotkeys_modal = false;
+    |             ^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_show_hotkeys_modal`
+
+warning: unused variable: `loop_break_requested`
+   --> crates/sagitta-code/src/gui/chat/input.rs:642:13
+    |
+642 |         let loop_break_requested = false;
+    |             ^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_loop_break_requested`
+
+warning: unused variable: `loop_inject_buffer`
+   --> crates/sagitta-code/src/gui/chat/input.rs:643:13
+    |
+643 |         let loop_inject_buffer = String::new();
+    |             ^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_loop_inject_buffer`
+
+warning: unused variable: `show_loop_inject_input`
+   --> crates/sagitta-code/src/gui/chat/input.rs:644:13
+    |
+644 |         let show_loop_inject_input = false;
+    |             ^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_show_loop_inject_input`
+
+warning: unused variable: `loop_inject_message`
+   --> crates/sagitta-code/src/gui/chat/input.rs:645:13
+    |
+645 |         let loop_inject_message: Option<String> = None;
+    |             ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_loop_inject_message`
+
+warning: value assigned to `input_buffer` is never read
+   --> crates/sagitta-code/src/gui/chat/input.rs:671:17
+    |
+671 |         let mut input_buffer = String::new();
+    |                 ^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+    = note: `#[warn(unused_assignments)]` on by default
+
+warning: value assigned to `global_collapsed` is never read
+   --> crates/sagitta-code/src/gui/chat/collapsing_tests.rs:172:17
+    |
+172 |         let mut global_collapsed = false;
+    |                 ^^^^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: unused variable: `user_id`
+   --> crates/sagitta-code/src/gui/chat/mod.rs:630:13
+    |
+630 |         let user_id = manager.add_user_message("Hello, can you help me?".to_string());
+    |             ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_user_id`
+
+warning: unused variable: `user_id`
+   --> crates/sagitta-code/src/gui/chat/mod.rs:789:13
+    |
+789 |         let user_id = manager.add_user_message("First question".to_string());
+    |             ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_user_id`
+
+warning: unused variable: `user_id_2`
+   --> crates/sagitta-code/src/gui/chat/mod.rs:797:13
+    |
+797 |         let user_id_2 = manager.add_user_message("Second question".to_string());
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_user_id_2`
+
+warning: unused variable: `user_id_1`
+   --> crates/sagitta-code/src/gui/chat/mod.rs:831:13
+    |
+831 |         let user_id_1 = manager.add_user_message("What is Rust?".to_string());
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_user_id_1`
+
+warning: unused variable: `user_id_2`
+   --> crates/sagitta-code/src/gui/chat/mod.rs:841:13
+    |
+841 |         let user_id_2 = manager.add_user_message("Can you give me an example?".to_string());
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_user_id_2`
+
+warning: unused variable: `temp_dir`
+    --> crates/sagitta-code/src/gui/repository/manager.rs:1299:13
+     |
+1299 |         let temp_dir = TempDir::new().unwrap();
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_temp_dir`
+
+warning: unused variable: `temp_dir`
+    --> crates/sagitta-code/src/gui/repository/manager.rs:1383:13
+     |
+1383 |         let temp_dir = TempDir::new().unwrap();
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_temp_dir`
+
+warning: unused variable: `state`
+    --> crates/sagitta-code/src/gui/repository/sync.rs:1078:13
+     |
+1078 |         let state = RepoPanelState {
+     |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_state`
+
+warning: unused variable: `syntax_set`
+   --> crates/sagitta-code/src/gui/repository/view.rs:523:13
+    |
+523 |         let syntax_set = get_syntax_set();
+    |             ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_syntax_set`
+
+warning: unused variable: `modal`
+   --> crates/sagitta-code/src/gui/git_history/tests.rs:356:13
+    |
+356 |         let modal = GitHistoryModal::new();
+    |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_modal`
+
+warning: unused variable: `modal`
+   --> crates/sagitta-code/src/gui/git_history/tests.rs:362:13
+    |
+362 |         let modal = GitHistoryModal::new();
+    |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_modal`
+
+warning: unused variable: `task_manager`
+   --> crates/sagitta-code/src/tasks/scheduler.rs:471:13
+    |
+471 |         let task_manager = Arc::new(InMemoryTaskManager::new());
+    |             ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_task_manager`
+
+warning: unused variable: `app_event_rx`
+  --> crates/sagitta-code/src/services/sync_orchestrator_test.rs:82:28
+   |
+82 |     let (app_event_tx, mut app_event_rx) = mpsc::unbounded_channel();
+   |                            ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_app_event_rx`
+
+warning: variable does not need to be mutable
+  --> crates/sagitta-code/src/services/sync_orchestrator_test.rs:82:24
+   |
+82 |     let (app_event_tx, mut app_event_rx) = mpsc::unbounded_channel();
+   |                        ----^^^^^^^^^^^^
+   |                        |
+   |                        help: remove this `mut`
+
+warning: unused variable: `app_event_rx`
+   --> crates/sagitta-code/src/services/sync_orchestrator_test.rs:185:28
+    |
+185 |     let (app_event_tx, mut app_event_rx) = mpsc::unbounded_channel();
+    |                            ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_app_event_rx`
+
+warning: variable does not need to be mutable
+   --> crates/sagitta-code/src/services/sync_orchestrator_test.rs:185:24
+    |
+185 |     let (app_event_tx, mut app_event_rx) = mpsc::unbounded_channel();
+    |                        ----^^^^^^^^^^^^
+    |                        |
+    |                        help: remove this `mut`
+
+warning: associated items `extract_searchable_text`, `update_tag_index`, and `update_workspace_index` are never used
+   --> crates/sagitta-code/src/agent/conversation/search/text.rs:49:8
+    |
+40  | impl TextConversationSearchEngine {
+    | --------------------------------- associated items in this implementation
+...
+49  |     fn extract_searchable_text(conversation: &Conversation) -> String {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^
+...
+146 |     async fn update_tag_index(&self, conversation_id: Uuid, tags: &[String]) {
+    |              ^^^^^^^^^^^^^^^^
+...
+164 |     async fn update_workspace_index(&self, conversation_id: Uuid, workspace_id: Option<Uuid>) {
+    |              ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `MockEguiInput` is never constructed
+    --> crates/sagitta-code/src/gui/app/rendering.rs:1833:12
+     |
+1833 |     struct MockEguiInput {
+     |            ^^^^^^^^^^^^^
+
+warning: associated functions `new` and `with_key_and_ctrl` are never used
+    --> crates/sagitta-code/src/gui/app/rendering.rs:1839:12
+     |
+1838 |     impl MockEguiInput {
+     |     ------------------ associated functions in this implementation
+1839 |         fn new() -> Self {
+     |            ^^^
+...
+1846 |         fn with_key_and_ctrl(key: Key) -> Self {
+     |            ^^^^^^^^^^^^^^^^^
+
+warning: fields `id` and `name` are never read
+  --> crates/sagitta-code/src/gui/chat/collapsing_tests.rs:26:9
+   |
+25 |     struct MockToolCard {
+   |            ------------ fields in this struct
+26 |         id: String,
+   |         ^^
+27 |         name: String,
+   |         ^^^^
+   |
+   = note: `MockToolCard` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+
+warning: field `tool_cards` is never read
+  --> crates/sagitta-code/src/gui/chat/collapsing_tests.rs:34:9
+   |
+31 |     struct CollapseBehaviorTester {
+   |            ---------------------- field in this struct
+...
+34 |         tool_cards: Vec<MockToolCard>,
+   |         ^^^^^^^^^^
+
+warning: method `get_all_states` is never used
+  --> crates/sagitta-code/src/gui/chat/collapsing_tests.rs:82:12
+   |
+37 |     impl CollapseBehaviorTester {
+   |     --------------------------- method in this implementation
+...
+82 |         fn get_all_states(&self) -> HashMap<String, bool> {
+   |            ^^^^^^^^^^^^^^
+
+warning: unused pinned boxed `Stream` trait object that must be used
+  --> crates/sagitta-code/src/agent/cancellation_tests.rs:80:9
+   |
+80 |         agent.process_message_stream("test message").await.unwrap();
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: streams do nothing unless polled
+   = note: `#[warn(unused_must_use)]` on by default
+
+warning: unused implementer of `futures_util::Future` that must be used
+   --> crates/sagitta-code/src/gui/app/rendering.rs:330:13
+    |
+330 |             agent.request_loop_break();
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: futures do nothing unless you `.await` or poll them
+
+warning: unused return value of `std::hint::must_use` that must be used
+   --> crates/sagitta-code/src/gui/repository/types.rs:847:13
+    |
+847 |             format!("{tab:?}");
+    |             ^^^^^^^^^^^^^^^^^^
+    |
+    = note: this warning originates in the macro `format` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: `sagitta-code` (lib test) generated 131 warnings (68 duplicates) (run `cargo fix --lib -p sagitta-code --tests` to apply 9 suggestions)
+warning: `sagitta-code` (lib) generated 84 warnings (run `cargo fix --lib -p sagitta-code` to apply 12 suggestions)
+warning: unused return value of `egui::Context::run` that must be used
+  --> crates/sagitta-code/tests/keyboard_input_test.rs:20:9
+   |
+20 | /         ctx.run(Default::default(), |ctx| {
+21 | |             egui::CentralPanel::default().show(ctx, |ui| {
+22 | |                 let mut input_buffer = String::from("Hello");
+23 | |                 let mut on_submit = false;
+...  |
+88 | |             });
+89 | |         });
+   | |__________^
+   |
+   = note: `#[warn(unused_must_use)]` on by default
+help: use `let _ = ...` to ignore the resulting value
+   |
+20 |         let _ = ctx.run(Default::default(), |ctx| {
+   |         +++++++
+
+warning: unused import: `sagitta_code::gui::app::rendering`
+ --> crates/sagitta-code/tests/stop_button_test.rs:7:9
+  |
+7 |     use sagitta_code::gui::app::rendering;
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `sagitta_code::gui::app::events::AppEvent`
+ --> crates/sagitta-code/tests/stop_button_test.rs:8:9
+  |
+8 |     use sagitta_code::gui::app::events::AppEvent;
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `sagitta_code::agent::events::AgentEvent`
+ --> crates/sagitta-code/tests/stop_button_test.rs:9:9
+  |
+9 |     use sagitta_code::agent::events::AgentEvent;
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `broadcast`
+  --> crates/sagitta-code/tests/stop_button_test.rs:16:30
+   |
+16 |     use tokio::sync::{Mutex, broadcast};
+   |                              ^^^^^^^^^
+
+warning: unused variable: `embedding_provider`
+   --> crates/sagitta-code/src/main.rs:190:13
+    |
+190 |         let embedding_provider = Arc::new(sagitta_search::EmbeddingPoolAdapter::new(Arc::new(embedding_pool)));
+    |             ^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_embedding_provider`
+    |
+    = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `qdrant_client`
+   --> crates/sagitta-code/src/main.rs:194:13
+    |
+194 |         let qdrant_client: Arc<dyn QdrantClientTrait> = match qdrant_client_result {
+    |             ^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_qdrant_client`
+
+warning: unused variable: `tool_registry`
+   --> crates/sagitta-code/src/main.rs:205:13
+    |
+205 |         let tool_registry = Arc::new(sagitta_code::tools::registry::ToolRegistry::new());
+    |             ^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_tool_registry`
+
+warning: unused variable: `agent`
+   --> crates/sagitta-code/src/main.rs:253:13
+    |
+253 |         let agent = match Agent::new(
+    |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_agent`
+
+error[E0412]: cannot find type `MistralRsConfig` in module `sagitta_code::providers::types`
+   --> crates/sagitta-code/tests/config/migration_tests.rs:100:63
+    |
+100 |         let mistral_reloaded: sagitta_code::providers::types::MistralRsConfig = 
+    |                                                               ^^^^^^^^^^^^^^^ not found in `sagitta_code::providers::types`
+
+error[E0412]: cannot find type `MistralRsConfig` in module `sagitta_code::providers::types`
+   --> crates/sagitta-code/tests/config/migration_tests.rs:192:63
+    |
+192 |         let mistral_reloaded: sagitta_code::providers::types::MistralRsConfig = 
+    |                                                               ^^^^^^^^^^^^^^^ not found in `sagitta_code::providers::types`
+
+error[E0412]: cannot find type `MistralRsConfig` in module `sagitta_code::providers::types`
+   --> crates/sagitta-code/tests/config/migration_tests.rs:265:70
+    |
+265 |         let reloaded_mistral_config: sagitta_code::providers::types::MistralRsConfig = 
+    |                                                                      ^^^^^^^^^^^^^^^ not found in `sagitta_code::providers::types`
+
+error[E0412]: cannot find type `MistralRsConfig` in module `sagitta_code::providers::types`
+   --> crates/sagitta-code/tests/ui/provider_ui_tests.rs:207:65
+    |
+207 |             let mistral_config: sagitta_code::providers::types::MistralRsConfig = 
+    |                                                                 ^^^^^^^^^^^^^^^ not found in `sagitta_code::providers::types`
+
+warning: unused return value of `egui::Context::run` that must be used
+   --> crates/sagitta-code/tests/keyboard_input_test.rs:98:9
+    |
+98  | /         ctx.run(Default::default(), |ctx| {
+99  | |             egui::CentralPanel::default().show(ctx, |ui| {
+100 | |                 let mut input_buffer = String::from("Hello world");
+101 | |                 let mut on_submit = false;
+...   |
+164 | |             });
+165 | |         });
+    | |__________^
+    |
+help: use `let _ = ...` to ignore the resulting value
+    |
+98  |         let _ = ctx.run(Default::default(), |ctx| {
+    |         +++++++
+
+warning: unused return value of `egui::Context::run` that must be used
+   --> crates/sagitta-code/tests/keyboard_input_test.rs:174:9
+    |
+174 | /         ctx.run(Default::default(), |ctx| {
+175 | |             egui::CentralPanel::default().show(ctx, |ui| {
+176 | |                 let mut input_buffer = String::new(); // Empty buffer
+177 | |                 let mut on_submit = false;
+...   |
+226 | |             });
+227 | |         });
+    | |__________^
+    |
+help: use `let _ = ...` to ignore the resulting value
+    |
+174 |         let _ = ctx.run(Default::default(), |ctx| {
+    |         +++++++
+
+warning: unused import: `anyhow::Result`
+ --> crates/sagitta-code/tests/config/migration_tests.rs:1:5
+  |
+1 | use anyhow::Result;
+  |     ^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `sagitta_code::providers::manager::ProviderManager`
+  --> crates/sagitta-code/tests/mod.rs:42:9
+   |
+42 |     use sagitta_code::providers::manager::ProviderManager;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `sagitta_code::providers::claude_code::mcp_integration::McpIntegration`
+  --> crates/sagitta-code/tests/mod.rs:43:9
+   |
+43 |     use sagitta_code::providers::claude_code::mcp_integration::McpIntegration;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::sync::Arc`
+  --> crates/sagitta-code/tests/mod.rs:44:9
+   |
+44 |     use std::sync::Arc;
+   |         ^^^^^^^^^^^^^^
+
+warning: function `create_test_conversation_summary` is never used
+   --> crates/sagitta-code/tests/tagging.rs:360:4
+    |
+360 | fn create_test_conversation_summary(title: &str, tags: Vec<String>) -> ConversationSummary {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` on by default
+
+warning: unused return value of `egui::Context::run` that must be used
+  --> crates/sagitta-code/tests/stop_button_test.rs:27:9
+   |
+27 | /         ctx.run(Default::default(), |ctx| {
+28 | |             egui::CentralPanel::default().show(ctx, |ui| {
+29 | |                 let mut input_buffer = String::new();
+30 | |                 let mut on_submit = false;
+...  |
+79 | |             });
+80 | |         });
+   | |__________^
+   |
+   = note: `#[warn(unused_must_use)]` on by default
+help: use `let _ = ...` to ignore the resulting value
+   |
+27 |         let _ = ctx.run(Default::default(), |ctx| {
+   |         +++++++
+
+warning: unused variable: `onnx_model`
+   --> crates/sagitta-code/tests/integration_test.rs:176:9
+    |
+176 |     let onnx_model = OnnxEmbeddingModel::new(model_path, tokenizer_path)
+    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_onnx_model`
+    |
+    = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `onnx_model`
+   --> crates/sagitta-code/tests/integration_test.rs:282:9
+    |
+282 |     let onnx_model = OnnxEmbeddingModel::new(model_path, tokenizer_path)
+    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_onnx_model`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+  --> crates/sagitta-code/tests/providers/integration_tests.rs:69:40
+   |
+69 |         app.set_provider(ProviderType::MistralRs).await.unwrap();
+   |                                        ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+warning: field `update_sender` is never read
+  --> crates/sagitta-code/src/main.rs:35:9
+   |
+33 |     struct GuiApp {
+   |            ------ field in this struct
+34 |         app: SagittaCodeApp, // This now correctly refers to sagitta_code::gui::app::SagittaCodeApp
+35 |         update_sender: tokio::sync::mpsc::Sender<()>,
+   |         ^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+warning: function `run` is never used
+   --> crates/sagitta-code/src/main.rs:167:18
+    |
+167 |     pub async fn run(config: SagittaCodeConfig) -> Result<()> {
+    |                  ^^^
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+  --> crates/sagitta-code/tests/providers/integration_tests.rs:70:62
+   |
+70 |         assert_eq!(app.get_current_provider(), ProviderType::MistralRs);
+   |                                                              ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+  --> crates/sagitta-code/tests/providers/integration_tests.rs:84:64
+   |
+84 |         let invalid_config = ProviderConfig::new(ProviderType::MistralRs);
+   |                                                                ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+  --> crates/sagitta-code/tests/providers/integration_tests.rs:85:58
+   |
+85 |         app.config.provider_configs.insert(ProviderType::MistralRs, invalid_config);
+   |                                                          ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+  --> crates/sagitta-code/tests/providers/integration_tests.rs:88:53
+   |
+88 |         let result = app.set_provider(ProviderType::MistralRs).await;
+   |                                                     ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/providers/integration_tests.rs:126:68
+    |
+126 |         let mut mistral_config = ProviderConfig::new(ProviderType::MistralRs);
+    |                                                                    ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/providers/integration_tests.rs:129:55
+    |
+129 |         manager.update_provider_config(&ProviderType::MistralRs, mistral_config).unwrap();
+    |                                                       ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/providers/integration_tests.rs:130:51
+    |
+130 |         manager.set_active_provider(ProviderType::MistralRs).unwrap();
+    |                                                   ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/providers/integration_tests.rs:155:68
+    |
+155 |         let mut mistral_config = ProviderConfig::new(ProviderType::MistralRs);
+    |                                                                    ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/providers/integration_tests.rs:158:55
+    |
+158 |         manager.update_provider_config(&ProviderType::MistralRs, mistral_config).unwrap();
+    |                                                       ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/providers/integration_tests.rs:159:51
+    |
+159 |         manager.set_active_provider(ProviderType::MistralRs).unwrap();
+    |                                                   ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/providers/integration_tests.rs:202:44
+    |
+202 |             app.set_provider(ProviderType::MistralRs).await.unwrap();
+    |                                            ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/providers/integration_tests.rs:256:68
+    |
+256 |         let mut mistral_config = ProviderConfig::new(ProviderType::MistralRs);
+    |                                                                    ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/providers/integration_tests.rs:260:70
+    |
+260 |         let mistral_provider = factory.create_provider(ProviderType::MistralRs).unwrap();
+    |                                                                      ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/providers/integration_tests.rs:264:72
+    |
+264 |         let invalid_mistral_config = ProviderConfig::new(ProviderType::MistralRs);
+    |                                                                        ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/providers/integration_tests.rs:280:70
+    |
+280 |         let mistral_provider = factory.create_provider(ProviderType::MistralRs).unwrap();
+    |                                                                      ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+  --> crates/sagitta-code/tests/config/migration_tests.rs:67:49
+   |
+67 |         config.current_provider = ProviderType::MistralRs;
+   |                                                 ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+  --> crates/sagitta-code/tests/config/migration_tests.rs:77:68
+   |
+77 |         let mut mistral_config = ProviderConfig::new(ProviderType::MistralRs);
+   |                                                                    ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+  --> crates/sagitta-code/tests/config/migration_tests.rs:81:54
+   |
+81 |         config.provider_configs.insert(ProviderType::MistralRs, mistral_config);
+   |                                                      ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+  --> crates/sagitta-code/tests/config/migration_tests.rs:88:68
+   |
+88 |         assert_eq!(reloaded_config.current_provider, ProviderType::MistralRs);
+   |                                                                    ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/config/migration_tests.rs:101:61
+    |
+101 |             reloaded_config.provider_configs[&ProviderType::MistralRs].clone().try_into().unwrap();
+    |                                                             ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/config/migration_tests.rs:175:49
+    |
+175 |         config.current_provider = ProviderType::MistralRs;
+    |                                                 ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/config/migration_tests.rs:179:68
+    |
+179 |         let mut mistral_config = ProviderConfig::new(ProviderType::MistralRs);
+    |                                                                    ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/config/migration_tests.rs:182:54
+    |
+182 |         config.provider_configs.insert(ProviderType::MistralRs, mistral_config);
+    |                                                      ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/config/migration_tests.rs:193:61
+    |
+193 |             reloaded_config.provider_configs[&ProviderType::MistralRs].clone().try_into().unwrap();
+    |                                                             ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/config/migration_tests.rs:248:59
+    |
+248 |         config_manager.set_current_provider(ProviderType::MistralRs);
+    |                                                           ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/config/migration_tests.rs:249:69
+    |
+249 |         assert_eq!(config_manager.current_provider(), ProviderType::MistralRs);
+    |                                                                     ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/config/migration_tests.rs:252:68
+    |
+252 |         let mut mistral_config = ProviderConfig::new(ProviderType::MistralRs);
+    |                                                                    ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/config/migration_tests.rs:255:58
+    |
+255 |         config_manager.set_provider_config(ProviderType::MistralRs, mistral_config);
+    |                                                          ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/config/migration_tests.rs:262:71
+    |
+262 |         assert_eq!(reloaded_manager.current_provider(), ProviderType::MistralRs);
+    |                                                                       ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/config/migration_tests.rs:264:78
+    |
+264 |         let provider_config = reloaded_manager.provider_config(ProviderType::MistralRs).unwrap();
+    |                                                                              ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+  --> crates/sagitta-code/tests/ui/provider_ui_tests.rs:28:86
+   |
+28 |         app_state.available_providers = vec![ProviderType::ClaudeCode, ProviderType::MistralRs];
+   |                                                                                      ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+  --> crates/sagitta-code/tests/ui/provider_ui_tests.rs:70:34
+   |
+70 |         assert_eq!(ProviderType::MistralRs.display_name(), "Mistral.rs");
+   |                                  ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+  --> crates/sagitta-code/tests/ui/provider_ui_tests.rs:83:40
+   |
+83 |         app.set_provider(ProviderType::MistralRs);
+   |                                        ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+  --> crates/sagitta-code/tests/ui/provider_ui_tests.rs:84:66
+   |
+84 |         assert_eq!(app.app_state.current_provider, ProviderType::MistralRs);
+   |                                                                  ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/ui/provider_ui_tests.rs:100:75
+    |
+100 |         assert!(app.app_state.available_providers.contains(&ProviderType::MistralRs));
+    |                                                                           ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/ui/provider_ui_tests.rs:166:35
+    |
+166 |                     ProviderType::MistralRs => {
+    |                                   ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+warning: `sagitta-code` (bin "sagitta-code" test) generated 6 warnings
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/ui/provider_ui_tests.rs:194:40
+    |
+194 |         app.set_provider(ProviderType::MistralRs);
+    |                                        ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/ui/provider_ui_tests.rs:197:68
+    |
+197 |         let mut mistral_config = ProviderConfig::new(ProviderType::MistralRs);
+    |                                                                    ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/ui/provider_ui_tests.rs:203:58
+    |
+203 |         app.config.provider_configs.insert(ProviderType::MistralRs, mistral_config);
+    |                                                          ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/ui/provider_ui_tests.rs:206:78
+    |
+206 |         if let Some(config) = app.config.provider_configs.get(&ProviderType::MistralRs) {
+    |                                                                              ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/ui/provider_ui_tests.rs:297:40
+    |
+297 |         app.set_provider(ProviderType::MistralRs);
+    |                                        ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/ui/provider_ui_tests.rs:301:66
+    |
+301 |         assert_eq!(app.app_state.current_provider, ProviderType::MistralRs);
+    |                                                                  ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/ui/provider_ui_tests.rs:361:47
+    |
+361 |         let selected_provider = ProviderType::MistralRs;
+    |                                               ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/ui/provider_ui_tests.rs:371:66
+    |
+371 |         assert_eq!(app.app_state.current_provider, ProviderType::MistralRs);
+    |                                                                  ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/ui/provider_ui_tests.rs:468:43
+    |
+468 | ...                   ProviderType::MistralRs => {
+    |                                     ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/ui/provider_ui_tests.rs:496:40
+    |
+496 |         app.set_provider(ProviderType::MistralRs);
+    |                                        ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+  --> crates/sagitta-code/tests/mod.rs:64:73
+   |
+64 |         let result = provider_manager.set_active_provider(ProviderType::MistralRs);
+   |                                                                         ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+  --> crates/sagitta-code/tests/mod.rs:85:34
+   |
+85 |         assert_eq!(ProviderType::MistralRs.display_name(), "Mistral.rs");
+   |                                  ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+  --> crates/sagitta-code/tests/mod.rs:89:65
+   |
+89 |         let mistral_json = serde_json::to_string(&ProviderType::MistralRs).unwrap();
+   |                                                                 ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+  --> crates/sagitta-code/tests/mod.rs:99:53
+   |
+99 |         assert_eq!(mistral_from_json, ProviderType::MistralRs);
+   |                                                     ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/mod.rs:110:55
+    |
+110 |         assert!(factory.create_provider(ProviderType::MistralRs).is_ok());
+    |                                                       ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/mod.rs:114:70
+    |
+114 |         let mistral_provider = factory.create_provider(ProviderType::MistralRs).unwrap();
+    |                                                                      ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/mod.rs:117:68
+    |
+117 |         assert_eq!(mistral_provider.provider_type(), ProviderType::MistralRs);
+    |                                                                    ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+error[E0599]: no variant or associated item named `MistralRs` found for enum `sagitta_code::providers::ProviderType` in the current scope
+   --> crates/sagitta-code/tests/mod.rs:137:70
+    |
+137 |         let mistral_provider = factory.create_provider(ProviderType::MistralRs).unwrap();
+    |                                                                      ^^^^^^^^^ variant or associated item not found in `ProviderType`
+
+warning: unused variable: `output`
+   --> crates/sagitta-code/tests/ui/provider_ui_tests.rs:110:13
+    |
+110 |         let output = app.ctx.run(Default::default(), |ctx| {
+    |             ^^^^^^ help: if this is intentional, prefix it with an underscore: `_output`
+    |
+    = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `output`
+   --> crates/sagitta-code/tests/ui/provider_ui_tests.rs:404:13
+    |
+404 |         let output = app.ctx.run(Default::default(), |ctx| {
+    |             ^^^^^^ help: if this is intentional, prefix it with an underscore: `_output`
+
+Some errors have detailed explanations: E0412, E0599.
+For more information about an error, try `rustc --explain E0412`.
+warning: `sagitta-code` (test "mod") generated 6 warnings
+error: could not compile `sagitta-code` (test "mod") due to 59 previous errors; 6 warnings emitted
+warning: build failed, waiting for other jobs to finish...
+warning: `sagitta-code` (test "keyboard_input_test") generated 3 warnings
+warning: `sagitta-code` (test "stop_button_test") generated 5 warnings (run `cargo fix --test "stop_button_test"` to apply 4 suggestions)
+warning: `sagitta-code` (test "tagging") generated 1 warning
+warning: `sagitta-code` (test "integration_test") generated 2 warnings
+warning: `sagitta-code` (bin "sagitta-code") generated 6 warnings (6 duplicates)
+error: process didn't exit successfully: `/home/adam/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo test --tests --release --manifest-path /home/adam/repos/sagitta/Cargo.toml --target-dir /home/adam/repos/sagitta/target/llvm-cov-target --all --features cuda` (exit status: 101)

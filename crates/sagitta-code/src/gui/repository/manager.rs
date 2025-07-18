@@ -21,6 +21,7 @@ use sagitta_search::{EmbeddingProcessor};
 
 use super::types::{RepoInfo, DisplayableSyncProgress};
 use crate::gui::progress::GuiProgressReporter;
+use crate::services::SyncOrchestrator;
 
 // Structure to track sync status with detailed progress
 #[derive(Debug, Clone)]
@@ -60,6 +61,8 @@ pub struct RepositoryManager {
     repositories: Arc<Mutex<Vec<RepoInfo>>>,
     // Log sender for sync operations
     sync_log_sender: Arc<Mutex<Option<mpsc::UnboundedSender<SyncLogMessage>>>>,
+    // Sync orchestrator for auto-sync functionality
+    sync_orchestrator: Option<Arc<SyncOrchestrator>>,
 }
 
 // Manual Debug implementation since QdrantClient doesn't implement Debug
@@ -71,6 +74,7 @@ impl std::fmt::Debug for RepositoryManager {
             .field("embedding_handler", &self.embedding_handler.is_some())
             .field("repositories", &"<Arc<Mutex<Repositories>>>")
             .field("sync_log_sender", &"<SyncLogSender>")
+            .field("sync_orchestrator", &self.sync_orchestrator.is_some())
             .finish()
     }
 }
@@ -85,6 +89,7 @@ impl RepositoryManager {
             embedding_handler: None,
             repositories,
             sync_log_sender: Arc::new(Mutex::new(None)),
+            sync_orchestrator: None,
         }
     }
     
@@ -96,6 +101,7 @@ impl RepositoryManager {
             embedding_handler: None,
             repositories: Arc::new(Mutex::new(Vec::new())),
             sync_log_sender: Arc::new(Mutex::new(None)),
+            sync_orchestrator: None,
         }
     }
     
@@ -172,6 +178,12 @@ impl RepositoryManager {
     pub fn set_embedding_handler(&mut self, embedding_handler: Arc<EmbeddingPool>) {
         log::info!("[RepositoryManager] Setting embedding handler from app's shared pool");
         self.embedding_handler = Some(embedding_handler);
+    }
+    
+    /// Set the sync orchestrator for auto-sync functionality
+    pub fn set_sync_orchestrator(&mut self, sync_orchestrator: Arc<SyncOrchestrator>) {
+        log::info!("[RepositoryManager] Setting sync orchestrator for auto-sync functionality");
+        self.sync_orchestrator = Some(sync_orchestrator);
     }
     
     /// Set the sync log sender for capturing log messages
@@ -453,6 +465,19 @@ impl RepositoryManager {
                 drop(config_guard); // Release lock before calling the helper
 
                 self.initialize_sync_status_for_new_repo(&new_repo_config.name).await;
+                
+                // Notify sync orchestrator about the new repository for auto-sync
+                if let Some(sync_orchestrator) = &self.sync_orchestrator {
+                    if let Err(e) = sync_orchestrator.add_repository(&new_repo_config.local_path).await {
+                        log::warn!("[GUI RepoManager] Failed to add repository to sync orchestrator: {e}");
+                        // Don't fail the overall operation, just log the warning
+                    } else {
+                        log::info!("[GUI RepoManager] Repository added to sync orchestrator for auto-sync: {}", new_repo_config.name);
+                    }
+                } else {
+                    log::debug!("[GUI RepoManager] No sync orchestrator configured, skipping auto-sync setup");
+                }
+                
                 log::info!("[GUI RepoManager] Local repository '{}' successfully added, saved, and status initialized.", new_repo_config.name);
                 
                 Ok(())
@@ -540,6 +565,19 @@ impl RepositoryManager {
                 drop(config_guard); // Release lock before calling the helper
 
                 self.initialize_sync_status_for_new_repo(&new_repo_config.name).await;
+                
+                // Notify sync orchestrator about the new repository for auto-sync
+                if let Some(sync_orchestrator) = &self.sync_orchestrator {
+                    if let Err(e) = sync_orchestrator.add_repository(&new_repo_config.local_path).await {
+                        log::warn!("[GUI RepoManager] Failed to add repository to sync orchestrator: {e}");
+                        // Don't fail the overall operation, just log the warning
+                    } else {
+                        log::info!("[GUI RepoManager] Repository added to sync orchestrator for auto-sync: {}", new_repo_config.name);
+                    }
+                } else {
+                    log::debug!("[GUI RepoManager] No sync orchestrator configured, skipping auto-sync setup");
+                }
+                
                 log::info!("[GUI RepoManager] Remote repository '{}' successfully added, saved, and status initialized.", new_repo_config.name);
                 
                 Ok(())

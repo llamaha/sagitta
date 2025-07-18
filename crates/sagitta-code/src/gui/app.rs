@@ -108,6 +108,7 @@ pub struct SagittaCodeApp {
     agent_event_receiver: Option<broadcast::Receiver<AgentEvent>>,
     conversation_event_sender: Option<mpsc::UnboundedSender<ConversationEvent>>,
     conversation_event_receiver: Option<mpsc::UnboundedReceiver<ConversationEvent>>,
+    conversation_service_event_receiver: Option<broadcast::Receiver<crate::agent::conversation::service::ConversationEvent>>,
     app_event_sender: mpsc::UnboundedSender<AppEvent>,
     app_event_receiver: Option<mpsc::UnboundedReceiver<AppEvent>>,
     
@@ -193,6 +194,7 @@ impl SagittaCodeApp {
             agent_event_receiver: None,
             conversation_event_sender: Some(conversation_sender),
             conversation_event_receiver: Some(conversation_receiver),
+            conversation_service_event_receiver: None,
             app_event_sender,
             app_event_receiver: Some(app_event_receiver),
             
@@ -400,6 +402,11 @@ impl SagittaCodeApp {
         );
         
         let service_arc = Arc::new(service);
+        
+        // Subscribe to conversation service events for auto-updates
+        let service_event_receiver = service_arc.subscribe();
+        self.conversation_service_event_receiver = Some(service_event_receiver);
+        
         self.conversation_service = Some(service_arc.clone());
         
         // Initialize title updater with the conversation service
@@ -640,19 +647,27 @@ impl SagittaCodeApp {
             repo_manager.clone(),
         );
         sync_orchestrator.set_app_event_sender(self.app_event_sender.clone());
+        
+        // Start the sync orchestrator BEFORE doing anything else - this is critical!
+        let _sync_result_rx = sync_orchestrator.start().await?;
+        log::info!("Sync orchestrator started successfully");
+        
         let sync_orchestrator = Arc::new(sync_orchestrator);
         self.sync_orchestrator = Some(sync_orchestrator.clone());
         self.git_controls.set_sync_orchestrator(sync_orchestrator.clone());
         self.repo_panel.set_sync_orchestrator(sync_orchestrator.clone());
         
-        // Start git controls command handler
-        let command_rx = self.git_controls.start_command_handler();
-        let mut git_controls_clone = GitControls::new(repo_manager.clone());
-        git_controls_clone.set_sync_orchestrator(sync_orchestrator.clone());
-        
-        tokio::spawn(async move {
-            git_controls_clone.handle_commands(command_rx).await;
-        });
+        // Start git controls command handler if not already started
+        if let Some(command_rx) = self.git_controls.start_command_handler() {
+            let mut git_controls_clone = GitControls::new(repo_manager.clone());
+            git_controls_clone.set_sync_orchestrator(sync_orchestrator.clone());
+            
+            tokio::spawn(async move {
+                git_controls_clone.handle_commands(command_rx).await;
+            });
+        } else {
+            log::warn!("Git controls command handler already started, skipping duplicate initialization");
+        }
         
         // Only initialize file watcher and auto-committer if their respective features are enabled
         if config_guard.auto_sync.file_watcher.enabled && config_guard.auto_sync.auto_commit.enabled {
@@ -708,37 +723,37 @@ impl SagittaCodeApp {
             });
             
             log::info!("Auto-sync services initialized and started");
+        } else {
+            log::info!("File watcher and/or auto-commit disabled, skipping file watcher and auto-commit initialization");
+        }
+        
+        // Always add existing repositories to sync orchestrator, regardless of file watcher/auto-commit settings
+        let repo_manager_clone = repo_manager.clone();
+        let sync_orchestrator_clone = sync_orchestrator.clone();
+        tokio::spawn(async move {
+            log::info!("Starting background repository initialization");
             
-            // Add existing repositories to file watcher and sync them in the background
-            let repo_manager_clone = repo_manager.clone();
-            let sync_orchestrator_clone = sync_orchestrator.clone();
-            tokio::spawn(async move {
-                log::info!("Starting background repository initialization");
+            let repo_manager_guard = repo_manager_clone.lock().await;
+            if let Ok(repositories) = repo_manager_guard.list_repositories().await {
+                log::info!("Adding {} existing repositories to sync orchestrator", repositories.len());
                 
-                let repo_manager_guard = repo_manager_clone.lock().await;
-                if let Ok(repositories) = repo_manager_guard.list_repositories().await {
-                    log::info!("Adding {} existing repositories to file watcher", repositories.len());
-                    
-                    for repo in repositories {
-                        let repo_path = std::path::PathBuf::from(&repo.local_path);
-                        if let Err(e) = sync_orchestrator_clone.add_repository(&repo_path).await {
-                            log::error!("Failed to add existing repository {} to file watcher: {}", repo.name, e);
-                        } else {
-                            log::info!("Added existing repository {} to file watcher and sync queue", repo.name);
-                        }
-                    }
-                    
-                    // Also ensure all out-of-sync repositories get synced
-                    if let Err(e) = sync_orchestrator_clone.sync_out_of_sync_repositories().await {
-                        log::error!("Failed to queue out-of-sync repositories: {}", e);
+                for repo in repositories {
+                    let repo_path = std::path::PathBuf::from(&repo.local_path);
+                    if let Err(e) = sync_orchestrator_clone.add_repository(&repo_path).await {
+                        log::error!("Failed to add existing repository {} to sync orchestrator: {}", repo.name, e);
+                    } else {
+                        log::info!("Added existing repository {} to sync orchestrator", repo.name);
                     }
                 }
                 
-                log::info!("Background repository initialization complete");
-            });
-        } else {
-            log::info!("File watcher and/or auto-commit disabled, skipping initialization");
-        }
+                // Also ensure all out-of-sync repositories get synced
+                if let Err(e) = sync_orchestrator_clone.sync_out_of_sync_repositories().await {
+                    log::error!("Failed to queue out-of-sync repositories: {}", e);
+                }
+            }
+            
+            log::info!("Background repository initialization complete");
+        });
         
         // Initialize auto title updater if we have a title updater and conversation service
         if let (Some(title_updater), Some(_conversation_service)) = (&self.title_updater, &self.conversation_service) {

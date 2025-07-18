@@ -802,7 +802,7 @@ fn default_enable_fast_model() -> bool {
 }
 
 fn default_auto_create_claude_md() -> bool {
-    true
+    false
 }
 
 fn default_claude_md_template() -> String {
@@ -900,7 +900,7 @@ mod tests {
         assert_eq!(config.window_width, 900); // default_window_width() returns 900
         assert_eq!(config.window_height, 700); // default_window_height() returns 700
         assert_eq!(config.current_repository_context, None);
-        assert!(config.auto_create_claude_md); // default_auto_create_claude_md() returns true
+        assert!(!config.auto_create_claude_md); // default_auto_create_claude_md() returns false
         assert!(!config.claude_md_template.is_empty()); // Should contain default template
         assert!(!config.first_run_completed); // default_first_run_completed() returns false
     }

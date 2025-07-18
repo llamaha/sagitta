@@ -106,8 +106,9 @@ impl GitControls {
     }
     
     /// Start the async command handler and return the receiver
-    pub fn start_command_handler(&mut self) -> mpsc::UnboundedReceiver<GitCommand> {
-        self.command_rx.take().expect("Command handler already started")
+    /// Returns None if the handler has already been started
+    pub fn start_command_handler(&mut self) -> Option<mpsc::UnboundedReceiver<GitCommand>> {
+        self.command_rx.take()
     }
 
     /// Update the current repository

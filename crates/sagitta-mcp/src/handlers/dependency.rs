@@ -15,6 +15,23 @@ pub async fn handle_repository_add_dependency(
 ) -> Result<RepositoryDependencyResult> {
     let mut config = config_mutex.write().await;
     
+    // Validate input parameters
+    if params.repository_name.trim().is_empty() {
+        return Err(anyhow::anyhow!("Repository name cannot be empty"));
+    }
+    
+    if params.dependency_name.trim().is_empty() {
+        return Err(anyhow::anyhow!("Dependency name cannot be empty"));
+    }
+    
+    // Prevent self-references
+    if params.repository_name == params.dependency_name {
+        return Err(anyhow::anyhow!(
+            "Repository '{}' cannot depend on itself",
+            params.repository_name
+        ));
+    }
+    
     // Check if dependency repository exists
     let dependency_exists = config.repositories.iter()
         .any(|r| r.name == params.dependency_name);
@@ -75,6 +92,15 @@ pub async fn handle_repository_remove_dependency(
     config_mutex: Arc<RwLock<sagitta_search::config::AppConfig>>,
 ) -> Result<RepositoryDependencyResult> {
     let mut config = config_mutex.write().await;
+    
+    // Validate input parameters
+    if params.repository_name.trim().is_empty() {
+        return Err(anyhow::anyhow!("Repository name cannot be empty"));
+    }
+    
+    if params.dependency_name.trim().is_empty() {
+        return Err(anyhow::anyhow!("Dependency name cannot be empty"));
+    }
     
     // Find the main repository
     let main_repo = config.repositories.iter_mut()

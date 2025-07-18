@@ -785,7 +785,8 @@ pub async fn embed_text_with_pool(pool: &EmbeddingPool, texts: &[&str]) -> Resul
 /// Helper function to embed a single text using EmbeddingPool.
 pub async fn embed_single_text_with_pool(pool: &EmbeddingPool, text: &str) -> Result<Vec<f32>> {
     let results = embed_text_with_pool(pool, &[text]).await?;
-    Ok(results.into_iter().next().unwrap())
+    results.into_iter().next()
+        .ok_or_else(|| SagittaError::EmbeddingError("No embeddings returned for text".to_string()))
 }
 
 /// Adapter that implements EmbeddingProvider for EmbeddingPool.

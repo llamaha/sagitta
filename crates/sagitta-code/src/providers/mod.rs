@@ -2,13 +2,13 @@
 //! 
 //! This module provides a clean abstraction over different LLM providers,
 //! allowing Sagitta Code to support multiple backends like Claude Code,
-//! Mistral.rs, and future providers.
+//! OpenAI-compatible providers, and future providers.
 
 pub mod types;
 pub mod manager;
 pub mod factory;
 pub mod claude_code;
-pub mod mistral_rs;
+
 pub mod openai_compatible;
 
 // Re-export commonly used types
@@ -16,7 +16,7 @@ pub use types::{ProviderType, ProviderConfig};
 pub use manager::{ProviderManager, ProviderState};
 pub use factory::ProviderFactory;
 pub use claude_code::ClaudeCodeProvider;
-pub use mistral_rs::MistralRsProvider;
+
 pub use openai_compatible::OpenAICompatibleProvider;
 
 use crate::llm::client::LlmClient;

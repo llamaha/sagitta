@@ -91,6 +91,9 @@ pub struct RepositoryInfo {
     pub branch: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_updated: Option<String>,
+    /// List of dependencies for this repository
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub dependencies: Vec<DependencyInfo>,
 }
 
 /// Response for repository list

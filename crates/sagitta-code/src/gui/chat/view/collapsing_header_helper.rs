@@ -20,11 +20,11 @@ pub fn create_controlled_collapsing_header<R>(
     // Make the collapsing header respond to clicks immediately
     if has_individual_override {
         // User has manually toggled - let egui handle state naturally
-        header.show(ui, add_contents)
+        header.show_unindented(ui, add_contents)
     } else {
         // No manual override - force the global state
         // Note: open() method takes Option<bool> not bool
-        header.open(Some(should_be_open)).show(ui, add_contents)
+        header.open(Some(should_be_open)).show_unindented(ui, add_contents)
     }
 }
 

@@ -10,6 +10,7 @@ use super::super::theme::{AppTheme, apply_theme};
 use crate::utils::logging::LOG_COLLECTOR;
 use futures_util::StreamExt;
 use super::panels::ActivePanel;
+use crate::providers::ProviderType;
 
 /// Main rendering function for the application
 pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
@@ -68,6 +69,40 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
                 }
             }
             // clicked_tool_info already cleared by take()
+        } else if tool_name == "__VIEW_JSON__" {
+            // Handle JSON modal request
+            app.state.json_modal_content = Some(tool_args);
+            app.state.show_json_modal = true;
+            // clicked_tool_info already cleared by take()
+        } else if tool_name == "__VIEW_FULL_FILE__" {
+            // Handle file content modal request
+            if let Ok(file_data) = serde_json::from_str::<serde_json::Value>(&tool_args) {
+                if let (Some(file_path), Some(content)) = (
+                    file_data.get("file_path").and_then(|v| v.as_str()),
+                    file_data.get("content").and_then(|v| v.as_str())
+                ) {
+                    app.state.file_content_modal_data = Some((file_path.to_string(), content.to_string()));
+                    app.state.show_file_content_modal = true;
+                }
+            }
+            // clicked_tool_info already cleared by take()
+        } else if tool_name == "__READ_FULL_FILE__" {
+            // Handle full file read request
+            if let Ok(file_data) = serde_json::from_str::<serde_json::Value>(&tool_args) {
+                if let Some(file_path) = file_data.get("file_path").and_then(|v| v.as_str()) {
+                    // Read the full file content
+                    match std::fs::read_to_string(file_path) {
+                        Ok(content) => {
+                            app.state.file_content_modal_data = Some((file_path.to_string(), content));
+                            app.state.show_file_content_modal = true;
+                        }
+                        Err(e) => {
+                            app.state.toasts.error(format!("Failed to read file: {}", e));
+                        }
+                    }
+                }
+            }
+            // clicked_tool_info already cleared by take()
         } else {
             // Process the tool info modal
             render_tool_info_modal(app, ctx, &tool_name, &tool_args);
@@ -81,6 +116,8 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
     // Render hotkeys modal if needed
     render_hotkeys_modal(app, ctx);
     render_tools_modal(app, ctx);
+    render_json_modal(app, ctx);
+    render_file_content_modal(app, ctx);
     
     // Render new conversation confirmation dialog if needed
     render_new_conversation_confirmation(app, ctx);
@@ -104,38 +141,27 @@ fn render_tools_modal(app: &mut SagittaCodeApp, ctx: &Context) {
             .resizable(true)
             .default_width(700.0)
             .default_height(500.0)
+            .frame(egui::Frame::window(&ctx.style()).fill(theme.panel_background()))
             .show(ctx, |ui| {
+                // Apply theme to UI elements
+                ui.visuals_mut().override_text_color = Some(theme.text_color());
+                ui.visuals_mut().widgets.noninteractive.bg_fill = theme.panel_background();
+                ui.visuals_mut().widgets.inactive.bg_fill = theme.input_background();
+                ui.visuals_mut().widgets.active.bg_fill = theme.button_background();
                 ui.label(egui::RichText::new("These tools are available to the AI assistant via MCP:").color(theme.accent_color()).strong());
                 ui.separator();
                 
                 // Create a scrollable area for the tools list
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    // Tools list with descriptions - matches actual MCP tools passed to Claude-code
-                    let tools = vec![
-                        ("ping", "Check if the MCP server is responsive"),
-                        ("repository_add", "Clone and add a new Git repository for indexing"),
-                        ("repository_list", "List currently configured repositories"),
-                        ("repository_remove", "Remove a repository configuration and delete its data"),
-                        ("repository_sync", "Fetch latest changes, update local copy, and re-index a repository"),
-                        ("query", "Perform semantic search on indexed repositories using hybrid vector search"),
-                        ("repository_search_file", "Search for files within a repository using glob patterns"),
-                        ("repository_view_file", "View the content of a specific file within a repository"),
-                        ("repository_switch_branch", "Switch to a different branch or Git reference with automatic resync"),
-                        ("repository_list_branches", "List branches and references in a repository with optional filtering"),
-                        ("todo_read", "Read the current todo list with detailed status information"),
-                        ("todo_write", "Update the todo list with structured todo items"),
-                        ("edit_file", "Perform exact string replacements in files with diff output"),
-                        ("multi_edit_file", "Perform multiple sequential edits to a single file"),
-                        ("shell_execute", "Execute shell commands with cross-platform support"),
-                        ("read_file", "Read file contents with optional line range support"),
-                        ("write_file", "Write content to a file with optional parent directory creation"),
-                    ];
+                    // Get the actual tool definitions from the MCP server
+                    let tool_definitions = sagitta_mcp::handlers::tool::get_tool_definitions();
                     
-                    for (tool_name, description) in tools {
+                    for tool in tool_definitions {
                         ui.group(|ui| {
                             ui.horizontal_wrapped(|ui| {
-                                ui.label(egui::RichText::new(tool_name).color(theme.success_color()).strong());
+                                ui.label(egui::RichText::new(&tool.name).color(theme.success_color()).strong());
                                 ui.label(egui::RichText::new("-").color(theme.text_color()));
+                                let description = tool.description.as_deref().unwrap_or("No description available");
                                 ui.label(egui::RichText::new(description).color(theme.text_color()));
                             });
                         });
@@ -164,6 +190,158 @@ fn render_tools_modal(app: &mut SagittaCodeApp, ctx: &Context) {
     }
 }
 
+/// Render JSON modal for viewing tool result JSON
+fn render_json_modal(app: &mut SagittaCodeApp, ctx: &Context) {
+    if app.state.show_json_modal {
+        // Check for ESC key to close modal
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            app.state.show_json_modal = false;
+            app.state.json_modal_content = None;
+            return;
+        }
+        
+        let theme = app.state.current_theme;
+        egui::Window::new("View JSON")
+            .collapsible(false)
+            .resizable(true)
+            .default_width(800.0)
+            .default_height(600.0)
+            .frame(egui::Frame::window(&ctx.style()).fill(theme.panel_background()))
+            .show(ctx, |ui| {
+                // Apply theme to UI elements
+                ui.visuals_mut().override_text_color = Some(theme.text_color());
+                ui.visuals_mut().widgets.noninteractive.bg_fill = theme.panel_background();
+                ui.visuals_mut().widgets.inactive.bg_fill = theme.input_background();
+                ui.visuals_mut().widgets.active.bg_fill = theme.button_background();
+                
+                ui.label(egui::RichText::new("Raw JSON Response").color(theme.accent_color()).strong());
+                ui.separator();
+                
+                // Create a scrollable area for the JSON content
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    if let Some(json_content) = &app.state.json_modal_content {
+                        // Format JSON if possible, otherwise show raw
+                        let formatted_json = if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_content) {
+                            serde_json::to_string_pretty(&parsed).unwrap_or_else(|_| json_content.clone())
+                        } else {
+                            json_content.clone()
+                        };
+                        
+                        ui.add(
+                            egui::TextEdit::multiline(&mut formatted_json.as_str())
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(30)
+                                .font(egui::TextStyle::Monospace)
+                                .interactive(false)
+                        );
+                    } else {
+                        ui.label(egui::RichText::new("No JSON content available").color(theme.hint_text_color()));
+                    }
+                });
+                
+                ui.separator();
+                
+                // Action buttons
+                ui.horizontal(|ui| {
+                    // Copy button
+                    if ui.button(egui::RichText::new("📋 Copy").color(theme.button_text_color())).clicked() {
+                        if let Some(content) = &app.state.json_modal_content {
+                            ui.output_mut(|o| o.copied_text = content.clone());
+                            app.state.toasts.success("JSON copied to clipboard");
+                        }
+                    }
+                    
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Close").color(theme.button_text_color())).clicked() {
+                            app.state.show_json_modal = false;
+                            app.state.json_modal_content = None;
+                        }
+                    });
+                });
+            });
+    }
+}
+
+fn render_file_content_modal(app: &mut SagittaCodeApp, ctx: &Context) {
+    if app.state.show_file_content_modal {
+        // Check for ESC key to close modal
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            app.state.show_file_content_modal = false;
+            app.state.file_content_modal_data = None;
+            return;
+        }
+        
+        let theme = app.state.current_theme;
+        egui::Window::new("View File Content")
+            .collapsible(false)
+            .resizable(true)
+            .default_width(900.0)
+            .default_height(700.0)
+            .min_height(400.0)
+            .min_width(600.0)
+            .frame(egui::Frame::window(&ctx.style()).fill(theme.panel_background()))
+            .show(ctx, |ui| {
+                // Apply theme to UI elements
+                ui.visuals_mut().override_text_color = Some(theme.text_color());
+                ui.visuals_mut().widgets.noninteractive.bg_fill = theme.panel_background();
+                ui.visuals_mut().widgets.inactive.bg_fill = theme.input_background();
+                ui.visuals_mut().widgets.active.bg_fill = theme.button_background();
+                
+                if let Some((file_path, content)) = &app.state.file_content_modal_data {
+                    let file_path_clone = file_path.clone();
+                    let content_clone = content.clone();
+                    
+                    ui.label(egui::RichText::new(format!("📄 {}", file_path_clone)).color(theme.accent_color()).strong());
+                    ui.separator();
+                    
+                    // Create a scrollable area for the file content
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        // Determine file language from path for syntax highlighting
+                        let language = if let Some(ext) = std::path::Path::new(&file_path_clone).extension().and_then(|e| e.to_str()) {
+                            ext
+                        } else {
+                            "txt"
+                        };
+                        
+                        // Use syntax highlighting for the content
+                        use crate::gui::chat::view::render_syntax_highlighted_code;
+                        render_syntax_highlighted_code(ui, &content_clone, language, &egui::Color32::TRANSPARENT, ui.available_width());
+                    });
+                    
+                    ui.separator();
+                    
+                    // Action buttons
+                    ui.horizontal(|ui| {
+                        // Copy button
+                        if ui.button(egui::RichText::new("📋 Copy").color(theme.button_text_color())).clicked() {
+                            ui.output_mut(|o| o.copied_text = content_clone.clone());
+                            app.state.toasts.success("File content copied to clipboard");
+                        }
+                        
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(egui::RichText::new("Close").color(theme.button_text_color())).clicked() {
+                                app.state.show_file_content_modal = false;
+                                app.state.file_content_modal_data = None;
+                            }
+                        });
+                    });
+                } else {
+                    ui.label(egui::RichText::new("No file content available").color(theme.hint_text_color()));
+                    ui.separator();
+                    
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(egui::RichText::new("Close").color(theme.button_text_color())).clicked() {
+                                app.state.show_file_content_modal = false;
+                                app.state.file_content_modal_data = None;
+                            }
+                        });
+                    });
+                }
+            });
+    }
+}
+
 /// Handle keyboard shortcuts
 fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
     if ctx.input(|i| i.key_pressed(Key::N) && i.modifiers.ctrl) {
@@ -187,10 +365,6 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
     if ctx.input(|i| i.key_pressed(Key::R) && i.modifiers.ctrl) {
         // Ctrl+R: Toggle repository panel
         app.panels.toggle_panel(ActivePanel::Repository);
-    }
-    if ctx.input(|i| i.key_pressed(Key::W) && i.modifiers.ctrl) {
-        // Ctrl+W: Toggle preview panel
-        app.panels.toggle_panel(ActivePanel::Preview);
     }
     if ctx.input(|i| i.key_pressed(Key::S) && i.modifiers.ctrl) {
         // Ctrl+S: Toggle settings panel
@@ -241,11 +415,19 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
         app.state.show_tools_modal = !app.state.show_tools_modal;
     }
     if ctx.input(|i| i.key_pressed(Key::F3)) {
-        // F3: Toggle CLAUDE.md modal
-        if app.claude_md_modal.is_open() {
-            app.claude_md_modal.close();
+        // F3: Toggle CLAUDE.md modal (only for claude-code provider)
+        let is_claude_code = if let Ok(config) = app.config.try_lock() {
+            config.current_provider == ProviderType::ClaudeCode
         } else {
-            app.open_claude_md_modal();
+            false
+        };
+        
+        if is_claude_code {
+            if app.claude_md_modal.is_open() {
+                app.claude_md_modal.close();
+            } else {
+                app.open_claude_md_modal();
+            }
         }
     }
     
@@ -322,15 +504,7 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
         app.state.tool_card_individual_states.clear();
     }
     
-    // Loop control shortcuts
-    if ctx.input(|i| i.key_pressed(Key::I) && i.modifiers.ctrl) && app.state.is_in_loop {
-        // Ctrl+I: Toggle loop injection input when in loop
-        app.state.show_loop_inject_input = !app.state.show_loop_inject_input;
-    }
-    if ctx.input(|i| i.key_pressed(Key::B) && i.modifiers.ctrl) && app.state.is_in_loop {
-        // Ctrl+B: Break loop
-        app.state.loop_break_requested = true;
-    }
+
 }
 
 /// Handle loop control actions
@@ -371,8 +545,15 @@ fn handle_loop_control(app: &mut SagittaCodeApp) {
 /// Handle stop/cancel requests
 fn handle_stop_request(app: &mut SagittaCodeApp) {
     if app.state.stop_requested {
-        log::info!("Stop requested by user");
+        log::info!("Stop requested by user - immediately resetting UI state");
         app.state.stop_requested = false;
+        
+        // IMMEDIATELY reset all UI states for instant feedback
+        app.state.is_waiting_for_response = false;
+        app.state.is_thinking = false;
+        app.state.is_responding = false;
+        app.state.is_streaming_response = false;
+        app.state.thinking_message = None;
         
         // Cancel the agent if it exists
         if let Some(agent) = &app.agent {
@@ -383,17 +564,14 @@ fn handle_stop_request(app: &mut SagittaCodeApp) {
             });
         }
         
-        // Reset UI state
-        app.state.is_waiting_for_response = false;
-        app.state.is_thinking = false;
-        app.state.is_responding = false;
-        app.state.is_streaming_response = false;
-        app.state.thinking_message = None;
+        // The cancellation is already handled by agent.cancel() above
         
         app.panels.events_panel.add_event(
             super::SystemEventType::Info,
-            "Operation cancelled".to_string()
+            "Operation cancelled - streaming stopped".to_string()
         );
+        
+        log::info!("Stop request handled - UI state reset immediately");
     }
 }
 
@@ -837,7 +1015,13 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
             .collapsible(false)
             .resizable(true)
             .default_width(500.0)
+            .frame(egui::Frame::window(&ctx.style()).fill(theme.panel_background()))
             .show(ctx, |ui| {
+                // Apply theme to UI elements
+                ui.visuals_mut().override_text_color = Some(theme.text_color());
+                ui.visuals_mut().widgets.noninteractive.bg_fill = theme.panel_background();
+                ui.visuals_mut().widgets.inactive.bg_fill = theme.input_background();
+                ui.visuals_mut().widgets.active.bg_fill = theme.button_background();
                 ui.label(egui::RichText::new("Panel Controls:").color(theme.accent_color()).strong());
                 
                 // Repository Panel
@@ -846,16 +1030,6 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
                             app.panels.toggle_panel(ActivePanel::Repository);
-                        }
-                    });
-                });
-                
-                // Preview Panel
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Ctrl + W: Toggle Preview Panel").color(theme.text_color()));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
-                            app.panels.toggle_panel(ActivePanel::Preview);
                         }
                     });
                 });
@@ -1080,40 +1254,25 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     });
                 });
                 
-                // F3 CLAUDE.md Template Manager
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("F3: CLAUDE.md Template Manager").color(theme.text_color()));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(egui::RichText::new("Open").color(theme.button_text_color())).clicked() {
-                            app.open_claude_md_modal();
-                        }
+                // F3 CLAUDE.md Template Manager (only for claude-code provider)
+                let is_claude_code = if let Ok(config) = app.config.try_lock() {
+                    config.current_provider == ProviderType::ClaudeCode
+                } else {
+                    false
+                };
+                
+                if is_claude_code {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("F3: CLAUDE.md Template Manager").color(theme.text_color()));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(egui::RichText::new("Open").color(theme.button_text_color())).clicked() {
+                                app.open_claude_md_modal();
+                            }
+                        });
                     });
-                });
+                }
                 
                 ui.separator();
-                ui.label(egui::RichText::new("Loop Control:").color(theme.accent_color()).strong());
-                
-                // Loop Injection Input
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Ctrl + I: Toggle Loop Injection Input").color(theme.text_color()));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() 
-                            && app.state.is_in_loop {
-                            app.state.show_loop_inject_input = !app.state.show_loop_inject_input;
-                        }
-                    });
-                });
-                
-                // Break Loop
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Ctrl + B: Break Loop").color(theme.text_color()));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(egui::RichText::new("Break").color(theme.button_text_color())).clicked() 
-                            && app.state.is_in_loop {
-                            app.state.loop_break_requested = true;
-                        }
-                    });
-                });
                 
                 // Tool Card Collapse
                 ui.horizontal(|ui| {
@@ -1128,9 +1287,17 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                 });
                 
                 ui.separator();
-                if ui.button(egui::RichText::new("Close").color(theme.button_text_color())).clicked() {
-                    app.state.show_hotkeys_modal = false;
-                }
+                
+                // Close button with proper theme
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let close_button = egui::Button::new(egui::RichText::new("Close").color(theme.button_text_color()))
+                            .fill(theme.button_background());
+                        if ui.add(close_button).clicked() {
+                            app.state.show_hotkeys_modal = false;
+                        }
+                    });
+                });
             });
     }
 }
@@ -1758,12 +1925,12 @@ fn render_provider_setup_dialog(app: &mut SagittaCodeApp, ctx: &Context) {
     if !app.state.show_provider_setup_dialog && !app.provider_setup_dialog.is_open() {
         // Check first run status from config (non-blocking)
         if let Ok(config_guard) = app.config.try_lock() {
-            // Show dialog if it's the first run and user hasn't disabled it
-            if !config_guard.ui.first_run_completed && config_guard.ui.dialog_preferences.show_provider_setup {
+            // Show dialog if user hasn't disabled it (for first run, show_provider_setup defaults to true)
+            if config_guard.ui.dialog_preferences.show_provider_setup {
                 drop(config_guard);
                 app.state.show_provider_setup_dialog = true;
                 app.provider_setup_dialog.open();
-                log::info!("Showing provider setup dialog for first run");
+                log::info!("Showing provider setup dialog");
             }
         }
     }

@@ -64,6 +64,12 @@ pub enum AppEvent {
     AgentReplaced {
         agent: std::sync::Arc<crate::agent::core::Agent>,
     },
+    // Task execution events
+    ExecuteTask {
+        conversation_id: uuid::Uuid,
+        task_message: String,
+    },
+    CheckAndExecuteTask,
     // Add other app-level UI events here if needed
 }
 
@@ -96,6 +102,9 @@ impl std::fmt::Debug for AppEvent {
             AppEvent::ReinitializeProvider { provider_type } => 
                 write!(f, "ReinitializeProvider {{ provider_type: {:?} }}", provider_type),
             AppEvent::AgentReplaced { agent: _ } => write!(f, "AgentReplaced {{ agent: Agent }}"),
+            AppEvent::ExecuteTask { conversation_id, task_message } => 
+                write!(f, "ExecuteTask {{ conversation_id: {}, task_message: {} }}", conversation_id, task_message),
+            AppEvent::CheckAndExecuteTask => write!(f, "CheckAndExecuteTask"),
         }
     }
 }
@@ -248,6 +257,30 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                         tokio::spawn(async move {
                             if let Err(e) = title_updater_clone.maybe_update_title(conversation_id).await {
                                 log::error!("Failed to update conversation title: {e}");
+                            }
+                        });
+                    }
+                    
+                    // Check if this conversation completion should trigger the next task
+                    if let Some(agent) = &app.agent {
+                        let agent_clone = agent.clone();
+                        let conversation_id_clone = conversation_id.clone();
+                        let task_panel = app.task_panel.clone();
+                        
+                        tokio::spawn(async move {
+                            if let Ok(Some(conversation)) = agent_clone.get_current_conversation().await {
+                                if conversation.id == conversation_id_clone {
+                                    // Get the full conversation content for analysis
+                                    let conversation_content = conversation.messages.iter()
+                                        .map(|msg| &msg.content)
+                                        .cloned()
+                                        .collect::<Vec<_>>()
+                                        .join("\n");
+                                    
+                                    if let Err(e) = task_panel.handle_stream_completion(&conversation_content).await {
+                                        log::error!("Failed to check task completion: {e}");
+                                    }
+                                }
                             }
                         });
                     }
@@ -500,6 +533,14 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                 log::info!("Received ReinitializeProvider event for provider: {:?}", provider_type);
                 handle_provider_reinitialization(app, provider_type);
             },
+            AppEvent::ExecuteTask { conversation_id, task_message } => {
+                log::info!("Received ExecuteTask event for conversation {conversation_id}");
+                handle_execute_task(app, conversation_id, task_message);
+            },
+            AppEvent::CheckAndExecuteTask => {
+                log::info!("Received CheckAndExecuteTask event");
+                handle_check_and_execute_task(app);
+            },
             AppEvent::AgentReplaced { agent } => {
                 log::info!("Received AgentReplaced event");
                 handle_agent_replaced(app, agent);
@@ -541,6 +582,20 @@ pub fn make_chat_message_from_agent_message(agent_msg: &AgentMessage) -> ChatMes
     let mut chat_message = ChatMessage::new(author, agent_msg.content.clone());
     chat_message.id = Some(agent_msg.id.to_string());
     chat_message.timestamp = agent_msg.timestamp; // Preserve original timestamp
+    chat_message.tool_calls = agent_msg.tool_calls.iter().map(|tool_call| {
+        crate::gui::chat::view::ToolCall {
+            id: tool_call.id.clone(),
+            name: tool_call.name.clone(),
+            arguments: tool_call.arguments.to_string(),
+            result: tool_call.result.as_ref().map(|r| r.to_string()),
+            status: if tool_call.successful { 
+                crate::gui::chat::view::MessageStatus::Complete 
+            } else { 
+                crate::gui::chat::view::MessageStatus::Error("Tool call failed".to_string()) 
+            },
+            content_position: None,
+        }
+    }).collect(); // Preserve tool calls
     chat_message
 }
 
@@ -803,7 +858,7 @@ pub fn handle_state_change(app: &mut SagittaCodeApp, state: AgentState) {
 
 /// Process conversation events from async tasks
 pub fn process_conversation_events(app: &mut SagittaCodeApp) {
-    // Collect events first to avoid borrowing issues
+    // Process app-internal conversation events
     let mut events = Vec::new();
     if let Some(ref mut receiver) = app.conversation_event_receiver {
         while let Ok(event) = receiver.try_recv() {
@@ -848,6 +903,58 @@ pub fn process_conversation_events(app: &mut SagittaCodeApp) {
                 // Handle the report
                 app.handle_analytics_report(report);
             },
+        }
+    }
+    
+    // Process conversation service events for auto-updates
+    process_conversation_service_events(app);
+}
+
+/// Process conversation service events that trigger auto-updates
+pub fn process_conversation_service_events(app: &mut SagittaCodeApp) {
+    if let Some(ref mut receiver) = app.conversation_service_event_receiver {
+        let mut service_events = Vec::new();
+        while let Ok(event) = receiver.try_recv() {
+            service_events.push(event);
+        }
+        
+        if !service_events.is_empty() {
+            log::debug!("Processing {} conversation service events", service_events.len());
+        }
+        
+        for event in service_events {
+            match event {
+                crate::agent::conversation::service::ConversationEvent::ListRefreshed(conversations) => {
+                    log::info!("Conversation list refreshed: {} conversations", conversations.len());
+                    app.state.conversation_list = conversations;
+                    app.state.conversation_data_loading = false;
+                    app.state.set_conversation_loading(false);
+                },
+                crate::agent::conversation::service::ConversationEvent::ConversationCreated(id) => {
+                    log::info!("Conversation service: conversation created {id}");
+                    // Trigger a refresh to get the updated list
+                    refresh_conversation_data(app);
+                },
+                crate::agent::conversation::service::ConversationEvent::ConversationUpdated(id) => {
+                    log::info!("Conversation service: conversation updated {id}");
+                    // Trigger a refresh to get the updated list
+                    refresh_conversation_data(app);
+                },
+                crate::agent::conversation::service::ConversationEvent::ConversationDeleted(id) => {
+                    log::info!("Conversation service: conversation deleted {id}");
+                    // Trigger a refresh to get the updated list
+                    refresh_conversation_data(app);
+                },
+                crate::agent::conversation::service::ConversationEvent::ClustersUpdated(clusters) => {
+                    log::debug!("Conversation clusters updated: {} clusters", clusters.len());
+                    // Update the conversation sidebar with new clusters
+                    app.conversation_sidebar.clusters = clusters;
+                },
+                crate::agent::conversation::service::ConversationEvent::AnalyticsReady(report) => {
+                    log::info!("Analytics ready from conversation service");
+                    app.handle_analytics_report(report);
+                },
+            }
         }
     }
 }
@@ -1591,6 +1698,38 @@ pub fn format_tool_arguments_for_display(tool_name: &str, arguments: &str) -> St
                 name if name.contains("repository_list") || name.contains("list_repositories") => {
                     "Listing available repositories".to_string()
                 },
+                name if name.contains("semantic_code_search") => {
+                    // Special handling for semantic code search to show both query and element type
+                    let query_text = json.get("queryText")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.chars().take(50).collect::<String>())
+                        .unwrap_or_else(|| "".to_string());
+                    
+                    let element_type = json.get("elementType")
+                        .and_then(|v| v.as_str());
+                    
+                    let lang = json.get("lang")
+                        .and_then(|v| v.as_str());
+                    
+                    match (element_type, lang) {
+                        (Some(elem), Some(l)) => {
+                            format!("Searching for: \"{}\" ({}s in {})", query_text, elem, l)
+                        },
+                        (Some(elem), None) => {
+                            format!("Searching for: \"{}\" ({}s)", query_text, elem)
+                        },
+                        (None, Some(l)) => {
+                            format!("Searching for: \"{}\" (in {})", query_text, l)
+                        },
+                        (None, None) => {
+                            if query_text.is_empty() {
+                                "Performing semantic search".to_string()
+                            } else {
+                                format!("Searching for: \"{}\"", query_text)
+                            }
+                        }
+                    }
+                },
                 name if name.contains("query") || name.contains("search") => {
                     if let Some(query_text) = json.get("queryText").and_then(|v| v.as_str()) {
                         format!("Searching for: \"{}\"", query_text.chars().take(50).collect::<String>())
@@ -1825,6 +1964,74 @@ fn handle_repository_switched(app: &mut SagittaCodeApp, repo_name: String) {
     }
 }
 
+/// Handle task execution event
+fn handle_execute_task(app: &mut SagittaCodeApp, conversation_id: uuid::Uuid, task_message: String) {
+    log::info!("Executing task for conversation {conversation_id}: {task_message}");
+    
+    // First, switch to the conversation
+    switch_to_conversation(app, conversation_id);
+    
+    // Then, set the task message in the input buffer and trigger submission
+    app.state.chat_input_buffer = task_message;
+    app.state.chat_on_submit = true;
+    
+    // The message will be sent on the next UI update cycle
+    log::info!("Task message set in input buffer and will be sent on next UI update");
+}
+
+/// Handle check and execute task event
+fn handle_check_and_execute_task(app: &mut SagittaCodeApp) {
+    log::info!("Checking if safe to execute next task");
+    
+    // Check if the current conversation is actively streaming
+    if app.state.is_streaming_response {
+        log::warn!("Cannot start task: Current conversation is still streaming a response");
+        // Show a toast notification to the user
+        app.state.toasts.warning("Cannot start task while a conversation is active. Please wait for the current response to complete.");
+        return;
+    }
+    
+    // Check if waiting for response
+    if app.state.is_waiting_for_response {
+        log::warn!("Cannot start task: Currently waiting for a response");
+        app.state.toasts.warning("Cannot start task while waiting for a response. Please wait for the current operation to complete.");
+        return;
+    }
+    
+    // Check if a tool is currently executing
+    if app.state.is_executing_tool {
+        log::warn!("Cannot start task: A tool is currently executing");
+        app.state.toasts.warning("Cannot start task while a tool is executing. Please wait for it to complete.");
+        return;
+    }
+    
+    // Check if there are any running tools
+    if !app.state.running_tools.is_empty() {
+        log::warn!("Cannot start task: {} tools are still running", app.state.running_tools.len());
+        app.state.toasts.warning("Cannot start task while tools are running. Please wait for them to complete.");
+        return;
+    }
+    
+    // If all checks pass, execute the task via the task panel
+    log::info!("All checks passed, proceeding to execute next task");
+    
+    // Get task panel and execute the task directly through its internal mechanism
+    let task_panel_clone = app.task_panel.clone();
+    tokio::spawn(async move {
+        match task_panel_clone.start_next_task().await {
+            Ok(Some(task_id)) => {
+                log::info!("Successfully started task with ID: {}", task_id);
+            }
+            Ok(None) => {
+                log::info!("No tasks in queue to start");
+            }
+            Err(e) => {
+                log::error!("Failed to start next task: {}", e);
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1909,6 +2116,8 @@ mod tests {
             AppEvent::ShowNewConversationConfirmation => assert!(true),
             AppEvent::ReinitializeProvider { .. } => assert!(true),
             AppEvent::AgentReplaced { .. } => assert!(true),
+            AppEvent::ExecuteTask { .. } => assert!(true),
+            AppEvent::CheckAndExecuteTask => assert!(true),
         }
         
         // Test the other variant too
@@ -1934,6 +2143,8 @@ mod tests {
             AppEvent::ShowNewConversationConfirmation => assert!(true),
             AppEvent::ReinitializeProvider { .. } => assert!(true),
             AppEvent::AgentReplaced { .. } => assert!(true),
+            AppEvent::ExecuteTask { .. } => assert!(true),
+            AppEvent::CheckAndExecuteTask => assert!(true),
         }
     }
 
@@ -1996,6 +2207,111 @@ mod tests {
         
         assert_eq!(chat_msg.author, MessageAuthor::System);
         assert_eq!(chat_msg.text, "System status OK");
+    }
+
+    #[test]
+    fn test_tool_call_preservation_in_chat_message_conversion() {
+        use crate::gui::chat::view::StreamingMessage;
+
+        // Create an agent tool call with the correct structure
+        let agent_tool_call = AgentToolCall {
+            id: "test_call_123".to_string(),
+            name: "test_tool".to_string(),
+            arguments: serde_json::json!({"param1": "value1"}),
+            result: Some(serde_json::json!("Tool executed successfully")),
+            successful: true,
+            execution_time: Some(chrono::Utc::now()),
+        };
+
+        // Create an agent message with tool calls using the helper
+        let mut agent_message = create_test_agent_message(crate::llm::client::Role::Assistant, "I'll help you with that task.");
+        agent_message.tool_calls = vec![agent_tool_call];
+
+        // Convert to ChatMessage using our fixed function
+        let chat_message = make_chat_message_from_agent_message(&agent_message);
+
+        // Verify tool calls are preserved
+        assert_eq!(chat_message.tool_calls.len(), 1);
+        assert_eq!(chat_message.tool_calls[0].id, "test_call_123");
+        assert_eq!(chat_message.tool_calls[0].name, "test_tool");
+        assert!(chat_message.tool_calls[0].result.is_some());
+        
+        // Convert ChatMessage to StreamingMessage
+        let streaming_message: StreamingMessage = chat_message.into();
+
+        // Verify tool calls survive the second conversion
+        assert_eq!(streaming_message.tool_calls.len(), 1);
+        assert_eq!(streaming_message.tool_calls[0].id, "test_call_123");
+        assert_eq!(streaming_message.tool_calls[0].name, "test_tool");
+        assert!(streaming_message.tool_calls[0].result.is_some());
+    }
+
+    #[test]
+    fn test_tool_call_preservation_with_multiple_tool_calls() {
+        use crate::gui::chat::view::StreamingMessage;
+
+        // Create multiple agent tool calls
+        let agent_tool_call1 = AgentToolCall {
+            id: "call_1".to_string(),
+            name: "tool_1".to_string(),
+            arguments: serde_json::json!({"param": "value1"}),
+            result: Some(serde_json::json!("Result 1")),
+            successful: true,
+            execution_time: Some(chrono::Utc::now()),
+        };
+
+        let agent_tool_call2 = AgentToolCall {
+            id: "call_2".to_string(),
+            name: "tool_2".to_string(),
+            arguments: serde_json::json!({"param": "value2"}),
+            result: Some(serde_json::json!("Error occurred")),
+            successful: false,
+            execution_time: Some(chrono::Utc::now()),
+        };
+
+        // Create an agent message with multiple tool calls
+        let mut agent_message = create_test_agent_message(crate::llm::client::Role::Assistant, "Processing multiple tools.");
+        agent_message.tool_calls = vec![agent_tool_call1, agent_tool_call2];
+
+        // Convert to ChatMessage
+        let chat_message = make_chat_message_from_agent_message(&agent_message);
+
+        // Verify both tool calls are preserved
+        assert_eq!(chat_message.tool_calls.len(), 2);
+        
+        // Check first tool call
+        assert_eq!(chat_message.tool_calls[0].id, "call_1");
+        assert_eq!(chat_message.tool_calls[0].name, "tool_1");
+        
+        // Check second tool call
+        assert_eq!(chat_message.tool_calls[1].id, "call_2");
+        assert_eq!(chat_message.tool_calls[1].name, "tool_2");
+
+        // Convert to StreamingMessage
+        let streaming_message: StreamingMessage = chat_message.into();
+
+        // Verify both tool calls survive the conversion
+        assert_eq!(streaming_message.tool_calls.len(), 2);
+        assert_eq!(streaming_message.tool_calls[0].id, "call_1");
+        assert_eq!(streaming_message.tool_calls[1].id, "call_2");
+    }
+
+    #[test]
+    fn test_empty_tool_calls_preservation() {
+        // Create an agent message with no tool calls using the helper
+        let agent_message = create_test_agent_message(crate::llm::client::Role::Assistant, "Just a regular message.");
+
+        // Convert to ChatMessage
+        let chat_message = make_chat_message_from_agent_message(&agent_message);
+
+        // Verify empty tool calls are preserved
+        assert_eq!(chat_message.tool_calls.len(), 0);
+
+        // Convert to StreamingMessage
+        let streaming_message: crate::gui::chat::view::StreamingMessage = chat_message.into();
+
+        // Verify empty tool calls list is preserved
+        assert_eq!(streaming_message.tool_calls.len(), 0);
     }
 
     #[test]

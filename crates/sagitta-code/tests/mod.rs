@@ -107,17 +107,21 @@ mod provider_system_tests {
         
         // Test that factory can create all provider types
         assert!(factory.create_provider(ProviderType::ClaudeCode).is_ok());
-        assert!(factory.create_provider(ProviderType::MistralRs).is_ok());
+        assert!(factory.create_provider(ProviderType::OpenAICompatible).is_ok());
+        assert!(factory.create_provider(ProviderType::ClaudeCodeRouter).is_ok());
         
         // Test that factory provides correct provider types
         let claude_provider = factory.create_provider(ProviderType::ClaudeCode).unwrap();
-        let mistral_provider = factory.create_provider(ProviderType::MistralRs).unwrap();
+        let openai_provider = factory.create_provider(ProviderType::OpenAICompatible).unwrap();
+        let router_provider = factory.create_provider(ProviderType::ClaudeCodeRouter).unwrap();
         
         assert_eq!(claude_provider.provider_type(), ProviderType::ClaudeCode);
-        assert_eq!(mistral_provider.provider_type(), ProviderType::MistralRs);
+        assert_eq!(openai_provider.provider_type(), ProviderType::OpenAICompatible);
+        assert_eq!(router_provider.provider_type(), ProviderType::ClaudeCodeRouter);
         
         assert_eq!(claude_provider.display_name(), "Claude Code");
-        assert_eq!(mistral_provider.display_name(), "Mistral.rs");
+        assert_eq!(openai_provider.display_name(), "OpenAI Compatible");
+        assert_eq!(router_provider.display_name(), "Claude Code Router");
     }
     
     #[test]
@@ -133,11 +137,11 @@ mod provider_system_tests {
         assert!(claude_features.contains(&"streaming".to_string()));
         assert!(claude_features.contains(&"mcp_tools".to_string()));
         
-        // Test Mistral.rs features
-        let mistral_provider = factory.create_provider(ProviderType::MistralRs).unwrap();
-        let mistral_features = mistral_provider.supported_features();
+        // Test OpenAI Compatible features
+        let openai_provider = factory.create_provider(ProviderType::OpenAICompatible).unwrap();
+        let openai_features = openai_provider.supported_features();
         
-        assert!(mistral_features.contains(&"streaming".to_string()));
-        assert!(mistral_features.contains(&"mcp_tools".to_string()));
+        assert!(openai_features.contains(&"streaming".to_string()));
+        // Note: OpenAI Compatible may not support MCP tools
     }
 }
