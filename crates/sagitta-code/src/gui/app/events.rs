@@ -213,9 +213,6 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                         let tool_arguments = tool_call.arguments.clone();
                         let message_id_clone = message_id.clone();
                         let chat_manager_clone = app.chat_manager.clone();
-                        let agent_clone = app.agent.clone();
-                        let app_event_sender_clone = app.app_event_sender.clone();
-                        let config_clone = app.config.clone();
                         
                         // Execute tool in background task
                         tokio::spawn(async move {
@@ -243,11 +240,12 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                                 success
                             );
                             
-                            // For OpenAI-compatible providers with mistral.rs, the tool results
-                            // are sent back through the model's native format (e.g., <tool_response> tags)
-                            // The model will continue the conversation automatically, so we don't need
-                            // to trigger a manual continuation like we do with true OpenAI API.
-                            log::info!("Tool execution complete for OpenAI-compatible provider. Model will continue automatically.");
+                            // IMPORTANT: Do NOT trigger continuation here!
+                            // The continuation logic is handled in the ToolResult event handler
+                            // which properly checks if ALL tools have completed before continuing.
+                            // Having continuation logic here causes an infinite loop because
+                            // each tool triggers a new continuation immediately.
+                            log::info!("Tool execution complete for '{}'. Continuation will be handled by ToolResult event.", tool_name);
                         });
                     }
                 },

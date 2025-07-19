@@ -2,7 +2,6 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::Arc;
 use crate::config::types::SagittaCodeConfig;
-use crate::llm::claude_code::client::ClaudeCodeClient;
 use crate::llm::client::{LlmClient, Message, LlmResponse};
 use crate::agent::message::types::AgentMessage;
 use crate::agent::conversation::types::Conversation;
@@ -43,16 +42,60 @@ impl FastModelProvider {
     /// Initialize the provider with the appropriate client
     pub async fn initialize(&mut self) -> Result<(), SagittaCodeError> {
         if self.config.conversation.enable_fast_model {
-            // Create a new config with the fast model
-            let mut fast_config = self.config.clone();
-            if let Some(ref mut claude_config) = fast_config.claude_code {
-                claude_config.model = self.config.conversation.fast_model.clone();
+            // Use the same provider as the main conversation instead of hardcoding Claude Code
+            // This prevents loading multiple models which is problematic for local providers
+            use crate::providers::{ProviderFactory, claude_code::mcp_integration::McpIntegration};
+            
+            log::info!("FastModelProvider: Initializing with provider {:?}", self.config.current_provider);
+            
+            // Create provider factory
+            let factory = ProviderFactory::new();
+            
+            // Create provider manager with all providers
+            let mut manager = factory.create_manager()
+                .map_err(|e| SagittaCodeError::ConfigError(format!("Failed to create provider manager: {}", e)))?;
+            
+            // Update provider configurations from saved config
+            for (provider_type, provider_config) in &self.config.provider_configs {
+                let mut final_config = provider_config.clone();
+                
+                // Special handling for Claude Code provider: merge model from legacy config
+                if *provider_type == crate::providers::types::ProviderType::ClaudeCode {
+                    if let Some(ref legacy_claude_config) = self.config.claude_code {
+                        // Use the fast model instead of the main model
+                        if let Err(e) = final_config.set_option("model", &self.config.conversation.fast_model) {
+                            log::warn!("Failed to set fast model from config: {}", e);
+                        }
+                        if let Some(ref fallback_model) = legacy_claude_config.fallback_model {
+                            if let Err(e) = final_config.set_option("fallback_model", fallback_model) {
+                                log::warn!("Failed to set fallback_model from legacy config: {}", e);
+                            }
+                        }
+                        if let Err(e) = final_config.set_option("max_output_tokens", legacy_claude_config.max_output_tokens) {
+                            log::warn!("Failed to set max_output_tokens from legacy config: {}", e);
+                        }
+                    }
+                }
+                
+                if let Err(e) = manager.update_provider_config(provider_type, final_config) {
+                    log::warn!("Failed to update config for provider {:?}: {}", provider_type, e);
+                }
             }
             
-            let client = ClaudeCodeClient::new(&fast_config)?;
-            self.client = Some(Arc::new(client) as Arc<dyn LlmClient>);
+            // Create MCP integration (shared across providers)
+            let mcp_integration = Arc::new(McpIntegration::new());
             
-            log::info!("FastModelProvider: Initialized with model {}", self.config.conversation.fast_model);
+            // Set the active provider from config
+            manager.set_active_provider(self.config.current_provider)
+                .map_err(|e| SagittaCodeError::ConfigError(format!("Failed to set active provider: {}", e)))?;
+            
+            // Create client for the active provider
+            let client = manager.create_active_client(mcp_integration)
+                .map_err(|e| SagittaCodeError::ConfigError(format!("Failed to create client for provider {:?}: {}", self.config.current_provider, e)))?;
+            
+            self.client = Some(Arc::from(client));
+            
+            log::info!("FastModelProvider: Initialized with provider {:?}", self.config.current_provider);
         } else {
             log::info!("FastModelProvider: Fast model disabled, will use rule-based fallbacks");
         }

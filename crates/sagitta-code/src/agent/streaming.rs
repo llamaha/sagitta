@@ -74,9 +74,13 @@ impl StreamingProcessor {
         // Set state to thinking
         self.state_manager.set_thinking("Processing user message").await?;
         
-        // Add the user message to history
-        self.history.add_user_message(&message_text).await;
-        debug!("Added user message to history (stream).");
+        // Add the user message to history only if it's not empty (empty means continuation)
+        if !message_text.is_empty() {
+            self.history.add_user_message(&message_text).await;
+            debug!("Added user message to history (stream).");
+        } else {
+            debug!("Skipping empty message (continuation flow)");
+        }
         
         // Get all messages from history
         let messages = self.history.to_llm_messages().await;

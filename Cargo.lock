@@ -5464,6 +5464,7 @@ dependencies = [
  "catppuccin",
  "catppuccin-egui",
  "chrono",
+ "clap",
  "ctor",
  "dashmap",
  "directories",
