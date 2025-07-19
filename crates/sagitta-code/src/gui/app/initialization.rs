@@ -37,6 +37,9 @@ use sagitta_search::qdrant_client_trait::QdrantClientTrait;
 use qdrant_client::Qdrant;
 // Qdrant collection imports removed - no longer needed after removing analyze_input tool
 
+// For spawning MCP server
+use std::process::{Command, Stdio};
+
 /// Get the default conversation storage path
 pub fn get_default_conversation_storage_path() -> PathBuf {
     let mut default_path = dirs::config_dir()
@@ -44,6 +47,62 @@ pub fn get_default_conversation_storage_path() -> PathBuf {
     default_path.push("sagitta-code");
     default_path.push("conversations");
     default_path
+}
+
+/// Spawn the MCP server in HTTP mode for tool execution
+async fn spawn_mcp_http_server(_core_config: sagitta_search::config::AppConfig) -> Result<()> {
+    log::info!("Spawning MCP HTTP server on localhost:8765...");
+    
+    // Get the path to sagitta-mcp binary
+    let mcp_binary = if let Ok(cargo_path) = std::env::var("CARGO_HOME") {
+        // Try cargo bin directory first
+        let mut path = PathBuf::from(cargo_path);
+        path.push("bin");
+        path.push("sagitta-mcp");
+        if path.exists() {
+            path
+        } else {
+            // Fallback to searching in PATH
+            PathBuf::from("sagitta-mcp")
+        }
+    } else {
+        // Just use the binary name and let the system find it in PATH
+        PathBuf::from("sagitta-mcp")
+    };
+    
+    // Spawn the MCP server as a background process
+    let mut child = Command::new(&mcp_binary)
+        .args(&["http", "--host", "127.0.0.1", "--port", "8765"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("Failed to spawn MCP server from {:?}", mcp_binary))?;
+    
+    // Give the server a moment to start up
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    
+    // Check if the process is still running
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            // Process has already exited, this is an error
+            return Err(anyhow::anyhow!("MCP server exited immediately with status: {:?}", status));
+        }
+        Ok(None) => {
+            // Process is still running, good!
+            log::info!("MCP HTTP server started successfully on localhost:8765 (PID: {:?})", child.id());
+            
+            // Store the child process handle in a static variable so it doesn't get dropped
+            // This ensures the server keeps running for the lifetime of the application
+            static MCP_SERVER: std::sync::OnceLock<std::sync::Mutex<Option<std::process::Child>>> = std::sync::OnceLock::new();
+            let _ = MCP_SERVER.set(std::sync::Mutex::new(Some(child)));
+        }
+        Err(e) => {
+            return Err(anyhow::anyhow!("Failed to check MCP server status: {}", e));
+        }
+    }
+    
+    Ok(())
 }
 
 /// Configure theme from config
@@ -220,6 +279,9 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
             (crate::config::SagittaCodeConfig::default(), sagitta_search::config::AppConfig::default())
         }
     };
+
+    // Spawn MCP server in HTTP mode for tool execution
+    spawn_mcp_http_server(core_config.clone()).await?;
 
     // Create repository manager
     let repo_manager = create_repository_manager(core_config.clone()).await?;
