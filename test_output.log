@@ -1,0 +1,522 @@
+[2025-07-19T05:55:44.259Z INFO  test_openai_streaming] Starting OpenAI streaming test CLI
+[2025-07-19T05:55:44.259Z INFO  test_openai_streaming] Endpoint: http://0.0.0.0:1234/v1
+[2025-07-19T05:55:44.259Z INFO  test_openai_streaming] Model: default
+[2025-07-19T05:55:44.280Z INFO  test_openai_streaming] Created OpenAI-compatible LLM client
+[2025-07-19T05:55:44.280Z INFO  test_openai_streaming] 
+    === Starting conversation ===
+[2025-07-19T05:55:44.280Z INFO  test_openai_streaming] User: List all repositories, then search for 'save game' in the first repository
+[2025-07-19T05:55:44.280Z DEBUG sagitta_code::providers::openai_compatible::client] OpenAICompatibleClient::generate_stream called with 2 messages and 3 tools
+[2025-07-19T05:55:44.280Z INFO  sagitta_code::providers::openai_compatible::client] OpenAICompatible: building request with 3 tools, stream=true
+[2025-07-19T05:55:44.280Z INFO  sagitta_code::providers::openai_compatible::client]   Tool: ping - Checks if the server is responsive.
+[2025-07-19T05:55:44.280Z INFO  sagitta_code::providers::openai_compatible::client]   Tool: repository_list - Lists currently configured repositories.
+[2025-07-19T05:55:44.280Z INFO  sagitta_code::providers::openai_compatible::client]   Tool: semantic_code_search - Performs semantic search on an indexed repository.
+[2025-07-19T05:55:44.280Z DEBUG sagitta_code::providers::openai_compatible::client] Converted to 3 OpenAI tools
+[2025-07-19T05:55:44.280Z DEBUG sagitta_code::providers::openai_compatible::client] OpenAI tools: [
+      {
+        "type": "function",
+        "function": {
+          "name": "ping",
+          "description": "Checks if the server is responsive.",
+          "parameters": {
+            "properties": {},
+            "required": [],
+            "type": "object"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "repository_list",
+          "description": "Lists currently configured repositories.",
+          "parameters": {
+            "properties": {},
+            "required": [],
+            "type": "object"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "semantic_code_search",
+          "description": "Performs semantic search on an indexed repository.",
+          "parameters": {
+            "properties": {
+              "limit": {
+                "description": "Maximum number of results to return",
+                "type": "integer"
+              },
+              "queryText": {
+                "description": "The natural language query text",
+                "type": "string"
+              },
+              "repositoryName": {
+                "description": "Name of the repository to query",
+                "type": "string"
+              }
+            },
+            "required": [
+              "repositoryName",
+              "queryText",
+              "limit"
+            ],
+            "type": "object"
+          }
+        }
+      }
+    ]
+[2025-07-19T05:55:44.280Z DEBUG reqwest::connect] starting new connection: http://0.0.0.0:1234/
+[2025-07-19T05:55:44.280Z DEBUG hyper::client::connect::http] connecting to 0.0.0.0:1234
+[2025-07-19T05:55:44.281Z DEBUG hyper::client::connect::http] connected to 0.0.0.0:1234
+[2025-07-19T05:55:44.281Z DEBUG hyper::proto::h1::io] flushed 1290 bytes
+[2025-07-19T05:55:44.281Z DEBUG hyper::proto::h1::io] parsed 6 headers
+[2025-07-19T05:55:44.281Z DEBUG hyper::proto::h1::conn] incoming body is chunked encoding
+[2025-07-19T05:55:44.281Z INFO  test_openai_streaming] Streaming response...
+[2025-07-19T05:55:44.337Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:44.355Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:44.371Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:44.387Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:44.402Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:44.418Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:44.433Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:44.449Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:44.464Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:44.480Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:44.496Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:44.512Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:44.528Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:44.545Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:44.561Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10F (271 bytes)
+[2025-07-19T05:55:44.577Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:44.593Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:44.610Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:44.626Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:44.641Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:44.656Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:44.673Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:44.689Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:44.705Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x114 (276 bytes)
+[2025-07-19T05:55:44.721Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:44.737Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:44.753Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:44.769Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:44.784Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:44.800Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:44.816Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:44.834Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:44.849Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:44.865Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:44.881Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:44.898Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:44.914Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:44.931Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:44.948Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:44.964Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:44.980Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:44.996Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:45.013Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:45.029Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:45.045Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:45.061Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:45.078Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x111 (273 bytes)
+[2025-07-19T05:55:45.094Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:45.110Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:45.126Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:45.142Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:45.158Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:45.173Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x110 (272 bytes)
+[2025-07-19T05:55:45.190Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:45.206Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x112 (274 bytes)
+[2025-07-19T05:55:45.222Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:45.238Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:45.254Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:45.270Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x112 (274 bytes)
+[2025-07-19T05:55:45.286Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x114 (276 bytes)
+[2025-07-19T05:55:45.301Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:45.317Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:45.333Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:45.349Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:45.365Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:45.382Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:45.398Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:45.414Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:45.430Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:45.446Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:45.463Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:45.479Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x111 (273 bytes)
+[2025-07-19T05:55:45.563Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x121 (289 bytes)
+[2025-07-19T05:55:45.580Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:45.596Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:45.612Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:45.628Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:45.645Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:45.661Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:45.678Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:45.694Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10F (271 bytes)
+[2025-07-19T05:55:45.710Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:45.726Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:45.743Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:45.759Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:45.775Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:45.791Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x110 (272 bytes)
+[2025-07-19T05:55:45.807Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:45.823Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:45.839Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:45.856Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:45.872Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:45.888Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:45.905Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:45.921Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x112 (274 bytes)
+[2025-07-19T05:55:45.937Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:45.954Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:45.970Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:45.987Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:46.003Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:46.019Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:46.036Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x110 (272 bytes)
+[2025-07-19T05:55:46.052Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:46.068Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:46.084Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:46.100Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:46.117Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:46.133Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:46.149Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:46.166Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:46.182Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:46.198Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:46.214Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:46.231Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:46.247Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:46.264Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:46.281Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:46.298Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:46.314Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:46.330Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:46.348Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:46.365Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:46.381Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:46.398Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10F (271 bytes)
+[2025-07-19T05:55:46.414Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:46.430Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:46.447Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:46.464Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:46.480Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:46.496Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:46.513Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:46.530Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:46.547Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:46.563Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:46.580Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:46.596Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:46.613Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:46.629Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10F (271 bytes)
+[2025-07-19T05:55:46.646Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:46.663Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x110 (272 bytes)
+[2025-07-19T05:55:46.680Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:46.696Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:46.712Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:46.728Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:46.745Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:46.762Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x112 (274 bytes)
+[2025-07-19T05:55:46.779Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:46.795Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:46.811Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x110 (272 bytes)
+[2025-07-19T05:55:46.828Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:46.844Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:46.861Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x110 (272 bytes)
+[2025-07-19T05:55:46.877Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:46.893Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:46.909Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x112 (274 bytes)
+[2025-07-19T05:55:46.926Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x110 (272 bytes)
+[2025-07-19T05:55:46.942Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:46.959Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x112 (274 bytes)
+[2025-07-19T05:55:46.975Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:46.992Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:47.008Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:47.024Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:47.040Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:47.057Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:47.073Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:47.089Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:47.106Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:47.123Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:47.139Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x111 (273 bytes)
+[2025-07-19T05:55:47.156Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:47.173Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:47.189Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:47.205Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:47.222Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:47.239Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:47.255Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:47.271Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:47.288Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:47.304Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:47.321Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:47.338Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:47.355Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:47.372Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:47.389Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:47.405Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:47.421Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:47.438Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:47.454Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:47.470Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:47.487Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:47.503Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10F (271 bytes)
+[2025-07-19T05:55:47.522Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:47.539Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:47.556Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:47.572Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:47.589Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x111 (273 bytes)
+[2025-07-19T05:55:47.605Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x111 (273 bytes)
+[2025-07-19T05:55:47.622Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:47.639Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:47.656Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:47.673Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:47.690Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:47.707Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:47.724Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10F (271 bytes)
+[2025-07-19T05:55:47.741Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:47.757Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:47.773Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:47.790Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:47.806Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:47.822Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:47.840Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:47.856Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:47.873Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x112 (274 bytes)
+[2025-07-19T05:55:47.889Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10F (271 bytes)
+[2025-07-19T05:55:47.906Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:47.923Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:47.939Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:47.956Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:47.973Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:47.989Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:48.005Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:48.022Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:48.038Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:48.054Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:48.071Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10F (271 bytes)
+[2025-07-19T05:55:48.087Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:48.104Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:48.121Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:48.138Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:48.155Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:48.171Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:48.187Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:48.205Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:48.221Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:48.238Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10F (271 bytes)
+[2025-07-19T05:55:48.254Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x110 (272 bytes)
+[2025-07-19T05:55:48.271Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:48.287Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:48.304Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:48.321Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:48.337Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x110 (272 bytes)
+[2025-07-19T05:55:48.353Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:48.370Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:48.386Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10F (271 bytes)
+[2025-07-19T05:55:48.402Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:48.417Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10F (271 bytes)
+[2025-07-19T05:55:48.434Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:48.450Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:48.466Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x110 (272 bytes)
+[2025-07-19T05:55:48.483Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x112 (274 bytes)
+[2025-07-19T05:55:48.499Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:48.515Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:48.532Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:48.549Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:48.565Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:48.582Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10F (271 bytes)
+[2025-07-19T05:55:48.598Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:48.615Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:48.631Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:48.648Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:48.665Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x110 (272 bytes)
+[2025-07-19T05:55:48.682Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:48.699Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:48.716Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:48.732Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:48.749Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:48.766Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x110 (272 bytes)
+[2025-07-19T05:55:48.783Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:48.800Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:48.817Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x110 (272 bytes)
+[2025-07-19T05:55:48.833Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:48.850Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:48.866Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:48.883Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x112 (274 bytes)
+[2025-07-19T05:55:48.901Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:48.917Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:48.933Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:48.951Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:48.967Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:48.984Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:49.000Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:49.017Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:49.033Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:49.049Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:49.066Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:49.082Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:49.098Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10F (271 bytes)
+[2025-07-19T05:55:49.115Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:49.131Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:49.147Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:49.165Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x110 (272 bytes)
+[2025-07-19T05:55:49.182Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:49.198Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x110 (272 bytes)
+[2025-07-19T05:55:49.215Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x112 (274 bytes)
+[2025-07-19T05:55:49.232Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:49.248Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:49.265Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:49.283Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:49.299Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:49.316Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:49.333Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:49.351Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:49.367Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:49.383Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:49.400Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:49.416Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x112 (274 bytes)
+[2025-07-19T05:55:49.432Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:49.449Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x110 (272 bytes)
+[2025-07-19T05:55:49.466Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:49.483Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:49.499Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:49.517Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x110 (272 bytes)
+[2025-07-19T05:55:49.533Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:49.650Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x12C (300 bytes)
+[2025-07-19T05:55:49.667Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:50.837Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x214 (532 bytes)
+[2025-07-19T05:55:50.854Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:50.870Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:50.886Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:50.901Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:50.917Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:50.933Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:50.950Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x112 (274 bytes)
+[2025-07-19T05:55:50.966Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:50.983Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:50.999Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:51.015Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:51.032Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:51.048Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:51.065Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:51.082Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:51.099Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:51.115Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:51.132Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x112 (274 bytes)
+[2025-07-19T05:55:51.150Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:51.166Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:51.182Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:51.199Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:51.216Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x110 (272 bytes)
+[2025-07-19T05:55:51.232Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:51.249Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:51.265Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:51.281Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:51.298Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:51.315Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:51.331Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:51.348Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:51.364Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:51.381Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:51.398Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:51.414Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:51.430Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:51.447Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:51.464Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:51.480Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:51.497Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:51.513Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:51.529Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:51.545Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:51.563Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:51.579Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:51.595Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:51.611Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:51.627Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x112 (274 bytes)
+[2025-07-19T05:55:51.644Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:51.660Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:51.677Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:51.694Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:51.710Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:51.726Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:51.742Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:51.758Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:51.774Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:51.790Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:51.807Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:51.823Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:51.839Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:51.856Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:51.872Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:51.889Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:51.905Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:51.921Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:51.938Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:51.954Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:51.970Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:51.987Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x112 (274 bytes)
+[2025-07-19T05:55:52.003Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:52.019Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:52.037Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:52.053Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x111 (273 bytes)
+[2025-07-19T05:55:52.069Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:52.085Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:52.100Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:52.116Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:52.132Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10F (271 bytes)
+[2025-07-19T05:55:52.149Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:52.166Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:52.183Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x108 (264 bytes)
+[2025-07-19T05:55:52.199Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10F (271 bytes)
+[2025-07-19T05:55:52.215Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:52.232Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10D (269 bytes)
+[2025-07-19T05:55:52.248Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x112 (274 bytes)
+[2025-07-19T05:55:52.265Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x109 (265 bytes)
+[2025-07-19T05:55:52.282Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:52.298Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:52.315Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:52.331Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:52.348Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:52.365Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:52.381Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x110 (272 bytes)
+[2025-07-19T05:55:52.398Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10C (268 bytes)
+[2025-07-19T05:55:52.415Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10E (270 bytes)
+[2025-07-19T05:55:52.431Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10A (266 bytes)
+[2025-07-19T05:55:52.447Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10F (271 bytes)
+[2025-07-19T05:55:52.447Z DEBUG test_openai_streaming] Chunk 1 received: StreamChunk { part: Thought { text: "\nOkay, let me figure out how to handle this user's request. The user wants me to list all repositories first and then search for 'save game' in the first one. \n\nFirst, I need to check the available tools. There's a function called repository_list that lists configured repositories. So I should call that first. Since the user mentioned \"the first repository,\" I need to make sure that after getting the list, I can identify which one is first. But the repository_list might return them in a specific order, maybe the order they were added. I'll assume that the first entry in the list is the correct one.\n\nOnce I have the list, the next step is to perform a semantic code search on that first repository using the semantic_code_search function. The parameters required are repositoryName, queryText, and limit. The user specified 'save game' as the query, so I'll set queryText to that. For limit, maybe default to 5 unless specified otherwise, but the user didn't mention a number, so I'll pick a reasonable default like 5.\n\nWait, the user didn't specify the limit, so maybe I should use the minimum required or check if the function allows a default. Looking at the function definition, the limit is an integer but not marked as required. Wait, no—the required fields for semantic_code_search are repositoryName, queryText, and limit. Wait, no, looking back: the required array includes repositoryName, queryText, and limit? Wait, the parameters for semantic_code_search have required as [\"repositoryName\",\"queryText\",\"limit\"], so all three are required. Oh, right, the user's query says 'search for 'save game'' but didn't mention the limit. So I need to include a limit. Since the user didn't specify, maybe I should use a default value, like 5 or 10. Let me choose 5 as a safe default.\n\nSo the steps are: call repository_list to get the list, then take the first repository name, then call semantic_code_search with that name, queryText 'save game', and limit 5.\n\nI need to make sure that the repository_list is called first, and then the search is done on the first result. So first tool call is repository_list with no arguments. Then, after getting the list, extract the first repository's name and use it in the semantic_code_search.\n" }, is_final: false, finish_reason: None, token_usage: None }
+[2025-07-19T05:55:52.447Z DEBUG test_openai_streaming] [Thinking] 
+    Okay, let me figure out how to handle this user's request. The user wants me to list all repositories first and then search for 'save game' in the first one. 
+    
+    First, I need to check the available tools. There's a function called repository_list that lists configured repositories. So I should call that first. Since the user mentioned "the first repository," I need to make sure that after getting the list, I can identify which one is first. But the repository_list might return them in a specific order, maybe the order they were added. I'll assume that the first entry in the list is the correct one.
+    
+    Once I have the list, the next step is to perform a semantic code search on that first repository using the semantic_code_search function. The parameters required are repositoryName, queryText, and limit. The user specified 'save game' as the query, so I'll set queryText to that. For limit, maybe default to 5 unless specified otherwise, but the user didn't mention a number, so I'll pick a reasonable default like 5.
+    
+    Wait, the user didn't specify the limit, so maybe I should use the minimum required or check if the function allows a default. Looking at the function definition, the limit is an integer but not marked as required. Wait, no—the required fields for semantic_code_search are repositoryName, queryText, and limit. Wait, no, looking back: the required array includes repositoryName, queryText, and limit? Wait, the parameters for semantic_code_search have required as ["repositoryName","queryText","limit"], so all three are required. Oh, right, the user's query says 'search for 'save game'' but didn't mention the limit. So I need to include a limit. Since the user didn't specify, maybe I should use a default value, like 5 or 10. Let me choose 5 as a safe default.
+    
+    So the steps are: call repository_list to get the list, then take the first repository name, then call semantic_code_search with that name, queryText 'save game', and limit 5.
+    
+    I need to make sure that the repository_list is called first, and then the search is done on the first result. So first tool call is repository_list with no arguments. Then, after getting the list, extract the first repository's name and use it in the semantic_code_search.
+    
+[2025-07-19T05:55:52.463Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x10B (267 bytes)
+[2025-07-19T05:55:52.463Z DEBUG test_openai_streaming] Chunk 2 received: StreamChunk { part: Text { text: "\n\n" }, is_final: false, finish_reason: None, token_usage: None }
+
+
+[2025-07-19T05:55:52.709Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0x286 (646 bytes)
+[2025-07-19T05:55:52.709Z DEBUG hyper::proto::h1::decode] incoming chunked header: 0xE (14 bytes)
+[2025-07-19T05:55:52.709Z DEBUG test_openai_streaming] Chunk 3 received: StreamChunk { part: ToolCall { tool_call_id: "call-af28dbbc-cad2-43a3-bc14-64cb17379335", name: "repository_list", parameters: Object {} }, is_final: false, finish_reason: None, token_usage: None }
+[2025-07-19T05:55:52.709Z INFO  test_openai_streaming] 
+    🔧 Tool call detected: repository_list
+[2025-07-19T05:55:52.709Z DEBUG test_openai_streaming] Chunk 4 received: StreamChunk { part: Text { text: "" }, is_final: true, finish_reason: Some("stop"), token_usage: None }
+[2025-07-19T05:55:52.709Z INFO  test_openai_streaming] 
+    ✅ Stream done. Finish reason: Some("stop")
+
+[2025-07-19T05:55:52.709Z INFO  test_openai_streaming] 
+    === Conversation complete ===
+[2025-07-19T05:55:52.709Z INFO  test_openai_streaming] Total chunks received: 4
+[2025-07-19T05:55:52.709Z INFO  test_openai_streaming] Had tool calls: true
+[2025-07-19T05:55:52.709Z DEBUG hyper::proto::h1::conn] incoming body completed
+[2025-07-19T05:55:52.709Z DEBUG hyper::client::pool] pooling idle connection for ("http", 0.0.0.0:1234)

@@ -37,6 +37,8 @@ use sagitta_search::qdrant_client_trait::QdrantClientTrait;
 use qdrant_client::Qdrant;
 // Qdrant collection imports removed - no longer needed after removing analyze_input tool
 
+// No longer need to spawn MCP server - tools executed directly
+
 /// Get the default conversation storage path
 pub fn get_default_conversation_storage_path() -> PathBuf {
     let mut default_path = dirs::config_dir()
@@ -44,6 +46,13 @@ pub fn get_default_conversation_storage_path() -> PathBuf {
     default_path.push("sagitta-code");
     default_path.push("conversations");
     default_path
+}
+
+/// No longer needed - tools are executed directly via internal MCP implementation
+#[allow(dead_code)]
+async fn spawn_mcp_http_server(_core_config: sagitta_search::config::AppConfig) -> Result<()> {
+    // This function is no longer used but kept for reference
+    Ok(())
 }
 
 /// Configure theme from config
@@ -220,6 +229,9 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
             (crate::config::SagittaCodeConfig::default(), sagitta_search::config::AppConfig::default())
         }
     };
+
+    // Note: MCP tools are executed directly via the internal implementation,
+    // no need to spawn a separate HTTP server
 
     // Create repository manager
     let repo_manager = create_repository_manager(core_config.clone()).await?;

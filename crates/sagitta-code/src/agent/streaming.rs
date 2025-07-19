@@ -74,9 +74,13 @@ impl StreamingProcessor {
         // Set state to thinking
         self.state_manager.set_thinking("Processing user message").await?;
         
-        // Add the user message to history
-        self.history.add_user_message(&message_text).await;
-        debug!("Added user message to history (stream).");
+        // Add the user message to history only if it's not empty (empty means continuation)
+        if !message_text.is_empty() {
+            self.history.add_user_message(&message_text).await;
+            debug!("Added user message to history (stream).");
+        } else {
+            debug!("Skipping empty message (continuation flow)");
+        }
         
         // Get all messages from history
         let messages = self.history.to_llm_messages().await;
@@ -147,9 +151,38 @@ impl StreamingProcessor {
                                             let _ = history_manager.add_message(updated).await;
                                         }
                                         
-                                        // If final, update state to idle
+                                        // If final, check finish reason to determine next steps
                                         if chunk.is_final {
-                                            let _ = state_manager.set_idle("Response complete").await;
+                                            // Check finish_reason to determine if conversation should complete
+                                            if let Some(finish_reason) = &chunk.finish_reason {
+                                                match finish_reason.as_str() {
+                                                    "stop" => {
+                                                        // Normal completion without tool calls - conversation is complete
+                                                        let _ = state_manager.set_idle("Response complete").await;
+                                                        
+                                                        // Get current conversation ID and emit completion event
+                                                        if let Ok(Some(conversation)) = history_manager.get_current_conversation().await {
+                                                            let _ = event_sender.send(AgentEvent::ConversationCompleted {
+                                                                conversation_id: conversation.id,
+                                                            });
+                                                            info!("Stream: Conversation completed (finish_reason: stop)");
+                                                        }
+                                                    },
+                                                    "tool_calls" => {
+                                                        // Tool calls were made - conversation will continue after tool execution
+                                                        let _ = state_manager.set_idle("Waiting for tool execution").await;
+                                                        info!("Stream: Response complete with tool calls - conversation will continue");
+                                                    },
+                                                    other => {
+                                                        // Handle other finish reasons (length, content_filter, etc.)
+                                                        let _ = state_manager.set_idle(&format!("Response complete: {}", other)).await;
+                                                        info!("Stream: Response complete with finish_reason: {}", other);
+                                                    }
+                                                }
+                                            } else {
+                                                // No finish reason provided, default to idle
+                                                let _ = state_manager.set_idle("Response complete").await;
+                                            }
                                         }
                                     },
                                     MessagePart::Thought { text } => {
@@ -182,7 +215,7 @@ impl StreamingProcessor {
                                             tool_calls.insert(tool_call_id.clone(), (name.clone(), tool_preview));
                                         }
                                         
-                                        // Emit tool call event to trigger tool card creation
+                                        // Create the tool call
                                         let tool_call = ToolCall {
                                             id: tool_call_id.clone(),
                                             name: name.clone(),
@@ -192,6 +225,17 @@ impl StreamingProcessor {
                                             execution_time: None,
                                         };
                                         
+                                        // CRITICAL: Add tool call to the assistant message in history
+                                        if let Some(msg) = history_manager.get_message(message_id).await {
+                                            let mut updated = msg.clone();
+                                            updated.tool_calls.push(tool_call.clone());
+                                            
+                                            let _ = history_manager.remove_message(message_id).await;
+                                            let _ = history_manager.add_message(updated).await;
+                                            info!("Stream: Added tool call to assistant message for {name}");
+                                        }
+                                        
+                                        // Emit tool call event to trigger tool card creation
                                         let _ = event_sender.send(AgentEvent::ToolCall { tool_call });
                                         
                                         info!("Stream: Emitted ToolCall event for {name}");

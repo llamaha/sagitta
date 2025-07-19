@@ -627,6 +627,11 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
             }
             app.state.current_response_id = None;
             log::info!("SagittaCodeApp: Cleared current_response_id for new user message: '{user_message}'");
+            
+            // CRITICAL FIX: Clear tool continuation tracking to prevent stale data
+            app.state.tool_calls_continued.clear();
+            app.state.completed_tool_results.clear();
+            log::info!("SagittaCodeApp: Cleared tool continuation tracking for new message");
 
             // Process the message with the agent using STREAMING
             if let Some(agent) = &app.agent {
@@ -647,15 +652,19 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
                 
                 let user_msg_clone = context_aware_message;
                 let app_event_sender_clone = app.app_event_sender.clone();
-                
-                // Always using Claude Code now
-                let is_claude_code = true;
+                let config_clone = app.config.clone();
                 
                 app.state.is_waiting_for_response = true;
                 
                 // Process in background task with STREAMING
                 tokio::spawn(async move {
-                    log::info!("Starting streaming task for user message: '{user_msg_clone}'");
+                    // Check if using Claude Code provider
+                    let current_provider = {
+                        let config_guard = config_clone.lock().await;
+                        config_guard.current_provider
+                    };
+                    let is_claude_code = current_provider == crate::providers::types::ProviderType::ClaudeCode;
+                    log::info!("Starting streaming task with provider {:?} (is_claude_code: {}) for user message: '{user_msg_clone}'", current_provider, is_claude_code);
                     
                     // Use the same streaming method as the CLI (without thinking config)
                     match agent_clone.process_message_stream(user_msg_clone).await {

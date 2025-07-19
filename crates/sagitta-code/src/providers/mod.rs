@@ -8,7 +8,7 @@ pub mod types;
 pub mod manager;
 pub mod factory;
 pub mod claude_code;
-
+pub mod claude_code_router;
 pub mod openai_compatible;
 
 // Re-export commonly used types
@@ -16,7 +16,7 @@ pub use types::{ProviderType, ProviderConfig};
 pub use manager::{ProviderManager, ProviderState};
 pub use factory::ProviderFactory;
 pub use claude_code::ClaudeCodeProvider;
-
+pub use claude_code_router::ClaudeCodeRouterProvider;
 pub use openai_compatible::OpenAICompatibleProvider;
 
 use crate::llm::client::LlmClient;

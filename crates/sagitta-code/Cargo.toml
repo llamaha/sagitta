@@ -40,6 +40,7 @@ reqwest = { version = "0.11", features = ["json", "stream"] }
 futures = "0.3"
 pin-project = "1.1"
 bytes = "1.0"
+eventsource-stream = "0.2"
 
 qdrant-client = { version = "1.14.0", features = ["serde"] }
 
@@ -47,6 +48,7 @@ qdrant-client = { version = "1.14.0", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 dirs = "5.0"
+clap = { version = "4.0", features = ["derive"] }
 dashmap = "5.5"
 tiktoken-rs = "0.5"
 regex = "1.10"
@@ -113,10 +115,16 @@ cuda = ["sagitta-embed/cuda", "sagitta-search/cuda"]
 coreml = ["sagitta-embed/coreml", "sagitta-search/coreml"]
 rocm = ["sagitta-embed/rocm", "sagitta-search/rocm"]
 directml = ["sagitta-embed/directml", "sagitta-search/directml"]
+openai-stream-cli = []  # Feature flag for test-openai-streaming binary
 
 [[bin]]
 name = "sagitta-code"
 path = "src/main.rs"
+
+[[bin]]
+name = "test-openai-streaming"
+path = "src/bin/test_openai_streaming.rs"
+required-features = ["openai-stream-cli"]
 
 [dev-dependencies]
 tokio-test = "0.4"

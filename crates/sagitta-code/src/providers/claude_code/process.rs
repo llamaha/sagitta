@@ -34,7 +34,16 @@ impl ClaudeProcess {
         mcp_config_path: Option<&str>,
     ) -> Result<Child, ClaudeCodeError> {
         log::info!("CLAUDE_CODE: Spawning claude process");
-        log::info!("CLAUDE_CODE: Binary path: {}", self.config.claude_path);
+        
+        // Determine the binary and args based on whether router is enabled
+        let (binary_path, mut args) = if self.config.use_claude_code_router {
+            log::info!("CLAUDE_CODE: Using claude-code-router (ccr)");
+            ("ccr".to_string(), vec!["code".to_string()])
+        } else {
+            log::info!("CLAUDE_CODE: Binary path: {}", self.config.claude_path);
+            (self.config.claude_path.clone(), vec![])
+        };
+        
         log::info!("CLAUDE_CODE: Model: {}", self.config.model);
         log::debug!("CLAUDE_CODE: Prompt: {prompt}");
         
@@ -121,12 +130,23 @@ impl ClaudeProcess {
         
         log::trace!("CLAUDE_CODE: Full args: {args:?}");
         
+        // Determine the actual binary and args based on whether we're using claude-code-router
+        let (binary_path, final_args) = if self.config.use_claude_code_router {
+            // Use ccr binary with "code" as the first argument
+            let mut router_args = vec!["code".to_string()];
+            router_args.extend(args);
+            ("ccr".to_string(), router_args)
+        } else {
+            // Use claude binary directly
+            (self.config.claude_path.clone(), args)
+        };
+        
         // Log the full command for debugging
-        let full_command = format!("{} {}", self.config.claude_path, args.join(" "));
+        let full_command = format!("{} {}", binary_path, final_args.join(" "));
         log::debug!("CLAUDE_CODE: Full command: {full_command}");
         
-        let mut cmd = Command::new(&self.config.claude_path);
-        cmd.args(&args)
+        let mut cmd = Command::new(&binary_path);
+        cmd.args(&final_args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -140,7 +160,7 @@ impl ClaudeProcess {
             }
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::NotFound {
-                    Err(ClaudeCodeError::BinaryNotFound(self.config.claude_path.clone()))
+                    Err(ClaudeCodeError::BinaryNotFound(binary_path))
                 } else {
                     Err(ClaudeCodeError::ProcessError(e))
                 }

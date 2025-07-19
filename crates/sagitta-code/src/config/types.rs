@@ -228,6 +228,10 @@ pub struct ClaudeCodeConfig {
     /// Automatically connect to IDE on startup
     #[serde(default)]
     pub auto_ide: bool,
+    
+    /// Use claude-code-router instead of claude-code directly
+    #[serde(default)]
+    pub use_claude_code_router: bool,
 }
 
 impl Default for ClaudeCodeConfig {
@@ -249,6 +253,7 @@ impl Default for ClaudeCodeConfig {
             additional_directories: Vec::new(),
             mcp_config: None,
             auto_ide: false,
+            use_claude_code_router: false,
         }
     }
 }

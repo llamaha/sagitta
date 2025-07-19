@@ -1,6 +1,8 @@
 // Event handling for the Sagitta Code application
 
 use uuid::{self};
+use futures_util::StreamExt;
+use std::sync::Arc;
 
 use crate::agent::message::types::{AgentMessage, ToolCall};
 use crate::agent::state::types::AgentState;
@@ -70,6 +72,12 @@ pub enum AppEvent {
         task_message: String,
     },
     CheckAndExecuteTask,
+    // Tool execution completion event for OpenAI-compatible providers
+    ToolExecutionComplete {
+        tool_call_id: String,
+        tool_name: String,
+        result: crate::agent::events::ToolResult,
+    },
     // Add other app-level UI events here if needed
 }
 
@@ -105,6 +113,8 @@ impl std::fmt::Debug for AppEvent {
             AppEvent::ExecuteTask { conversation_id, task_message } => 
                 write!(f, "ExecuteTask {{ conversation_id: {}, task_message: {} }}", conversation_id, task_message),
             AppEvent::CheckAndExecuteTask => write!(f, "CheckAndExecuteTask"),
+            AppEvent::ToolExecutionComplete { tool_call_id, tool_name, result: _ } => 
+                write!(f, "ToolExecutionComplete {{ tool_call_id: {}, tool_name: {} }}", tool_call_id, tool_name),
         }
     }
 }
@@ -189,7 +199,81 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                     );
                     
                     // Store the tool call ID for later result updates
-                    app.state.active_tool_calls.insert(tool_call.id.clone(), message_id);
+                    app.state.active_tool_calls.insert(tool_call.id.clone(), message_id.clone());
+                    
+                    // For OpenAI-compatible providers, we need to execute the tool ourselves
+                    // through the internal MCP server
+                    let should_execute_tool = if let Ok(config) = app.config.try_lock() {
+                        matches!(config.current_provider, crate::providers::ProviderType::OpenAICompatible)
+                    } else {
+                        false
+                    };
+                    
+                    log::info!("Tool call event received. Provider is OpenAI-compatible: {}, will execute: {}", 
+                        should_execute_tool, should_execute_tool);
+                    
+                    if should_execute_tool {
+                        log::info!("OpenAI-compatible provider detected, executing tool {} through internal MCP", tool_call.name);
+                        
+                        // Clone necessary data for the async task
+                        let tool_call_id = tool_call.id.clone();
+                        let tool_name = tool_call.name.clone();
+                        let tool_arguments = tool_call.arguments.clone();
+                        let message_id_clone = message_id.clone();
+                        let chat_manager_clone = app.chat_manager.clone();
+                        
+                        // Clone app_event_sender for the async task
+                        let app_event_sender_clone = app.app_event_sender.clone();
+                        
+                        // Execute tool in background task
+                        tokio::spawn(async move {
+                            // Call the internal MCP server to execute the tool
+                            log::info!("Attempting to execute tool {} through MCP server at localhost:8765", tool_name);
+                            let (success, result_json) = match execute_mcp_tool(&tool_name, tool_arguments).await {
+                                Ok(result) => {
+                                    log::info!("Tool {} executed successfully through MCP, result: {}", tool_name, 
+                                        serde_json::to_string(&result).unwrap_or_else(|_| "unparseable".to_string()));
+                                    (true, result)
+                                },
+                                Err(e) => {
+                                    log::error!("Tool {} execution failed: {}", tool_name, e);
+                                    (false, serde_json::json!({
+                                        "error": e.to_string()
+                                    }))
+                                }
+                            };
+                            
+                            // Update the tool result in the message
+                            chat_manager_clone.update_tool_result_in_message(
+                                &message_id_clone,
+                                &tool_call_id,
+                                result_json.clone(),
+                                success
+                            );
+                            
+                            // Create a ToolResult event to trigger the standard continuation flow
+                            let tool_result = if success {
+                                crate::agent::events::ToolResult::Success {
+                                    output: serde_json::to_string(&result_json).unwrap_or_default()
+                                }
+                            } else {
+                                crate::agent::events::ToolResult::Error {
+                                    error: result_json.get("error")
+                                        .and_then(|e| e.as_str())
+                                        .unwrap_or("Unknown error")
+                                        .to_string()
+                                }
+                            };
+                            
+                            // Send ToolCallComplete event through the app event system
+                            // This will trigger the standard continuation logic
+                            let _ = app_event_sender_clone.send(AppEvent::ToolExecutionComplete {
+                                tool_call_id: tool_call_id.clone(),
+                                tool_name: tool_name.clone(),
+                                result: tool_result,
+                            });
+                        });
+                    }
                 },
                 AgentEvent::ToolCallComplete { tool_call_id, tool_name, result } => {
                     log::info!("Tool call {tool_call_id} ({tool_name}) completed");
@@ -211,8 +295,127 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                             success
                         );
                         
+                        // Store tool result for adding to conversation history
+                        if !app.state.completed_tool_results.contains_key(&tool_call_id) {
+                            app.state.completed_tool_results.insert(tool_call_id.clone(), (tool_name.clone(), result.clone()));
+                        }
+                        
                         // Clean up
                         app.state.active_tool_calls.remove(&tool_call_id);
+                        
+                        // Check if all tools are complete and we need to continue the conversation
+                        // This is needed for OpenAI-compatible providers that don't handle tool execution internally
+                        // CRITICAL: Check if we've already triggered continuation for this tool call
+                        let already_continued = app.state.tool_calls_continued.get(&tool_call_id).copied().unwrap_or(false);
+                        if app.state.active_tool_calls.is_empty() && !app.state.is_waiting_for_response && !already_continued {
+                            // Check if we're using an OpenAI-compatible provider
+                            let should_continue = if let Some(agent) = &app.agent {
+                                // Get the LLM client type through the agent
+                                if let Ok(config) = app.config.try_lock() {
+                                    matches!(config.current_provider, crate::providers::ProviderType::OpenAICompatible)
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            };
+                            
+                            if should_continue {
+                                log::info!("All tools complete for OpenAI-compatible provider, triggering continuation");
+                                
+                                // Mark all completed tool calls as continued to prevent double handling
+                                for (tool_id, _) in &app.state.completed_tool_results {
+                                    app.state.tool_calls_continued.insert(tool_id.clone(), true);
+                                }
+                                
+                                // CRITICAL FIX: Add tool results to conversation history before continuation
+                                if let Some(agent) = &app.agent {
+                                    let agent_clone = agent.clone();
+                                    let app_event_sender_clone = app.app_event_sender.clone();
+                                    let completed_results = app.state.completed_tool_results.clone();
+                                    
+                                    app.state.is_waiting_for_response = true;
+                                    
+                                    // Process in background task with STREAMING
+                                    tokio::spawn(async move {
+                                        log::info!("Adding {} tool results to conversation history before continuation", completed_results.len());
+                                        
+                                        // Add each tool result to the agent's conversation history
+                                        for (tool_call_id, (tool_name, tool_result)) in completed_results.iter() {
+                                            log::info!("Adding tool result to history: {} -> {:?}", tool_call_id, tool_result);
+                                            
+                                            // Create a user message containing the tool result
+                                            let tool_result_json = match tool_result {
+                                                crate::agent::events::ToolResult::Success { output } => {
+                                                    serde_json::from_str(output).unwrap_or(serde_json::Value::String(output.clone()))
+                                                },
+                                                crate::agent::events::ToolResult::Error { error } => {
+                                                    serde_json::json!({ "error": error })
+                                                }
+                                            };
+                                            
+                                            // Add tool result to conversation history using the agent's method
+                                            if let Err(e) = agent_clone.add_tool_result_to_history(tool_call_id, tool_name, &tool_result_json).await {
+                                                log::error!("Failed to add tool result to history: {}", e);
+                                            }
+                                        }
+                                        
+                                        log::info!("Starting continuation stream after tool completion and history update");
+                                        
+                                        // Send a continuation message to help the model understand it should continue
+                                        match agent_clone.process_message_stream("Please continue analyzing the results.").await {
+                                            Ok(mut stream) => {
+                                                log::info!("Successfully created continuation stream");
+                                                let mut chunk_count = 0;
+                                                
+                                                // Consume the stream
+                                                loop {
+                                                    match tokio::time::timeout(
+                                                        std::time::Duration::from_secs(60),
+                                                        stream.next()
+                                                    ).await {
+                                                        Ok(Some(chunk_result)) => {
+                                                            chunk_count += 1;
+                                                            
+                                                            match chunk_result {
+                                                                Ok(chunk) => {
+                                                                    if chunk.is_final {
+                                                                        log::info!("Received final chunk in continuation, stream complete");
+                                                                        break;
+                                                                    }
+                                                                },
+                                                                Err(e) => {
+                                                                    log::error!("Error in continuation streaming response: {e}");
+                                                                    break;
+                                                                }
+                                                            }
+                                                        },
+                                                        Ok(None) => {
+                                                            log::info!("Continuation stream ended after {chunk_count} chunks");
+                                                            break;
+                                                        },
+                                                        Err(_timeout) => {
+                                                            log::error!("Timeout waiting for continuation chunk");
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                                
+                                                // Send completion event
+                                                let _ = app_event_sender_clone.send(AppEvent::ResponseProcessingComplete);
+                                            },
+                                            Err(e) => {
+                                                log::error!("Failed to create continuation stream: {e}");
+                                                let _ = app_event_sender_clone.send(AppEvent::ResponseProcessingComplete);
+                                            }
+                                        }
+                                    });
+                                }
+                                
+                                // Clear completed tool results after starting continuation
+                                app.state.completed_tool_results.clear();
+                            }
+                        }
                     } else {
                         log::warn!("Received tool result for unknown tool call: {tool_call_id}");
                     }
@@ -544,6 +747,163 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
             AppEvent::AgentReplaced { agent } => {
                 log::info!("Received AgentReplaced event");
                 handle_agent_replaced(app, agent);
+            },
+            AppEvent::ToolExecutionComplete { tool_call_id, tool_name, result } => {
+                log::info!("Received ToolExecutionComplete event for tool {} ({})", tool_name, tool_call_id);
+                
+                // Process it directly as if it came from the agent
+                if let Some(message_id) = app.state.active_tool_calls.get(&tool_call_id) {
+                    let success = matches!(result, crate::agent::events::ToolResult::Success { .. });
+                    let result_json = match &result {
+                        crate::agent::events::ToolResult::Success { output } => serde_json::from_str(output).unwrap_or(serde_json::Value::String(output.clone())),
+                        crate::agent::events::ToolResult::Error { error } => serde_json::json!({
+                            "error": error
+                        }),
+                    };
+                    
+                    // Store tool result for adding to conversation history (same as AgentEvent::ToolCallComplete)
+                    if !app.state.completed_tool_results.contains_key(&tool_call_id) {
+                        app.state.completed_tool_results.insert(tool_call_id.clone(), (tool_name.clone(), result.clone()));
+                    }
+                    
+                    // Clean up
+                    app.state.active_tool_calls.remove(&tool_call_id);
+                    
+                    // Check if all tools are complete and we need to continue the conversation
+                    // This is needed for OpenAI-compatible providers that don't handle tool execution internally
+                    // CRITICAL: Check if we've already triggered continuation for this tool call
+                    let already_continued = app.state.tool_calls_continued.get(&tool_call_id).copied().unwrap_or(false);
+                    if app.state.active_tool_calls.is_empty() && !app.state.is_waiting_for_response && !already_continued {
+                        // Check if we're using an OpenAI-compatible provider
+                        let should_continue = if let Some(_agent) = &app.agent {
+                            // Get the LLM client type through the agent
+                            if let Ok(config) = app.config.try_lock() {
+                                matches!(config.current_provider, crate::providers::ProviderType::OpenAICompatible)
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
+                        
+                        if should_continue {
+                            log::info!("All tools complete for OpenAI-compatible provider, triggering continuation");
+                            
+                            // Mark all completed tool calls as continued to prevent double handling
+                            for (tool_id, _) in &app.state.completed_tool_results {
+                                app.state.tool_calls_continued.insert(tool_id.clone(), true);
+                            }
+                            
+                            // CRITICAL FIX: Add all completed tool results to agent history BEFORE continuation
+                            // This is the same logic as in the CLI test tool and AgentEvent::ToolCallComplete handler
+                            let completed_results = app.state.completed_tool_results.clone();
+                            app.state.completed_tool_results.clear(); // Clear to prevent duplicate additions
+                            
+                            if let Some(agent) = &app.agent {
+                                let agent_clone = agent.clone();
+                                let app_event_sender_clone = app.app_event_sender.clone();
+                                
+                                app.state.is_waiting_for_response = true;
+                                
+                                // Process in background task with STREAMING
+                                tokio::spawn(async move {
+                                    log::info!("Starting continuation stream after tool completion");
+                                    
+                                    // CRITICAL FIX: Add tool results to conversation history before continuation
+                                    for (tool_call_id_inner, (tool_name_inner, tool_result)) in completed_results.iter() {
+                                        log::info!("Adding tool result to agent history: {} -> {:?}", tool_call_id_inner, tool_result);
+                                        
+                                        let tool_result_json = match tool_result {
+                                            crate::agent::events::ToolResult::Success { output } => {
+                                                serde_json::from_str(output).unwrap_or(serde_json::Value::String(output.clone()))
+                                            },
+                                            crate::agent::events::ToolResult::Error { error } => {
+                                                serde_json::json!({ "error": error })
+                                            }
+                                        };
+                                        
+                                        // Add tool result to conversation history using the agent's method
+                                        if let Err(e) = agent_clone.add_tool_result_to_history(tool_call_id_inner, tool_name_inner, &tool_result_json).await {
+                                            log::error!("Failed to add tool result to history: {}", e);
+                                        } else {
+                                            log::info!("Successfully added tool result to conversation history: {}", tool_call_id_inner);
+                                        }
+                                    }
+                                    
+                                    // DEBUG: Log conversation history before continuation
+                                    log::info!("DEBUG: Conversation history before continuation:");
+                                    let history = agent_clone.get_history().await;
+                                    for (i, msg) in history.iter().enumerate() {
+                                        log::info!("  Message {}: Role={:?}, Content={}, ToolCalls={}", 
+                                            i, msg.role, 
+                                            if msg.content.is_empty() { "<empty>" } else { &msg.content[..50.min(msg.content.len())] },
+                                            msg.tool_calls.len()
+                                        );
+                                        for tool_call in &msg.tool_calls {
+                                            log::info!("    Tool: {} (id: {}), Result: {}", 
+                                                tool_call.name, tool_call.id,
+                                                tool_call.result.is_some()
+                                            );
+                                        }
+                                    }
+                                    log::info!("DEBUG: Total messages in history: {}", history.len());
+                                    
+                                    // Send a continuation message to help the model understand it should continue
+                                    // Empty message might confuse the model, so we send a small prompt
+                                    log::info!("DEBUG: Calling process_message_stream with continuation prompt");
+                                    match agent_clone.process_message_stream("Please continue analyzing the results.").await {
+                                        Ok(mut stream) => {
+                                            log::info!("Successfully created continuation stream");
+                                            let mut chunk_count = 0;
+                                            
+                                            // Consume the stream
+                                            loop {
+                                                match tokio::time::timeout(
+                                                    std::time::Duration::from_secs(60),
+                                                    stream.next()
+                                                ).await {
+                                                    Ok(Some(chunk_result)) => {
+                                                        chunk_count += 1;
+                                                        
+                                                        match chunk_result {
+                                                            Ok(chunk) => {
+                                                                if chunk.is_final {
+                                                                    log::info!("Received final chunk in continuation, stream complete");
+                                                                    break;
+                                                                }
+                                                            },
+                                                            Err(e) => {
+                                                                log::error!("Error in continuation streaming response: {e}");
+                                                                break;
+                                                            }
+                                                        }
+                                                    },
+                                                    Ok(None) => {
+                                                        log::info!("Continuation stream ended after {chunk_count} chunks");
+                                                        break;
+                                                    },
+                                                    Err(_timeout) => {
+                                                        log::error!("Timeout waiting for continuation chunk");
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            
+                                            // Send completion event
+                                            let _ = app_event_sender_clone.send(AppEvent::ResponseProcessingComplete);
+                                        },
+                                        Err(e) => {
+                                            log::error!("Failed to create continuation stream: {e}");
+                                            let _ = app_event_sender_clone.send(AppEvent::ResponseProcessingComplete);
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
+                } else {
+                    log::warn!("Received tool result for unknown tool call: {}", tool_call_id);
+                }
             },
         }
     }
@@ -3047,4 +3407,78 @@ fn handle_agent_replaced(app: &mut SagittaCodeApp, new_agent: std::sync::Arc<cra
     // The provider should already be set in the config from the reinitialization
     
     log::info!("Agent replacement completed successfully");
+}
+
+/// Execute a tool through the internal MCP implementation
+async fn execute_mcp_tool(tool_name: &str, arguments: serde_json::Value) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+    use sagitta_mcp::handlers::tool::handle_tools_call;
+    use sagitta_mcp::mcp::types::CallToolParams;
+    use sagitta_search::config::load_config;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+    use qdrant_client::Qdrant;
+    
+    log::debug!("Executing tool {} with arguments: {}", tool_name, serde_json::to_string_pretty(&arguments)?);
+    
+    // Load the sagitta search config
+    let config = load_config(None).map_err(|e| format!("Failed to load config: {}", e))?;
+    let config = Arc::new(RwLock::new(config));
+    
+    // Create Qdrant client
+    let qdrant_url = {
+        let cfg = config.read().await;
+        cfg.qdrant_url.clone()
+    };
+    let qdrant_client = Qdrant::from_url(&qdrant_url).build()
+        .map_err(|e| format!("Failed to create Qdrant client: {}", e))?;
+    let qdrant_client = Arc::new(qdrant_client);
+    
+    // Create the tool call params
+    let params = CallToolParams {
+        name: tool_name.to_string(),
+        arguments,
+    };
+    
+    // Execute the tool directly using the MCP handler
+    match handle_tools_call(params, config, qdrant_client).await {
+        Ok(Some(result)) => {
+            log::debug!("Tool {} executed successfully, raw result: {}", tool_name, 
+                serde_json::to_string_pretty(&result).unwrap_or_else(|_| "unparseable".to_string()));
+            
+            // Extract the actual content from the MCP result structure
+            // MCP returns: { "content": [{"text": "...", "type": "text"}], "isError": false }
+            if let Some(content_array) = result.get("content").and_then(|v| v.as_array()) {
+                if let Some(first_content) = content_array.first() {
+                    if let Some(text) = first_content.get("text").and_then(|v| v.as_str()) {
+                        // Try to parse the text as JSON, otherwise return it as a string
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(text) {
+                            log::debug!("Parsed tool result as JSON");
+                            Ok(parsed)
+                        } else {
+                            log::debug!("Returning tool result as text");
+                            Ok(serde_json::json!({ "result": text }))
+                        }
+                    } else {
+                        // No text field, return the whole content block
+                        Ok(first_content.clone())
+                    }
+                } else {
+                    // Empty content array
+                    Ok(serde_json::json!({}))
+                }
+            } else {
+                // No content field, return the whole result
+                log::warn!("MCP result doesn't have expected 'content' field, returning raw result");
+                Ok(result)
+            }
+        }
+        Ok(None) => {
+            log::debug!("Tool {} executed successfully with no result", tool_name);
+            Ok(serde_json::json!({}))
+        }
+        Err(e) => {
+            log::error!("Tool {} execution failed: {:?}", tool_name, e);
+            Err(format!("Tool execution failed: {:?}", e).into())
+        }
+    }
 } 

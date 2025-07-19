@@ -9,6 +9,7 @@ use sagitta_search::config::{AppConfig, get_repo_base_path};
 
 use crate::config::{SagittaCodeConfig, save_config as save_sagitta_code_config};
 use crate::providers::types::ProviderType;
+use crate::providers::Provider;
 // TODO: Re-enable when claude_code module is implemented in Phase 2
 // use crate::llm::claude_code::models::CLAUDE_CODE_MODELS;
 
@@ -62,6 +63,13 @@ pub struct SettingsPanel {
     
     // Provider Settings
     pub current_provider: ProviderType,
+    
+    // OpenAI Compatible provider fields
+    pub openai_base_url: String,
+    pub openai_api_key: Option<String>,
+    pub openai_model: Option<String>,
+    pub openai_timeout_seconds: u64,
+    pub openai_max_retries: u32,
 
     
     // Test connection state
@@ -135,6 +143,21 @@ impl SettingsPanel {
             
             // Provider Settings
             current_provider: initial_sagitta_code_config.current_provider,
+            
+            // OpenAI Compatible provider fields - initialize from provider_configs if available
+            openai_base_url: initial_sagitta_code_config.provider_configs.get(&ProviderType::OpenAICompatible)
+                .and_then(|config| config.get_option::<String>("base_url").ok().flatten())
+                .unwrap_or_else(|| "http://localhost:1234/v1".to_string()),
+            openai_api_key: initial_sagitta_code_config.provider_configs.get(&ProviderType::OpenAICompatible)
+                .and_then(|config| config.get_option::<String>("api_key").ok().flatten()),
+            openai_model: initial_sagitta_code_config.provider_configs.get(&ProviderType::OpenAICompatible)
+                .and_then(|config| config.get_option::<String>("model").ok().flatten()),
+            openai_timeout_seconds: initial_sagitta_code_config.provider_configs.get(&ProviderType::OpenAICompatible)
+                .and_then(|config| config.get_option::<u64>("timeout_seconds").ok().flatten())
+                .unwrap_or(120),
+            openai_max_retries: initial_sagitta_code_config.provider_configs.get(&ProviderType::OpenAICompatible)
+                .and_then(|config| config.get_option::<u32>("max_retries").ok().flatten())
+                .unwrap_or(3),
 
             
             // Test connection state
@@ -443,7 +466,52 @@ impl SettingsPanel {
                                 },
                                 ProviderType::OpenAICompatible => {
                                     ui.collapsing("OpenAI Compatible Provider Settings", |ui| {
-                                        ui.label("OpenAI Compatible settings will be implemented here.");
+                                        Grid::new("openai_compatible_grid")
+                                            .num_columns(2)
+                                            .spacing([8.0, 8.0])
+                                            .show(ui, |ui| {
+                                                ui.label("Base URL:");
+                                                ui.text_edit_singleline(&mut self.openai_base_url)
+                                                    .on_hover_text("Base URL for the OpenAI-compatible API (e.g., http://localhost:1234/v1)");
+                                                ui.end_row();
+                                                
+                                                ui.label("API Key:");
+                                                let mut api_key_text = self.openai_api_key.clone().unwrap_or_default();
+                                                ui.add(egui::TextEdit::singleline(&mut api_key_text)
+                                                    .password(true)
+                                                    .hint_text("Optional API key for authentication"));
+                                                self.openai_api_key = if api_key_text.is_empty() { None } else { Some(api_key_text) };
+                                                ui.end_row();
+                                                
+                                                ui.label("Model:");
+                                                let mut model_text = self.openai_model.clone().unwrap_or_default();
+                                                ui.add(egui::TextEdit::singleline(&mut model_text)
+                                                    .hint_text("Optional model name (uses server default if empty)"));
+                                                self.openai_model = if model_text.is_empty() { None } else { Some(model_text) };
+                                                ui.end_row();
+                                                
+                                                ui.label("Timeout (seconds):");
+                                                ui.add(egui::DragValue::new(&mut self.openai_timeout_seconds)
+                                                    .range(1..=3600)
+                                                    .speed(10.0))
+                                                    .on_hover_text("Request timeout in seconds");
+                                                ui.end_row();
+                                                
+                                                ui.label("Max Retries:");
+                                                ui.add(egui::DragValue::new(&mut self.openai_max_retries)
+                                                    .range(0..=10))
+                                                    .on_hover_text("Maximum number of retries on failure");
+                                                ui.end_row();
+                                            });
+                                            
+                                        ui.add_space(4.0);
+                                        ui.label("Common OpenAI-compatible services:");
+                                        ui.indent("openai_examples", |ui| {
+                                            ui.label("• LM Studio: http://localhost:1234/v1");
+                                            ui.label("• Ollama: http://localhost:11434/v1");
+                                            ui.label("• Text Generation WebUI: http://localhost:5000/v1");
+                                            ui.label("• OpenRouter: https://openrouter.ai/api/v1");
+                                        });
                                     });
                                 },
                                 ProviderType::ClaudeCodeRouter => {
@@ -816,6 +884,29 @@ impl SettingsPanel {
         updated_config.current_provider = self.current_provider;
         
         // Update provider-specific configurations
+        // Update OpenAI Compatible provider config if needed
+        if self.current_provider == ProviderType::OpenAICompatible || 
+           updated_config.provider_configs.contains_key(&ProviderType::OpenAICompatible) {
+            let mut openai_config = updated_config.provider_configs
+                .get(&ProviderType::OpenAICompatible)
+                .cloned()
+                .unwrap_or_else(|| {
+                    let provider = crate::providers::openai_compatible::provider::OpenAICompatibleProvider::new();
+                    provider.default_config()
+                });
+            
+            openai_config.set_option("base_url", self.openai_base_url.clone()).ok();
+            if let Some(ref api_key) = self.openai_api_key {
+                openai_config.set_option("api_key", api_key.clone()).ok();
+            }
+            if let Some(ref model) = self.openai_model {
+                openai_config.set_option("model", model.clone()).ok();
+            }
+            openai_config.set_option("timeout_seconds", self.openai_timeout_seconds).ok();
+            openai_config.set_option("max_retries", self.openai_max_retries).ok();
+            
+            updated_config.provider_configs.insert(ProviderType::OpenAICompatible, openai_config);
+        }
         
         // Preserve all other fields
         // and all other config sections (sagitta, ui, logging) from the original
@@ -849,6 +940,11 @@ impl SettingsPanel {
         let provider_type = self.current_provider.clone();
         let claude_model = self.claude_code_model.clone();
         let claude_path = self.claude_code_path.clone();
+        let openai_base_url = self.openai_base_url.clone();
+        let openai_api_key = self.openai_api_key.clone();
+        let openai_model = self.openai_model.clone();
+        let openai_timeout_seconds = self.openai_timeout_seconds;
+        let openai_max_retries = self.openai_max_retries;
 
         
         // Spawn async task to test the connection
@@ -857,6 +953,11 @@ impl SettingsPanel {
                 provider_type,
                 claude_model,
                 claude_path,
+                openai_base_url,
+                openai_api_key,
+                openai_model,
+                openai_timeout_seconds,
+                openai_max_retries,
             ).await;
             
             // Send the result through the channel
@@ -880,13 +981,24 @@ impl SettingsPanel {
         provider_type: ProviderType,
         claude_model: String,
         claude_path: String,
+        openai_base_url: String,
+        openai_api_key: Option<String>,
+        openai_model: Option<String>,
+        openai_timeout_seconds: u64,
+        openai_max_retries: u32,
     ) -> Result<String, String> {
         match provider_type {
             ProviderType::ClaudeCode => {
                 Self::test_claude_code_connection(claude_model, claude_path).await
             },
             ProviderType::OpenAICompatible => {
-                Ok("OpenAI Compatible connection test not implemented yet".to_string())
+                Self::test_openai_compatible_connection(
+                    openai_base_url,
+                    openai_api_key,
+                    openai_model,
+                    openai_timeout_seconds,
+                    openai_max_retries,
+                ).await
             },
             ProviderType::ClaudeCodeRouter => {
                 Ok("Claude Code Router connection test not implemented yet".to_string())
@@ -946,6 +1058,95 @@ impl SettingsPanel {
             model, version_info.trim()))
     }
     
+    async fn test_openai_compatible_connection(
+        base_url: String,
+        api_key: Option<String>,
+        model: Option<String>,
+        timeout_seconds: u64,
+        max_retries: u32,
+    ) -> Result<String, String> {
+        use reqwest::Client;
+        use serde_json::json;
+        use std::time::Duration;
+        
+        log::info!("Testing OpenAI Compatible connection to: {}", base_url);
+        
+        // Create HTTP client with timeout
+        let client = Client::builder()
+            .timeout(Duration::from_secs(timeout_seconds))
+            .build()
+            .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+        
+        // First, try to get the models list endpoint if available
+        let models_url = format!("{}/models", base_url.trim_end_matches("/v1"));
+        let mut request = client.get(&models_url);
+        if let Some(ref key) = api_key {
+            request = request.bearer_auth(key);
+        }
+        
+        let models_result = request.send().await;
+        
+        // If models endpoint fails, try a simple chat completions request
+        if models_result.is_err() || !models_result.as_ref().unwrap().status().is_success() {
+            log::info!("Models endpoint not available, trying chat completions test");
+            
+            let chat_url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+            let test_payload = json!({
+                "model": model.clone().unwrap_or_else(|| "gpt-3.5-turbo".to_string()),
+                "messages": [
+                    {"role": "user", "content": "Say 'OK' to confirm the connection works."}
+                ],
+                "max_tokens": 10,
+                "temperature": 0
+            });
+            
+            let mut request = client.post(&chat_url)
+                .json(&test_payload);
+            if let Some(ref key) = api_key {
+                request = request.bearer_auth(key);
+            }
+            
+            match request.send().await {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        let response_body: serde_json::Value = response.json().await
+                            .map_err(|e| format!("Failed to parse response: {}", e))?;
+                        
+                        // Check if it's a valid OpenAI-compatible response
+                        if response_body.get("choices").is_some() {
+                            let model_used = response_body.get("model")
+                                .and_then(|m| m.as_str())
+                                .unwrap_or("unknown");
+                            return Ok(format!("OpenAI Compatible connection successful! Server: {}, Model: {}", 
+                                base_url, model_used));
+                        } else {
+                            return Err("Server response is not OpenAI-compatible format".to_string());
+                        }
+                    } else {
+                        let status = response.status();
+                        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                        return Err(format!("HTTP error {}: {}", status, error_text));
+                    }
+                },
+                Err(e) => {
+                    return Err(format!("Failed to connect to {}: {}", base_url, e));
+                }
+            }
+        } else {
+            // Models endpoint succeeded
+            let response = models_result.unwrap();
+            let models_data: serde_json::Value = response.json().await
+                .map_err(|e| format!("Failed to parse models response: {}", e))?;
+            
+            let model_count = models_data.get("data")
+                .and_then(|d| d.as_array())
+                .map(|arr| arr.len())
+                .unwrap_or(0);
+                
+            Ok(format!("OpenAI Compatible connection successful! Server: {}, Available models: {}", 
+                base_url, model_count))
+        }
+    }
 
 
     /// Apply provider changes and restart the application

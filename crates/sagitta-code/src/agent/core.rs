@@ -412,6 +412,29 @@ impl Agent {
             .map_err(|e| SagittaCodeError::Unknown(format!("Failed to list conversations: {e}")))
     }
 
+    /// Add a tool result to the conversation history
+    /// This is needed for OpenAI-compatible providers that execute tools externally
+    pub async fn add_tool_result_to_history(&self, tool_call_id: &str, tool_name: &str, result: &serde_json::Value) -> Result<(), SagittaCodeError> {
+        // Find the assistant message with this tool call and update it
+        let messages = self.history.get_messages().await;
+        for msg in messages.iter().rev() {
+            if msg.role == crate::llm::client::Role::Assistant {
+                for tool_call in &msg.tool_calls {
+                    if tool_call.id == tool_call_id {
+                        // Update the existing tool call with the result
+                        let success = self.history.add_tool_result(tool_call_id, result.clone(), !result.get("error").is_some()).await?;
+                        debug!("Updated tool call {} with result in assistant message", tool_call_id);
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        
+        // If we couldn't find the tool call in an assistant message, log an error
+        log::error!("Could not find tool call {} in any assistant message", tool_call_id);
+        Err(SagittaCodeError::Unknown(format!("Tool call {} not found in conversation history", tool_call_id)))
+    }
+
     // Added getter for StateManager's state Arc
     pub fn get_state_manager_state_info_arc(&self) -> Arc<tokio::sync::RwLock<AgentStateInfo>> {
         self.state_manager.get_state_arc()
