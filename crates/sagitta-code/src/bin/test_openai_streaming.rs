@@ -108,13 +108,13 @@ async fn run_with_agent(
     initial_prompt: String,
     interactive: bool,
 ) -> Result<()> {
-    log::info!("=== Running with Agent (better tool handling) ===");
+    log::info!("=== Running with Agent (with proper tool execution) ===");
     
     // Create tool registry
     let tool_registry = Arc::new(ToolRegistry::new());
     
     // Create event channel
-    let (tx, mut rx) = broadcast::channel(1000);
+    let (tx, rx) = broadcast::channel(1000);
     
     // Build the agent
     let agent = AgentBuilder::new(client)
@@ -124,71 +124,14 @@ async fn run_with_agent(
     // Subscribe to agent events
     agent.subscribe_to_events(tx);
     
-    // Handle events in background
-    let event_handle = tokio::spawn(async move {
-        while let Ok(event) = rx.recv().await {
-            match event {
-                sagitta_code::agent::events::AgentEvent::LlmChunk { chunk } => {
-                    match &chunk.part {
-                        MessagePart::Text { text } => print!("{}", text),
-                        MessagePart::ToolCall { name, .. } => {
-                            log::info!("\n🔧 Tool call: {}", name);
-                        }
-                        MessagePart::Thought { text } => {
-                            log::debug!("💭 Thinking: {}", text);
-                        }
-                        _ => {}
-                    }
-                }
-                sagitta_code::agent::events::AgentEvent::ToolCallExecuting { tool_call } => {
-                    log::info!("⚙️  Executing tool: {} with args: {}", 
-                        tool_call.name, 
-                        tool_call.arguments
-                    );
-                }
-                sagitta_code::agent::events::AgentEvent::ToolCallComplete { tool_name, result, .. } => {
-                    match result {
-                        sagitta_code::agent::events::ToolResult::Success { output } => {
-                            log::info!("✅ Tool {} completed successfully", tool_name);
-                            log::debug!("   Result: {}", output);
-                        }
-                        sagitta_code::agent::events::ToolResult::Error { error } => {
-                            log::error!("❌ Tool {} failed: {}", tool_name, error);
-                        }
-                    }
-                }
-                sagitta_code::agent::events::AgentEvent::StateChanged(state) => {
-                    log::debug!("🔄 Agent state: {:?}", state);
-                }
-                _ => {}
-            }
-        }
-    });
+    // Create test CLI with tool execution capabilities
+    let mut test_cli = TestCLI::new(agent, rx).await;
     
     // Process initial message
     log::info!("\nUser: {}", initial_prompt);
     log::info!("Assistant:");
     
-    let mut stream = agent.process_message_stream(&initial_prompt).await?;
-    
-    // Process stream
-    tokio::pin!(stream);
-    while let Some(chunk_result) = stream.next().await {
-        match chunk_result {
-            Ok(chunk) => {
-                if chunk.is_final {
-                    log::debug!("\n✅ Stream complete: {:?}", chunk.finish_reason);
-                    break;
-                }
-            }
-            Err(e) => {
-                log::error!("Stream error: {}", e);
-                return Err(anyhow::anyhow!("Stream error: {}", e));
-            }
-        }
-    }
-    
-    println!(); // New line after response
+    test_cli.process_message(&initial_prompt).await?;
     
     if interactive {
         // Interactive mode for testing tool chaining
@@ -205,32 +148,301 @@ async fn run_with_agent(
             log::info!("\nUser: {}", input);
             log::info!("Assistant:");
             
-            let mut stream = agent.process_message_stream(input).await?;
-            
-            tokio::pin!(stream);
-            while let Some(chunk_result) = stream.next().await {
-                match chunk_result {
-                    Ok(chunk) => {
-                        if chunk.is_final {
-                            log::debug!("\n✅ Stream complete: {:?}", chunk.finish_reason);
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("Stream error: {}", e);
-                        break;
-                    }
-                }
-            }
-            
-            println!(); // New line after response
+            test_cli.process_message(input).await?;
         }
     }
     
-    // Cancel event handler
-    event_handle.abort();
-    
     Ok(())
+}
+
+/// Test CLI that handles tool execution like the GUI
+struct TestCLI {
+    agent: Arc<sagitta_code::agent::core::Agent>,
+    event_receiver: broadcast::Receiver<sagitta_code::agent::events::AgentEvent>,
+    active_tool_calls: HashMap<String, String>, // tool_call_id -> message_id
+}
+
+impl TestCLI {
+    async fn new(
+        agent: Arc<sagitta_code::agent::core::Agent>,
+        event_receiver: broadcast::Receiver<sagitta_code::agent::events::AgentEvent>,
+    ) -> Self {
+        Self {
+            agent,
+            event_receiver,
+            active_tool_calls: HashMap::new(),
+        }
+    }
+    
+    async fn process_message(&mut self, input: &str) -> Result<()> {
+        // Start the agent processing
+        let stream = self.agent.process_message_stream(input).await?;
+        
+        // Handle stream and events concurrently
+        tokio::pin!(stream);
+        loop {
+            tokio::select! {
+                // Process stream chunks
+                chunk_result = stream.next() => {
+                    match chunk_result {
+                        Some(Ok(chunk)) => {
+                            if chunk.is_final {
+                                log::debug!("\n✅ Stream complete: {:?}", chunk.finish_reason);
+                                break;
+                            }
+                        }
+                        Some(Err(e)) => {
+                            log::error!("Stream error: {}", e);
+                            return Err(anyhow::anyhow!("Stream error: {}", e));
+                        }
+                        None => {
+                            log::debug!("Stream ended");
+                            break;
+                        }
+                    }
+                }
+                
+                // Handle agent events
+                event_result = self.event_receiver.recv() => {
+                    match event_result {
+                        Ok(event) => {
+                            if let Err(e) = self.handle_agent_event(event).await {
+                                log::error!("Error handling agent event: {}", e);
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            log::debug!("Event channel closed");
+                            break;
+                        }
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            log::warn!("Skipped {} events due to lag", skipped);
+                        }
+                    }
+                }
+            }
+        }
+        
+        println!(); // New line after response
+        Ok(())
+    }
+    
+    async fn handle_agent_event(&mut self, event: sagitta_code::agent::events::AgentEvent) -> Result<()> {
+        match event {
+            sagitta_code::agent::events::AgentEvent::LlmChunk { chunk } => {
+                match &chunk.part {
+                    MessagePart::Text { text } => print!("{}", text),
+                    MessagePart::ToolCall { name, .. } => {
+                        log::info!("\n🔧 Tool call: {}", name);
+                    }
+                    MessagePart::Thought { text } => {
+                        log::debug!("💭 Thinking: {}", text);
+                    }
+                    _ => {}
+                }
+            }
+            
+            sagitta_code::agent::events::AgentEvent::ToolCall { tool_call, message_id } => {
+                log::info!("🛠️  Tool call received: {} (id: {})", tool_call.name, tool_call.id);
+                self.execute_tool(tool_call, message_id).await?;
+            }
+            
+            sagitta_code::agent::events::AgentEvent::ToolCallComplete { tool_call_id, tool_name, result } => {
+                log::info!("✅ Tool call complete: {} (id: {})", tool_name, tool_call_id);
+                self.handle_tool_completion(tool_call_id, tool_name, result).await?;
+            }
+            
+            sagitta_code::agent::events::AgentEvent::StateChanged(state) => {
+                log::debug!("🔄 Agent state: {:?}", state);
+            }
+            
+            _ => {}
+        }
+        
+        Ok(())
+    }
+    
+    async fn execute_tool(
+        &mut self,
+        tool_call: sagitta_code::agent::message::types::ToolCall,
+        message_id: String,
+    ) -> Result<()> {
+        // Store active tool call
+        self.active_tool_calls.insert(tool_call.id.clone(), message_id);
+        
+        let tool_call_id = tool_call.id.clone();
+        let tool_name = tool_call.name.clone();
+        let agent = self.agent.clone();
+        
+        // Execute tool in background using same logic as GUI
+        tokio::spawn(async move {
+            log::info!("🚀 Executing tool {} through MCP", tool_name);
+            
+            let (success, result_json) = match execute_mcp_tool(&tool_name, tool_call.arguments).await {
+                Ok(result) => {
+                    log::info!("✅ Tool {} executed successfully", tool_name);
+                    log::debug!("   Result: {}", serde_json::to_string_pretty(&result).unwrap_or_default());
+                    (true, result)
+                },
+                Err(e) => {
+                    log::error!("❌ Tool {} execution failed: {}", tool_name, e);
+                    (false, serde_json::json!({
+                        "error": e.to_string()
+                    }))
+                }
+            };
+            
+            // Add tool result to conversation history (CRITICAL FIX)
+            if let Err(e) = agent.add_tool_result_to_history(&tool_call_id, &tool_name, &result_json).await {
+                log::error!("Failed to add tool result to history: {}", e);
+            } else {
+                log::info!("📝 Added tool result to conversation history");
+            }
+            
+            // TODO: Trigger continuation if this was the last tool
+            // For now, we'll rely on the agent to continue automatically
+        });
+        
+        Ok(())
+    }
+    
+    async fn handle_tool_completion(
+        &mut self,
+        tool_call_id: String,
+        tool_name: String,
+        result: sagitta_code::agent::events::ToolResult,
+    ) -> Result<()> {
+        // Remove from active tools
+        self.active_tool_calls.remove(&tool_call_id);
+        
+        match result {
+            sagitta_code::agent::events::ToolResult::Success { output } => {
+                log::info!("✅ Tool {} completed successfully", tool_name);
+                log::debug!("   Result: {}", output);
+            }
+            sagitta_code::agent::events::ToolResult::Error { error } => {
+                log::error!("❌ Tool {} failed: {}", tool_name, error);
+            }
+        }
+        
+        // If all tools are complete, trigger continuation
+        if self.active_tool_calls.is_empty() {
+            log::info!("🔄 All tools complete, triggering continuation...");
+            
+            // Trigger continuation with empty message like the GUI does
+            let agent = self.agent.clone();
+            tokio::spawn(async move {
+                match agent.process_message_stream("").await {
+                    Ok(mut stream) => {
+                        log::info!("📡 Processing continuation stream...");
+                        
+                        // Process the continuation stream
+                        while let Some(chunk_result) = stream.next().await {
+                            match chunk_result {
+                                Ok(chunk) => {
+                                    // Handle continuation chunks
+                                    match &chunk.part {
+                                        MessagePart::Text { text } => print!("{}", text),
+                                        MessagePart::ToolCall { name, .. } => {
+                                            log::info!("\n🔧 Continuation tool call: {}", name);
+                                        }
+                                        _ => {}
+                                    }
+                                    
+                                    if chunk.is_final {
+                                        log::debug!("\n✅ Continuation complete: {:?}", chunk.finish_reason);
+                                        break;
+                                    }
+                                }
+                                Err(e) => {
+                                    log::error!("Continuation stream error: {}", e);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to create continuation stream: {}", e);
+                    }
+                }
+            });
+        }
+        
+        Ok(())
+    }
+}
+
+/// Execute MCP tool (copied from GUI events.rs)
+async fn execute_mcp_tool(tool_name: &str, arguments: serde_json::Value) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+    use sagitta_mcp::handlers::tool::handle_tools_call;
+    use sagitta_mcp::mcp::types::CallToolParams;
+    use sagitta_search::config::load_config;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+    use qdrant_client::Qdrant;
+    
+    log::debug!("Executing tool {} with arguments: {}", tool_name, serde_json::to_string_pretty(&arguments)?);
+    
+    // Load the sagitta search config
+    let config = load_config(None).map_err(|e| format!("Failed to load config: {}", e))?;
+    let config = Arc::new(RwLock::new(config));
+    
+    // Create Qdrant client
+    let qdrant_url = {
+        let cfg = config.read().await;
+        cfg.qdrant_url.clone()
+    };
+    let qdrant_client = Qdrant::from_url(&qdrant_url).build()
+        .map_err(|e| format!("Failed to create Qdrant client: {}", e))?;
+    let qdrant_client = Arc::new(qdrant_client);
+    
+    // Create the tool call params
+    let params = CallToolParams {
+        name: tool_name.to_string(),
+        arguments,
+    };
+    
+    // Execute the tool directly using the MCP handler
+    match handle_tools_call(params, config, qdrant_client).await {
+        Ok(Some(result)) => {
+            log::debug!("Tool {} executed successfully, raw result: {}", tool_name, 
+                serde_json::to_string_pretty(&result).unwrap_or_else(|_| "unparseable".to_string()));
+            
+            // Extract the actual content from the MCP result structure
+            // MCP returns: { "content": [{"text": "...", "type": "text"}], "isError": false }
+            if let Some(content_array) = result.get("content").and_then(|v| v.as_array()) {
+                if let Some(first_content) = content_array.first() {
+                    if let Some(text) = first_content.get("text").and_then(|v| v.as_str()) {
+                        // Try to parse the text as JSON, otherwise return it as a string
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(text) {
+                            log::debug!("Parsed tool result as JSON");
+                            Ok(parsed)
+                        } else {
+                            log::debug!("Returning tool result as text");
+                            Ok(serde_json::json!({ "result": text }))
+                        }
+                    } else {
+                        // No text field, return the whole content block
+                        Ok(first_content.clone())
+                    }
+                } else {
+                    // Empty content array
+                    Ok(serde_json::json!({}))
+                }
+            } else {
+                // No content field, return the whole result
+                log::warn!("MCP result doesn't have expected 'content' field, returning raw result");
+                Ok(result)
+            }
+        }
+        Ok(None) => {
+            log::debug!("Tool {} executed successfully with no result", tool_name);
+            Ok(serde_json::json!({}))
+        }
+        Err(e) => {
+            log::error!("Tool {} execution failed: {:?}", tool_name, e);
+            Err(format!("Tool execution failed: {:?}", e).into())
+        }
+    }
 }
 
 async fn run_direct_llm(
