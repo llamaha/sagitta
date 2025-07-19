@@ -3224,8 +3224,35 @@ async fn execute_mcp_tool(tool_name: &str, arguments: serde_json::Value) -> Resu
     // Execute the tool directly using the MCP handler
     match handle_tools_call(params, config, qdrant_client).await {
         Ok(Some(result)) => {
-            log::debug!("Tool {} executed successfully", tool_name);
-            Ok(result)
+            log::debug!("Tool {} executed successfully, raw result: {}", tool_name, 
+                serde_json::to_string_pretty(&result).unwrap_or_else(|_| "unparseable".to_string()));
+            
+            // Extract the actual content from the MCP result structure
+            // MCP returns: { "content": [{"text": "...", "type": "text"}], "isError": false }
+            if let Some(content_array) = result.get("content").and_then(|v| v.as_array()) {
+                if let Some(first_content) = content_array.first() {
+                    if let Some(text) = first_content.get("text").and_then(|v| v.as_str()) {
+                        // Try to parse the text as JSON, otherwise return it as a string
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(text) {
+                            log::debug!("Parsed tool result as JSON");
+                            Ok(parsed)
+                        } else {
+                            log::debug!("Returning tool result as text");
+                            Ok(serde_json::json!({ "result": text }))
+                        }
+                    } else {
+                        // No text field, return the whole content block
+                        Ok(first_content.clone())
+                    }
+                } else {
+                    // Empty content array
+                    Ok(serde_json::json!({}))
+                }
+            } else {
+                // No content field, return the whole result
+                log::warn!("MCP result doesn't have expected 'content' field, returning raw result");
+                Ok(result)
+            }
         }
         Ok(None) => {
             log::debug!("Tool {} executed successfully with no result", tool_name);
