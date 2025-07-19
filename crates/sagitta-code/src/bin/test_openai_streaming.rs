@@ -2,17 +2,12 @@ use anyhow::Result;
 use clap::Parser;
 use futures_util::StreamExt;
 use std::sync::Arc;
-use std::collections::HashMap;
-
 use sagitta_code::providers::{ProviderFactory, ProviderType, ProviderConfig};
 use sagitta_code::providers::claude_code::mcp_integration::McpIntegration;
-use sagitta_code::llm::client::{Message, MessagePart, Role, LlmClient, ToolDefinition, ToolCall};
-use sagitta_code::agent::AgentBuilder;
-use sagitta_code::tools::registry::ToolRegistry;
-use sagitta_code::utils::errors::SagittaCodeError;
+use sagitta_code::llm::client::{Message, MessagePart, Role, LlmClient, ToolDefinition};
+use sagitta_code::agent::message::types::ToolCall;
 use uuid::Uuid;
 use serde_json::json;
-use tokio::sync::broadcast;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -94,10 +89,10 @@ async fn main() -> Result<()> {
 
     if args.use_agent {
         // Use the Agent for better tool handling
-        run_with_agent(client, args.prompt, args.interactive).await?;
+        run_with_agent(Arc::from(client), args.prompt, args.interactive).await?;
     } else {
         // Use direct LLM client (original behavior) 
-        run_direct_llm(client, args.prompt, args.interactive).await?;
+        run_direct_llm(Arc::from(client), args.prompt, args.interactive).await?;
     }
     
     Ok(())
@@ -109,33 +104,217 @@ async fn run_with_agent(
     interactive: bool,
 ) -> Result<()> {
     log::info!("=== Running with Agent (with proper tool execution) ===");
+    log::info!("Note: Using simplified approach focused on tool execution testing");
     
-    // Create tool registry
-    let tool_registry = Arc::new(ToolRegistry::new());
+    // For now, use the direct LLM approach with proper tool execution
+    // TODO: Implement full Agent integration once we get tool execution working
+    run_direct_llm_with_tool_execution(client, initial_prompt, interactive).await
+}
+
+async fn run_direct_llm_with_tool_execution(
+    client: Arc<dyn LlmClient>,
+    initial_prompt: String,
+    interactive: bool,
+) -> Result<()> {
+    log::info!("=== Running with direct LLM client + proper tool execution ===");
     
-    // Create event channel
-    let (tx, rx) = broadcast::channel(1000);
-    
-    // Build the agent
-    let agent = AgentBuilder::new(client)
-        .with_tool_registry(tool_registry)
-        .build();
-    
-    // Subscribe to agent events
-    agent.subscribe_to_events(tx);
-    
-    // Create test CLI with tool execution capabilities
-    let mut test_cli = TestCLI::new(agent, rx).await;
-    
-    // Process initial message
-    log::info!("\nUser: {}", initial_prompt);
-    log::info!("Assistant:");
-    
-    test_cli.process_message(&initial_prompt).await?;
-    
-    if interactive {
-        // Interactive mode for testing tool chaining
-        loop {
+    // Create messages
+    let mut messages = vec![
+        Message {
+            id: Uuid::new_v4(),
+            role: Role::System,
+            parts: vec![MessagePart::Text {
+                text: "You are a helpful AI assistant with access to tools. When you use tools, you should continue after receiving the results to complete the user's request.".to_string()
+            }],
+            metadata: Default::default(),
+        },
+        Message {
+            id: Uuid::new_v4(),
+            role: Role::User,
+            parts: vec![MessagePart::Text {
+                text: initial_prompt.clone()
+            }],
+            metadata: Default::default(),
+        }
+    ];
+
+    // Define some tools
+    let tools = vec![
+        ToolDefinition {
+            name: "ping".to_string(),
+            description: "Checks if the server is responsive.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+            is_required: false,
+        },
+        ToolDefinition {
+            name: "repository_list".to_string(),
+            description: "Lists currently configured repositories.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+            is_required: false,
+        },
+        ToolDefinition {
+            name: "shell_execute".to_string(),
+            description: "Executes shell commands with cross-platform support.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "command": { "type": "string", "description": "The command to execute" },
+                    "working_directory": { "type": "string", "description": "Optional working directory" },
+                    "timeout_ms": { "type": "integer", "description": "Optional timeout in milliseconds" }
+                },
+                "required": ["command"]
+            }),
+            is_required: false,
+        },
+        ToolDefinition {
+            name: "semantic_code_search".to_string(),
+            description: "Performs semantic search on an indexed repository.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "repositoryName": { "type": "string", "description": "Name of the repository to query" },
+                    "queryText": { "type": "string", "description": "The natural language query text" },
+                    "limit": { "type": "integer", "description": "Maximum number of results to return" }
+                },
+                "required": ["repositoryName", "queryText", "limit"]
+            }),
+            is_required: false,
+        },
+    ];
+
+    log::info!("\n=== Starting conversation ===");
+    log::info!("User: {}", initial_prompt);
+
+    // Run conversation loop
+    loop {
+        // Generate stream
+        let mut stream = client.generate_stream(&messages, &tools).await?;
+        
+        log::info!("Streaming response...");
+        
+        let mut chunk_count = 0;
+        let mut tool_calls: Vec<ToolCall> = Vec::new();
+        let mut response_text = String::new();
+        let mut current_message_id = Uuid::new_v4();
+        
+        // Process the stream
+        tokio::pin!(stream);
+        while let Some(chunk_result) = stream.next().await {
+            match chunk_result {
+                Ok(chunk) => {
+                    chunk_count += 1;
+                    log::debug!("Chunk {} received: {:?}", chunk_count, chunk);
+                    
+                    match &chunk.part {
+                        MessagePart::Text { text } => {
+                            print!("{}", text);
+                            response_text.push_str(text);
+                        }
+                        MessagePart::ToolCall { tool_call_id, name, parameters } => {
+                            log::info!("\n🔧 Tool call detected: {}", name);
+                            tool_calls.push(ToolCall {
+                                id: tool_call_id.clone(),
+                                name: name.clone(),
+                                arguments: parameters.clone(),
+                                result: None,
+                                successful: false,
+                                execution_time: None,
+                            });
+                        }
+                        MessagePart::Thought { text } => {
+                            log::debug!("[Thinking] {}", text);
+                        }
+                        _ => {}
+                    }
+                    
+                    // Note: StreamChunk doesn't have message_id field, using UUID per chunk
+                    current_message_id = Uuid::new_v4();
+                    
+                    if chunk.is_final {
+                        log::info!("\n✅ Stream done. Finish reason: {:?}", chunk.finish_reason);
+                        break;
+                    }
+                }
+                Err(e) => {
+                    log::error!("Stream error: {}", e);
+                    return Err(anyhow::anyhow!("Stream error: {}", e));
+                }
+            }
+        }
+        
+        println!(); // New line after streaming
+        
+        // Add assistant response to messages
+        let mut assistant_parts = vec![];
+        if !response_text.is_empty() {
+            assistant_parts.push(MessagePart::Text { text: response_text });
+        }
+        for tool_call in &tool_calls {
+            assistant_parts.push(MessagePart::ToolCall {
+                tool_call_id: tool_call.id.clone(),
+                name: tool_call.name.clone(),
+                parameters: tool_call.arguments.clone(),
+            });
+        }
+        
+        messages.push(Message {
+            id: current_message_id,
+            role: Role::Assistant,
+            parts: assistant_parts,
+            metadata: Default::default(),
+        });
+        
+        // If there were tool calls, execute them and continue
+        if !tool_calls.is_empty() {
+            log::info!("\n=== Executing {} tool calls ===", tool_calls.len());
+            
+            for tool_call in tool_calls {
+                log::info!("🚀 Executing tool: {} with args: {}", tool_call.name, tool_call.arguments);
+                
+                // CRITICAL FIX: Execute tools via MCP like the GUI does
+                let result_json = match execute_mcp_tool(&tool_call.name, tool_call.arguments).await {
+                    Ok(result) => {
+                        log::info!("✅ Tool {} executed successfully", tool_call.name);
+                        log::debug!("   Result: {}", serde_json::to_string_pretty(&result).unwrap_or_default());
+                        result
+                    },
+                    Err(e) => {
+                        log::error!("❌ Tool {} execution failed: {}", tool_call.name, e);
+                        json!({ "error": e.to_string() })
+                    }
+                };
+                
+                // Add tool result message to conversation history (CRITICAL FIX)
+                messages.push(Message {
+                    id: Uuid::new_v4(),
+                    role: Role::Function,
+                    parts: vec![MessagePart::ToolResult {
+                        tool_call_id: tool_call.id.clone(),
+                        name: tool_call.name.clone(),
+                        result: result_json.clone(),
+                    }],
+                    metadata: Default::default(),
+                });
+                
+                log::info!("📝 Added tool result to conversation history");
+                log::debug!("Tool result: {}", serde_json::to_string_pretty(&result_json)?);
+            }
+            
+            log::info!("\n=== All tools executed, continuing conversation ===");
+            // Continue the loop to process tool results
+            continue;
+        }
+        
+        // No tool calls, check if we should continue interactively
+        if interactive {
             log::info!("\nEnter next prompt (or 'quit' to exit):");
             let mut input = String::new();
             std::io::stdin().read_line(&mut input)?;
@@ -145,230 +324,23 @@ async fn run_with_agent(
                 break;
             }
             
-            log::info!("\nUser: {}", input);
-            log::info!("Assistant:");
+            messages.push(Message {
+                id: Uuid::new_v4(),
+                role: Role::User,
+                parts: vec![MessagePart::Text { text: input.to_string() }],
+                metadata: Default::default(),
+            });
             
-            test_cli.process_message(input).await?;
+            log::info!("\nUser: {}", input);
+        } else {
+            break;
         }
     }
+    
+    log::info!("\n=== Conversation complete ===");
+    log::info!("Total messages in history: {}", messages.len());
     
     Ok(())
-}
-
-/// Test CLI that handles tool execution like the GUI
-struct TestCLI {
-    agent: Arc<sagitta_code::agent::core::Agent>,
-    event_receiver: broadcast::Receiver<sagitta_code::agent::events::AgentEvent>,
-    active_tool_calls: HashMap<String, String>, // tool_call_id -> message_id
-}
-
-impl TestCLI {
-    async fn new(
-        agent: Arc<sagitta_code::agent::core::Agent>,
-        event_receiver: broadcast::Receiver<sagitta_code::agent::events::AgentEvent>,
-    ) -> Self {
-        Self {
-            agent,
-            event_receiver,
-            active_tool_calls: HashMap::new(),
-        }
-    }
-    
-    async fn process_message(&mut self, input: &str) -> Result<()> {
-        // Start the agent processing
-        let stream = self.agent.process_message_stream(input).await?;
-        
-        // Handle stream and events concurrently
-        tokio::pin!(stream);
-        loop {
-            tokio::select! {
-                // Process stream chunks
-                chunk_result = stream.next() => {
-                    match chunk_result {
-                        Some(Ok(chunk)) => {
-                            if chunk.is_final {
-                                log::debug!("\n✅ Stream complete: {:?}", chunk.finish_reason);
-                                break;
-                            }
-                        }
-                        Some(Err(e)) => {
-                            log::error!("Stream error: {}", e);
-                            return Err(anyhow::anyhow!("Stream error: {}", e));
-                        }
-                        None => {
-                            log::debug!("Stream ended");
-                            break;
-                        }
-                    }
-                }
-                
-                // Handle agent events
-                event_result = self.event_receiver.recv() => {
-                    match event_result {
-                        Ok(event) => {
-                            if let Err(e) = self.handle_agent_event(event).await {
-                                log::error!("Error handling agent event: {}", e);
-                            }
-                        }
-                        Err(broadcast::error::RecvError::Closed) => {
-                            log::debug!("Event channel closed");
-                            break;
-                        }
-                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                            log::warn!("Skipped {} events due to lag", skipped);
-                        }
-                    }
-                }
-            }
-        }
-        
-        println!(); // New line after response
-        Ok(())
-    }
-    
-    async fn handle_agent_event(&mut self, event: sagitta_code::agent::events::AgentEvent) -> Result<()> {
-        match event {
-            sagitta_code::agent::events::AgentEvent::LlmChunk { chunk } => {
-                match &chunk.part {
-                    MessagePart::Text { text } => print!("{}", text),
-                    MessagePart::ToolCall { name, .. } => {
-                        log::info!("\n🔧 Tool call: {}", name);
-                    }
-                    MessagePart::Thought { text } => {
-                        log::debug!("💭 Thinking: {}", text);
-                    }
-                    _ => {}
-                }
-            }
-            
-            sagitta_code::agent::events::AgentEvent::ToolCall { tool_call, message_id } => {
-                log::info!("🛠️  Tool call received: {} (id: {})", tool_call.name, tool_call.id);
-                self.execute_tool(tool_call, message_id).await?;
-            }
-            
-            sagitta_code::agent::events::AgentEvent::ToolCallComplete { tool_call_id, tool_name, result } => {
-                log::info!("✅ Tool call complete: {} (id: {})", tool_name, tool_call_id);
-                self.handle_tool_completion(tool_call_id, tool_name, result).await?;
-            }
-            
-            sagitta_code::agent::events::AgentEvent::StateChanged(state) => {
-                log::debug!("🔄 Agent state: {:?}", state);
-            }
-            
-            _ => {}
-        }
-        
-        Ok(())
-    }
-    
-    async fn execute_tool(
-        &mut self,
-        tool_call: sagitta_code::agent::message::types::ToolCall,
-        message_id: String,
-    ) -> Result<()> {
-        // Store active tool call
-        self.active_tool_calls.insert(tool_call.id.clone(), message_id);
-        
-        let tool_call_id = tool_call.id.clone();
-        let tool_name = tool_call.name.clone();
-        let agent = self.agent.clone();
-        
-        // Execute tool in background using same logic as GUI
-        tokio::spawn(async move {
-            log::info!("🚀 Executing tool {} through MCP", tool_name);
-            
-            let (success, result_json) = match execute_mcp_tool(&tool_name, tool_call.arguments).await {
-                Ok(result) => {
-                    log::info!("✅ Tool {} executed successfully", tool_name);
-                    log::debug!("   Result: {}", serde_json::to_string_pretty(&result).unwrap_or_default());
-                    (true, result)
-                },
-                Err(e) => {
-                    log::error!("❌ Tool {} execution failed: {}", tool_name, e);
-                    (false, serde_json::json!({
-                        "error": e.to_string()
-                    }))
-                }
-            };
-            
-            // Add tool result to conversation history (CRITICAL FIX)
-            if let Err(e) = agent.add_tool_result_to_history(&tool_call_id, &tool_name, &result_json).await {
-                log::error!("Failed to add tool result to history: {}", e);
-            } else {
-                log::info!("📝 Added tool result to conversation history");
-            }
-            
-            // TODO: Trigger continuation if this was the last tool
-            // For now, we'll rely on the agent to continue automatically
-        });
-        
-        Ok(())
-    }
-    
-    async fn handle_tool_completion(
-        &mut self,
-        tool_call_id: String,
-        tool_name: String,
-        result: sagitta_code::agent::events::ToolResult,
-    ) -> Result<()> {
-        // Remove from active tools
-        self.active_tool_calls.remove(&tool_call_id);
-        
-        match result {
-            sagitta_code::agent::events::ToolResult::Success { output } => {
-                log::info!("✅ Tool {} completed successfully", tool_name);
-                log::debug!("   Result: {}", output);
-            }
-            sagitta_code::agent::events::ToolResult::Error { error } => {
-                log::error!("❌ Tool {} failed: {}", tool_name, error);
-            }
-        }
-        
-        // If all tools are complete, trigger continuation
-        if self.active_tool_calls.is_empty() {
-            log::info!("🔄 All tools complete, triggering continuation...");
-            
-            // Trigger continuation with empty message like the GUI does
-            let agent = self.agent.clone();
-            tokio::spawn(async move {
-                match agent.process_message_stream("").await {
-                    Ok(mut stream) => {
-                        log::info!("📡 Processing continuation stream...");
-                        
-                        // Process the continuation stream
-                        while let Some(chunk_result) = stream.next().await {
-                            match chunk_result {
-                                Ok(chunk) => {
-                                    // Handle continuation chunks
-                                    match &chunk.part {
-                                        MessagePart::Text { text } => print!("{}", text),
-                                        MessagePart::ToolCall { name, .. } => {
-                                            log::info!("\n🔧 Continuation tool call: {}", name);
-                                        }
-                                        _ => {}
-                                    }
-                                    
-                                    if chunk.is_final {
-                                        log::debug!("\n✅ Continuation complete: {:?}", chunk.finish_reason);
-                                        break;
-                                    }
-                                }
-                                Err(e) => {
-                                    log::error!("Continuation stream error: {}", e);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("Failed to create continuation stream: {}", e);
-                    }
-                }
-            });
-        }
-        
-        Ok(())
-    }
 }
 
 /// Execute MCP tool (copied from GUI events.rs)
@@ -538,12 +510,15 @@ async fn run_direct_llm(
                             print!("{}", text);
                             response_text.push_str(text);
                         }
-                        MessagePart::ToolCall { id, name, arguments } => {
+                        MessagePart::ToolCall { tool_call_id, name, parameters } => {
                             log::info!("\n🔧 Tool call detected: {}", name);
                             tool_calls.push(ToolCall {
-                                id: id.clone(),
+                                id: tool_call_id.clone(),
                                 name: name.clone(),
-                                arguments: arguments.clone(),
+                                arguments: parameters.clone(),
+                                result: None,
+                                successful: false,
+                                execution_time: None,
                             });
                         }
                         MessagePart::Thought { text } => {
@@ -552,9 +527,8 @@ async fn run_direct_llm(
                         _ => {}
                     }
                     
-                    if let Some(id) = chunk.message_id {
-                        current_message_id = id;
-                    }
+                    // Note: StreamChunk doesn't have message_id field, using UUID per chunk
+                    current_message_id = Uuid::new_v4();
                     
                     if chunk.is_final {
                         log::info!("\n✅ Stream done. Finish reason: {:?}", chunk.finish_reason);
@@ -577,9 +551,9 @@ async fn run_direct_llm(
         }
         for tool_call in &tool_calls {
             assistant_parts.push(MessagePart::ToolCall {
-                id: tool_call.id.clone(),
+                tool_call_id: tool_call.id.clone(),
                 name: tool_call.name.clone(),
-                arguments: tool_call.arguments.clone(),
+                parameters: tool_call.arguments.clone(),
             });
         }
         
@@ -607,7 +581,7 @@ async fn run_direct_llm(
                         ]
                     }),
                     "semantic_code_search" => {
-                        let args: serde_json::Value = serde_json::from_str(&tool_call.arguments)?;
+                        let args = &tool_call.arguments;
                         json!({
                             "results": [
                                 {
@@ -627,12 +601,11 @@ async fn run_direct_llm(
                 // Add tool result message
                 messages.push(Message {
                     id: Uuid::new_v4(),
-                    role: Role::ToolResult,
+                    role: Role::Function,
                     parts: vec![MessagePart::ToolResult {
                         tool_call_id: tool_call.id.clone(),
-                        tool_name: tool_call.name.clone(),
+                        name: tool_call.name.clone(),
                         result: result.clone(),
-                        is_error: result.get("error").is_some(),
                     }],
                     metadata: Default::default(),
                 });
