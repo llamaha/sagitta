@@ -412,6 +412,34 @@ impl Agent {
             .map_err(|e| SagittaCodeError::Unknown(format!("Failed to list conversations: {e}")))
     }
 
+    /// Add a tool result to the conversation history
+    /// This is needed for OpenAI-compatible providers that execute tools externally
+    pub async fn add_tool_result_to_history(&self, tool_call_id: &str, tool_name: &str, result: &serde_json::Value) -> Result<(), SagittaCodeError> {
+        // Create a Function role message with the tool result
+        let tool_result_message = AgentMessage {
+            id: Uuid::new_v4(),
+            role: crate::llm::client::Role::Function,
+            content: String::new(),
+            is_streaming: false,
+            timestamp: chrono::Utc::now(),
+            metadata: Default::default(),
+            tool_calls: vec![ToolCall {
+                id: tool_call_id.to_string(),
+                name: tool_name.to_string(),
+                arguments: serde_json::json!({}),
+                result: Some(result.clone()),
+                successful: !result.get("error").is_some(),
+                execution_time: Some(chrono::Utc::now()),
+            }],
+        };
+        
+        // Add the message to history
+        self.history.add_message(tool_result_message).await;
+        
+        debug!("Added tool result to conversation history: {} -> {:?}", tool_call_id, result);
+        Ok(())
+    }
+
     // Added getter for StateManager's state Arc
     pub fn get_state_manager_state_info_arc(&self) -> Arc<tokio::sync::RwLock<AgentStateInfo>> {
         self.state_manager.get_state_arc()
