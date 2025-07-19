@@ -415,29 +415,24 @@ impl Agent {
     /// Add a tool result to the conversation history
     /// This is needed for OpenAI-compatible providers that execute tools externally
     pub async fn add_tool_result_to_history(&self, tool_call_id: &str, tool_name: &str, result: &serde_json::Value) -> Result<(), SagittaCodeError> {
-        // Create a Function role message with the tool result
-        let tool_result_message = AgentMessage {
-            id: Uuid::new_v4(),
-            role: crate::llm::client::Role::Function,
-            content: String::new(),
-            is_streaming: false,
-            timestamp: chrono::Utc::now(),
-            metadata: Default::default(),
-            tool_calls: vec![ToolCall {
-                id: tool_call_id.to_string(),
-                name: tool_name.to_string(),
-                arguments: serde_json::json!({}),
-                result: Some(result.clone()),
-                successful: !result.get("error").is_some(),
-                execution_time: Some(chrono::Utc::now()),
-            }],
-        };
+        // Find the assistant message with this tool call and update it
+        let messages = self.history.get_messages().await;
+        for msg in messages.iter().rev() {
+            if msg.role == crate::llm::client::Role::Assistant {
+                for tool_call in &msg.tool_calls {
+                    if tool_call.id == tool_call_id {
+                        // Update the existing tool call with the result
+                        let success = self.history.add_tool_result(tool_call_id, result.clone(), !result.get("error").is_some()).await?;
+                        debug!("Updated tool call {} with result in assistant message", tool_call_id);
+                        return Ok(());
+                    }
+                }
+            }
+        }
         
-        // Add the message to history
-        self.history.add_message(tool_result_message).await;
-        
-        debug!("Added tool result to conversation history: {} -> {:?}", tool_call_id, result);
-        Ok(())
+        // If we couldn't find the tool call in an assistant message, log an error
+        log::error!("Could not find tool call {} in any assistant message", tool_call_id);
+        Err(SagittaCodeError::Unknown(format!("Tool call {} not found in conversation history", tool_call_id)))
     }
 
     // Added getter for StateManager's state Arc

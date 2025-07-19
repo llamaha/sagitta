@@ -215,7 +215,7 @@ impl StreamingProcessor {
                                             tool_calls.insert(tool_call_id.clone(), (name.clone(), tool_preview));
                                         }
                                         
-                                        // Emit tool call event to trigger tool card creation
+                                        // Create the tool call
                                         let tool_call = ToolCall {
                                             id: tool_call_id.clone(),
                                             name: name.clone(),
@@ -225,6 +225,17 @@ impl StreamingProcessor {
                                             execution_time: None,
                                         };
                                         
+                                        // CRITICAL: Add tool call to the assistant message in history
+                                        if let Some(msg) = history_manager.get_message(message_id).await {
+                                            let mut updated = msg.clone();
+                                            updated.tool_calls.push(tool_call.clone());
+                                            
+                                            let _ = history_manager.remove_message(message_id).await;
+                                            let _ = history_manager.add_message(updated).await;
+                                            info!("Stream: Added tool call to assistant message for {name}");
+                                        }
+                                        
+                                        // Emit tool call event to trigger tool card creation
                                         let _ = event_sender.send(AgentEvent::ToolCall { tool_call });
                                         
                                         info!("Stream: Emitted ToolCall event for {name}");

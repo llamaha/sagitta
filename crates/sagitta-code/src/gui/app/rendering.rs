@@ -627,6 +627,11 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
             }
             app.state.current_response_id = None;
             log::info!("SagittaCodeApp: Cleared current_response_id for new user message: '{user_message}'");
+            
+            // CRITICAL FIX: Clear tool continuation tracking to prevent stale data
+            app.state.tool_calls_continued.clear();
+            app.state.completed_tool_results.clear();
+            log::info!("SagittaCodeApp: Cleared tool continuation tracking for new message");
 
             // Process the message with the agent using STREAMING
             if let Some(agent) = &app.agent {

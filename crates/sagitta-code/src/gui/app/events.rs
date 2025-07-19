@@ -305,7 +305,9 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                         
                         // Check if all tools are complete and we need to continue the conversation
                         // This is needed for OpenAI-compatible providers that don't handle tool execution internally
-                        if app.state.active_tool_calls.is_empty() && !app.state.is_waiting_for_response {
+                        // CRITICAL: Check if we've already triggered continuation for this tool call
+                        let already_continued = app.state.tool_calls_continued.get(&tool_call_id).copied().unwrap_or(false);
+                        if app.state.active_tool_calls.is_empty() && !app.state.is_waiting_for_response && !already_continued {
                             // Check if we're using an OpenAI-compatible provider
                             let should_continue = if let Some(agent) = &app.agent {
                                 // Get the LLM client type through the agent
@@ -320,6 +322,11 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                             
                             if should_continue {
                                 log::info!("All tools complete for OpenAI-compatible provider, triggering continuation");
+                                
+                                // Mark all completed tool calls as continued to prevent double handling
+                                for (tool_id, _) in &app.state.completed_tool_results {
+                                    app.state.tool_calls_continued.insert(tool_id.clone(), true);
+                                }
                                 
                                 // CRITICAL FIX: Add tool results to conversation history before continuation
                                 if let Some(agent) = &app.agent {
@@ -355,8 +362,8 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                                         
                                         log::info!("Starting continuation stream after tool completion and history update");
                                         
-                                        // Send an empty message to continue the conversation with tool results
-                                        match agent_clone.process_message_stream("").await {
+                                        // Send a continuation message to help the model understand it should continue
+                                        match agent_clone.process_message_stream("Please continue analyzing the results.").await {
                                             Ok(mut stream) => {
                                                 log::info!("Successfully created continuation stream");
                                                 let mut chunk_count = 0;
@@ -764,7 +771,9 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                     
                     // Check if all tools are complete and we need to continue the conversation
                     // This is needed for OpenAI-compatible providers that don't handle tool execution internally
-                    if app.state.active_tool_calls.is_empty() && !app.state.is_waiting_for_response {
+                    // CRITICAL: Check if we've already triggered continuation for this tool call
+                    let already_continued = app.state.tool_calls_continued.get(&tool_call_id).copied().unwrap_or(false);
+                    if app.state.active_tool_calls.is_empty() && !app.state.is_waiting_for_response && !already_continued {
                         // Check if we're using an OpenAI-compatible provider
                         let should_continue = if let Some(_agent) = &app.agent {
                             // Get the LLM client type through the agent
@@ -779,6 +788,11 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                         
                         if should_continue {
                             log::info!("All tools complete for OpenAI-compatible provider, triggering continuation");
+                            
+                            // Mark all completed tool calls as continued to prevent double handling
+                            for (tool_id, _) in &app.state.completed_tool_results {
+                                app.state.tool_calls_continued.insert(tool_id.clone(), true);
+                            }
                             
                             // CRITICAL FIX: Add all completed tool results to agent history BEFORE continuation
                             // This is the same logic as in the CLI test tool and AgentEvent::ToolCallComplete handler
@@ -816,8 +830,28 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                                         }
                                     }
                                     
-                                    // Send an empty message to continue the conversation with tool results
-                                    match agent_clone.process_message_stream("").await {
+                                    // DEBUG: Log conversation history before continuation
+                                    log::info!("DEBUG: Conversation history before continuation:");
+                                    let history = agent_clone.get_history().await;
+                                    for (i, msg) in history.iter().enumerate() {
+                                        log::info!("  Message {}: Role={:?}, Content={}, ToolCalls={}", 
+                                            i, msg.role, 
+                                            if msg.content.is_empty() { "<empty>" } else { &msg.content[..50.min(msg.content.len())] },
+                                            msg.tool_calls.len()
+                                        );
+                                        for tool_call in &msg.tool_calls {
+                                            log::info!("    Tool: {} (id: {}), Result: {}", 
+                                                tool_call.name, tool_call.id,
+                                                tool_call.result.is_some()
+                                            );
+                                        }
+                                    }
+                                    log::info!("DEBUG: Total messages in history: {}", history.len());
+                                    
+                                    // Send a continuation message to help the model understand it should continue
+                                    // Empty message might confuse the model, so we send a small prompt
+                                    log::info!("DEBUG: Calling process_message_stream with continuation prompt");
+                                    match agent_clone.process_message_stream("Please continue analyzing the results.").await {
                                         Ok(mut stream) => {
                                             log::info!("Successfully created continuation stream");
                                             let mut chunk_count = 0;

@@ -86,6 +86,7 @@ pub struct AppState {
     pub tool_call_to_run_id: HashMap<String, ToolRunId>, // Maps tool_call_id to run_id
     pub active_tool_calls: HashMap<String, String>, // Maps tool_call_id to message_id
     pub completed_tool_results: HashMap<String, (String, crate::agent::events::ToolResult)>, // Maps tool_call_id to (tool_name, result)
+    pub tool_calls_continued: HashMap<String, bool>, // Maps tool_call_id to whether continuation has been triggered
     
     // Thinking content state
     pub collapsed_thinking: HashMap<String, bool>, // message_id -> collapsed state
@@ -189,6 +190,7 @@ impl AppState {
             tool_call_to_run_id: HashMap::new(),
             active_tool_calls: HashMap::new(),
             completed_tool_results: HashMap::new(),
+            tool_calls_continued: HashMap::new(),
             
             // Thinking content state
             collapsed_thinking: HashMap::new(),
