@@ -399,6 +399,7 @@ struct OpenAIStreamAdapter<S> {
     stream_processor: super::stream_processor::StreamProcessor,
     done: bool,
     buffered_chunks: Vec<StreamChunk>,
+    buffered_tool_calls: Vec<StreamChunk>,
 }
 
 impl<S> OpenAIStreamAdapter<S> {
@@ -408,6 +409,7 @@ impl<S> OpenAIStreamAdapter<S> {
             stream_processor: super::stream_processor::StreamProcessor::new(),
             done: false,
             buffered_chunks: Vec::new(),
+            buffered_tool_calls: Vec::new(),
         }
     }
 }
@@ -421,14 +423,25 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
         
-        if *this.done {
+        if *this.done && this.buffered_tool_calls.is_empty() && this.buffered_chunks.is_empty() {
             return Poll::Ready(None);
         }
         
-        // Return buffered chunks first
+        // Return buffered tool calls first
+        if !this.buffered_tool_calls.is_empty() {
+            let chunk = this.buffered_tool_calls.remove(0);
+            return Poll::Ready(Some(Ok(chunk)));
+        }
+        
+        // Then return buffered chunks
         if !this.buffered_chunks.is_empty() {
             let chunk = this.buffered_chunks.remove(0);
             return Poll::Ready(Some(Ok(chunk)));
+        }
+        
+        // If we're done and no more buffered items, return None
+        if *this.done {
+            return Poll::Ready(None);
         }
         
         loop {
@@ -471,9 +484,9 @@ where
                                         // Get any remaining tool calls
                                         let tool_calls = this.stream_processor.get_completed_tool_calls();
                                         if !tool_calls.is_empty() {
-                                            // Emit tool calls before final chunk
+                                            // Buffer tool calls before final chunk
                                             for tool_call in tool_calls {
-                                                return Poll::Ready(Some(Ok(StreamChunk {
+                                                this.buffered_tool_calls.push(StreamChunk {
                                                     part: MessagePart::ToolCall {
                                                         tool_call_id: tool_call.id,
                                                         name: tool_call.name,
@@ -482,7 +495,13 @@ where
                                                     is_final: false,
                                                     finish_reason: None,
                                                     token_usage: None,
-                                                })));
+                                                });
+                                            }
+                                            
+                                            // Return the first tool call
+                                            if !this.buffered_tool_calls.is_empty() {
+                                                let chunk = this.buffered_tool_calls.remove(0);
+                                                return Poll::Ready(Some(Ok(chunk)));
                                             }
                                         }
                                         
@@ -520,9 +539,9 @@ where
                             // Emit any remaining content or tool calls
                             let tool_calls = this.stream_processor.get_completed_tool_calls();
                             if !tool_calls.is_empty() {
-                                // Return tool calls one by one
-                                if let Some(tool_call) = tool_calls.into_iter().next() {
-                                    return Poll::Ready(Some(Ok(StreamChunk {
+                                // Buffer all tool calls
+                                for tool_call in tool_calls {
+                                    this.buffered_tool_calls.push(StreamChunk {
                                         part: MessagePart::ToolCall {
                                             tool_call_id: tool_call.id,
                                             name: tool_call.name,
@@ -531,7 +550,13 @@ where
                                         is_final: false,
                                         finish_reason: None,
                                         token_usage: None,
-                                    })));
+                                    });
+                                }
+                                
+                                // Return the first tool call
+                                if !this.buffered_tool_calls.is_empty() {
+                                    let chunk = this.buffered_tool_calls.remove(0);
+                                    return Poll::Ready(Some(Ok(chunk)));
                                 }
                             }
                             

@@ -90,8 +90,10 @@ impl StreamProcessor {
         
         while !remaining.is_empty() {
             if self.is_thinking {
-                // Look for closing thinking tag
-                if let Some(end_pos) = remaining.find("</thinking>") {
+                // Look for closing thinking tag (both </thinking> and </think>)
+                let end_pos = remaining.find("</thinking>")
+                    .or_else(|| remaining.find("</think>"));
+                if let Some(end_pos) = end_pos {
                     // Add content up to closing tag to thinking buffer
                     self.thinking_buffer.push_str(&remaining[..end_pos]);
                     
@@ -109,7 +111,9 @@ impl StreamProcessor {
                     }
                     
                     self.is_thinking = false;
-                    remaining = &remaining[end_pos + 11..]; // Skip past </thinking>
+                    // Skip past the closing tag (handle both </thinking> and </think>)
+                    let skip_len = if remaining[end_pos..].starts_with("</thinking>") { 11 } else { 8 };
+                    remaining = &remaining[end_pos + skip_len..];
                     // Continue processing any remaining content
                 } else {
                     // No closing tag, add all to thinking buffer
@@ -117,8 +121,10 @@ impl StreamProcessor {
                     break;
                 }
             } else {
-                // Look for opening thinking tag
-                if let Some(start_pos) = remaining.find("<thinking>") {
+                // Look for opening thinking tag (both <thinking> and <think>)
+                let start_pos = remaining.find("<thinking>")
+                    .or_else(|| remaining.find("<think>"));
+                if let Some(start_pos) = start_pos {
                     // Emit any content before thinking tag
                     if start_pos > 0 {
                         let content_before = &remaining[..start_pos];
@@ -138,7 +144,9 @@ impl StreamProcessor {
                     }
                     
                     self.is_thinking = true;
-                    remaining = &remaining[start_pos + 10..]; // Skip past <thinking>
+                    // Skip past the opening tag (handle both <thinking> and <think>)
+                    let skip_len = if remaining[start_pos..].starts_with("<thinking>") { 10 } else { 7 };
+                    remaining = &remaining[start_pos + skip_len..];
                 } else {
                     // No thinking tag, add all to content buffer
                     self.content_buffer.push_str(remaining);
@@ -285,6 +293,37 @@ mod tests {
         }
         if let MessagePart::Text { text } = &chunks2[1].part {
             assert_eq!(text, " The answer is");
+        } else {
+            panic!("Expected text part");
+        }
+    }
+    
+    #[test]
+    fn test_process_think_tag() {
+        let mut processor = StreamProcessor::new();
+        
+        // Test with <think> tag instead of <thinking>
+        let delta1 = json!({
+            "content": "Let me think <think>processing internally</think> Done!"
+        });
+        
+        let chunks = processor.process_delta(&delta1);
+        assert_eq!(chunks.len(), 3);
+        
+        if let MessagePart::Text { text } = &chunks[0].part {
+            assert_eq!(text, "Let me think ");
+        } else {
+            panic!("Expected text part");
+        }
+        
+        if let MessagePart::Thought { text } = &chunks[1].part {
+            assert_eq!(text, "processing internally");
+        } else {
+            panic!("Expected thought part");
+        }
+        
+        if let MessagePart::Text { text } = &chunks[2].part {
+            assert_eq!(text, " Done!");
         } else {
             panic!("Expected text part");
         }

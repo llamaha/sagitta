@@ -1,6 +1,7 @@
 // Event handling for the Sagitta Code application
 
 use uuid::{self};
+use futures_util::StreamExt;
 
 use crate::agent::message::types::{AgentMessage, ToolCall};
 use crate::agent::state::types::AgentState;
@@ -213,6 +214,88 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                         
                         // Clean up
                         app.state.active_tool_calls.remove(&tool_call_id);
+                        
+                        // Check if all tools are complete and we need to continue the conversation
+                        // This is needed for OpenAI-compatible providers that don't handle tool execution internally
+                        if app.state.active_tool_calls.is_empty() && !app.state.is_waiting_for_response {
+                            // Check if we're using an OpenAI-compatible provider
+                            let should_continue = if let Some(agent) = &app.agent {
+                                // Get the LLM client type through the agent
+                                if let Ok(config) = app.config.try_lock() {
+                                    matches!(config.current_provider, crate::providers::ProviderType::OpenAICompatible)
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            };
+                            
+                            if should_continue {
+                                log::info!("All tools complete for OpenAI-compatible provider, triggering continuation");
+                                
+                                // Trigger a continuation message to the agent
+                                // We send an empty message to trigger the agent to process the tool results
+                                if let Some(agent) = &app.agent {
+                                    let agent_clone = agent.clone();
+                                    let app_event_sender_clone = app.app_event_sender.clone();
+                                    
+                                    app.state.is_waiting_for_response = true;
+                                    
+                                    // Process in background task with STREAMING
+                                    tokio::spawn(async move {
+                                        log::info!("Starting continuation stream after tool completion");
+                                        
+                                        // Send an empty message to continue the conversation with tool results
+                                        match agent_clone.process_message_stream("").await {
+                                            Ok(mut stream) => {
+                                                log::info!("Successfully created continuation stream");
+                                                let mut chunk_count = 0;
+                                                
+                                                // Consume the stream
+                                                loop {
+                                                    match tokio::time::timeout(
+                                                        std::time::Duration::from_secs(60),
+                                                        stream.next()
+                                                    ).await {
+                                                        Ok(Some(chunk_result)) => {
+                                                            chunk_count += 1;
+                                                            
+                                                            match chunk_result {
+                                                                Ok(chunk) => {
+                                                                    if chunk.is_final {
+                                                                        log::info!("Received final chunk in continuation, stream complete");
+                                                                        break;
+                                                                    }
+                                                                },
+                                                                Err(e) => {
+                                                                    log::error!("Error in continuation streaming response: {e}");
+                                                                    break;
+                                                                }
+                                                            }
+                                                        },
+                                                        Ok(None) => {
+                                                            log::info!("Continuation stream ended after {chunk_count} chunks");
+                                                            break;
+                                                        },
+                                                        Err(_timeout) => {
+                                                            log::error!("Timeout waiting for continuation chunk");
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                                
+                                                // Send completion event
+                                                let _ = app_event_sender_clone.send(AppEvent::ResponseProcessingComplete);
+                                            },
+                                            Err(e) => {
+                                                log::error!("Failed to create continuation stream: {e}");
+                                                let _ = app_event_sender_clone.send(AppEvent::ResponseProcessingComplete);
+                                            }
+                                        }
+                                    });
+                                }
+                            }
+                        }
                     } else {
                         log::warn!("Received tool result for unknown tool call: {tool_call_id}");
                     }

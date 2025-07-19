@@ -4,6 +4,7 @@ pub mod translator;
 pub mod types;
 pub mod sse_parser;
 pub mod stream_processor;
+pub mod continuation;
 
 #[cfg(test)]
 mod tests;

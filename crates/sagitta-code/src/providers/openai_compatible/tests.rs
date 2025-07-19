@@ -281,6 +281,111 @@ mod integration_tests {
     }
     
     #[tokio::test]
+    async fn test_streaming_multiple_tool_calls() {
+        let mock_server = create_mock_server().await;
+        
+        // Create SSE response with multiple tool calls
+        let response_body = create_sse_response(vec![
+            r#"{"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4","choices":[{"index":0,"delta":{"content":"I'll check the weather for both cities."},"finish_reason":null}]}"#,
+            // First tool call
+            r#"{"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_sf","type":"function","function":{"name":"get_weather","arguments":""}}]},"finish_reason":null}]}"#,
+            r#"{"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"location\":\"San Francisco\"}"}}]},"finish_reason":null}]}"#,
+            // Second tool call
+            r#"{"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"call_ny","type":"function","function":{"name":"get_weather","arguments":""}}]},"finish_reason":null}]}"#,
+            r#"{"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"arguments":"{\"location\":\"New York\"}"}}]},"finish_reason":null}]}"#,
+            r#"{"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#,
+            "[DONE]",
+        ]);
+        
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(response_body)
+                    .insert_header("content-type", "text/event-stream")
+            )
+            .mount(&mock_server)
+            .await;
+        
+        let config = OpenAICompatibleConfig {
+            base_url: mock_server.uri(),
+            api_key: Some("test-key".to_string()),
+            model: Some("gpt-4".to_string()),
+            timeout_seconds: 30,
+            max_retries: 3,
+        };
+        
+        let mcp_integration = create_mock_mcp_integration();
+        let client = OpenAICompatibleClient::new(
+            config.base_url.clone(),
+            config.api_key.clone(),
+            config.model.clone(),
+            mcp_integration,
+            config.timeout_seconds,
+            3, // max_retries
+        );
+        
+        let messages = vec![
+            Message {
+                id: Uuid::new_v4(),
+                role: Role::User,
+                parts: vec![MessagePart::Text { text: "What's the weather in San Francisco and New York?".to_string() }],
+                metadata: HashMap::new(),
+            }
+        ];
+        
+        let tools = vec![
+            crate::llm::client::ToolDefinition {
+                name: "get_weather".to_string(),
+                description: "Get weather information".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "location": {"type": "string"}
+                    },
+                    "required": ["location"]
+                }),
+                is_required: false,
+            }
+        ];
+        
+        let mut stream = client.generate_stream(&messages, &tools).await.unwrap();
+        
+        let mut parts = Vec::new();
+        let mut tool_calls = Vec::new();
+        
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result.unwrap();
+            
+            match chunk.part {
+                MessagePart::ToolCall { tool_call_id, name, parameters } => {
+                    tool_calls.push((tool_call_id, name, parameters));
+                }
+                MessagePart::Text { text } => {
+                    parts.push(text);
+                }
+                _ => panic!("Unexpected message part: {:?}", chunk.part),
+            }
+        }
+        
+        // Verify we got both tool calls
+        assert_eq!(tool_calls.len(), 2, "Expected 2 tool calls, got {}", tool_calls.len());
+        
+        // First tool call
+        assert_eq!(tool_calls[0].0, "call_sf");
+        assert_eq!(tool_calls[0].1, "get_weather");
+        assert_eq!(tool_calls[0].2["location"], "San Francisco");
+        
+        // Second tool call
+        assert_eq!(tool_calls[1].0, "call_ny");
+        assert_eq!(tool_calls[1].1, "get_weather");
+        assert_eq!(tool_calls[1].2["location"], "New York");
+        
+        // Verify we got the initial text
+        assert!(parts.iter().any(|text| text.contains("I'll check the weather for both cities.")));
+    }
+    
+    #[tokio::test]
     async fn test_streaming_error_handling() {
         let mock_server = create_mock_server().await;
         

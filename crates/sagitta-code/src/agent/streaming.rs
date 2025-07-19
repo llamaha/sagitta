@@ -147,9 +147,38 @@ impl StreamingProcessor {
                                             let _ = history_manager.add_message(updated).await;
                                         }
                                         
-                                        // If final, update state to idle
+                                        // If final, check finish reason to determine next steps
                                         if chunk.is_final {
-                                            let _ = state_manager.set_idle("Response complete").await;
+                                            // Check finish_reason to determine if conversation should complete
+                                            if let Some(finish_reason) = &chunk.finish_reason {
+                                                match finish_reason.as_str() {
+                                                    "stop" => {
+                                                        // Normal completion without tool calls - conversation is complete
+                                                        let _ = state_manager.set_idle("Response complete").await;
+                                                        
+                                                        // Get current conversation ID and emit completion event
+                                                        if let Ok(Some(conversation)) = history_manager.get_current_conversation().await {
+                                                            let _ = event_sender.send(AgentEvent::ConversationCompleted {
+                                                                conversation_id: conversation.id,
+                                                            });
+                                                            info!("Stream: Conversation completed (finish_reason: stop)");
+                                                        }
+                                                    },
+                                                    "tool_calls" => {
+                                                        // Tool calls were made - conversation will continue after tool execution
+                                                        let _ = state_manager.set_idle("Waiting for tool execution").await;
+                                                        info!("Stream: Response complete with tool calls - conversation will continue");
+                                                    },
+                                                    other => {
+                                                        // Handle other finish reasons (length, content_filter, etc.)
+                                                        let _ = state_manager.set_idle(&format!("Response complete: {}", other)).await;
+                                                        info!("Stream: Response complete with finish_reason: {}", other);
+                                                    }
+                                                }
+                                            } else {
+                                                // No finish reason provided, default to idle
+                                                let _ = state_manager.set_idle("Response complete").await;
+                                            }
                                         }
                                     },
                                     MessagePart::Thought { text } => {
