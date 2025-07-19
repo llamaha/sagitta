@@ -241,6 +241,59 @@ mod tests {
     }
     
     #[tokio::test]
+    async fn test_shell_execute_bug_reproduction() {
+        use tokio::fs;
+        
+        // This test reproduces the bug where the app builds in the CWD instead of the repository directory
+        
+        // Create a temporary directory to act as the app launch directory (CWD)
+        let app_cwd = TempDir::new().unwrap();
+        let app_cwd_path = app_cwd.path().to_str().unwrap().to_string();
+        
+        // Create a temporary directory to act as the repository
+        let repo_dir = TempDir::new().unwrap();
+        let repo_path = repo_dir.path().to_str().unwrap().to_string();
+        
+        // Create a test file in the repository
+        let test_file_path = repo_dir.path().join("test_file.txt");
+        fs::write(&test_file_path, "This is in the repository").await.unwrap();
+        
+        // Write repository path to state file
+        let mut state_dir = dirs::config_dir().unwrap();
+        state_dir.push("sagitta-code");
+        fs::create_dir_all(&state_dir).await.unwrap();
+        
+        let mut state_file = state_dir.clone();
+        state_file.push("current_repository.txt");
+        fs::write(&state_file, &repo_path).await.unwrap();
+        
+        // Execute a command that lists files (should see test_file.txt if working directory is correct)
+        let params = ShellExecuteParams {
+            command: if cfg!(target_os = "windows") {
+                "dir /b".to_string()
+            } else {
+                "ls".to_string()
+            },
+            working_directory: None, // Not specified - should use state file
+            timeout_ms: 5000,
+            env: None,
+        };
+        
+        let config = Arc::new(RwLock::new(AppConfig::default()));
+        let qdrant_client = create_mock_qdrant();
+        
+        let result = handle_shell_execute(params, config, qdrant_client, None).await.unwrap();
+        
+        // Clean up state file
+        let _ = fs::remove_file(&state_file).await;
+        
+        assert_eq!(result.exit_code, 0);
+        // Should see the test file if working directory is correctly set to repository
+        assert!(result.stdout.contains("test_file.txt"), 
+            "Expected to find test_file.txt in output, but got: {}", result.stdout);
+    }
+    
+    #[tokio::test]
     async fn test_shell_execute_with_error() {
         let params = ShellExecuteParams {
             command: if cfg!(target_os = "windows") {

@@ -92,6 +92,7 @@ impl ThemeCustomizer {
                     // Border and stroke colors
                     border_color: Color32::from_rgb(200, 200, 200),
                     focus_border_color: Color32::from_rgb(70, 130, 180),
+                    tool_card_border_color: Color32::from_rgb(180, 180, 190),
                     
                     // Button states
                     button_hover_color: Color32::from_rgb(230, 230, 230),
@@ -505,6 +506,8 @@ impl ThemeCustomizer {
                         self.test_border_color(ui);
                         ui.add_space(4.0);
                         self.test_focus_border_color(ui);
+                        ui.add_space(4.0);
+                        self.test_tool_card_border_color(ui);
                     });
                 
                 ui.add_space(8.0);
@@ -717,6 +720,25 @@ impl ThemeCustomizer {
                 ui.label("This frame simulates a focused element border");
             });
         ui.label("Used in: Focused input fields, selected elements, active UI components");
+    }
+
+    fn test_tool_card_border_color(&self, ui: &mut Ui) {
+        ui.label(RichText::new("Tool Card Border Color Test:").strong());
+        Frame::NONE
+            .fill(self.colors.tool_card_background)
+            .stroke(Stroke::new(0.5, self.colors.tool_card_border_color.linear_multiply(0.3)))
+            .inner_margin(Vec2::splat(12.0))
+            .corner_radius(egui::CornerRadius::same(6))
+            .shadow(egui::Shadow {
+                offset: [0, 2],
+                blur: 8,
+                spread: 0,
+                color: Color32::from_black_alpha(25),
+            })
+            .show(ui, |ui| {
+                ui.label("This simulates a tool card appearance");
+            });
+        ui.label("Used in: Tool cards in chat messages");
     }
 
     fn test_button_hover_color(&self, ui: &mut Ui) {
@@ -966,6 +988,7 @@ impl ThemeCustomizer {
                     .show(ui, |ui| {
                         changed |= color_picker_standalone(ui, "Border Color", &mut self.colors.border_color);
                         changed |= color_picker_standalone(ui, "Focus Border", &mut self.colors.focus_border_color);
+                        changed |= color_picker_standalone(ui, "Tool Card Border", &mut self.colors.tool_card_border_color);
                     });
             });
         

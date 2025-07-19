@@ -1236,7 +1236,7 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color3
         .fill(app_theme.tool_card_background())
         .inner_margin(egui::Margin::same(12))
         .corner_radius(egui::CornerRadius::same(6))
-        .stroke(Stroke::new(0.5, app_theme.border_color().linear_multiply(0.3)))
+        .stroke(Stroke::new(0.5, app_theme.tool_card_border_color().linear_multiply(0.3)))
         .shadow(egui::Shadow {
             offset: [0, 2],
             blur: 8,
@@ -1566,7 +1566,7 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
         .fill(app_theme.tool_card_background())
         .inner_margin(egui::Margin::same(12))
         .corner_radius(egui::CornerRadius::same(6))
-        .stroke(Stroke::new(0.5, app_theme.border_color().linear_multiply(0.3)))
+        .stroke(Stroke::new(0.5, app_theme.tool_card_border_color().linear_multiply(0.3)))
         .shadow(egui::Shadow {
             offset: [0, 2],
             blur: 8,

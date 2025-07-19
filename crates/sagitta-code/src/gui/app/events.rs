@@ -2478,6 +2478,7 @@ mod tests {
             AppEvent::AgentReplaced { .. } => assert!(true),
             AppEvent::ExecuteTask { .. } => assert!(true),
             AppEvent::CheckAndExecuteTask => assert!(true),
+            AppEvent::ToolExecutionComplete { .. } => assert!(true),
         }
         
         // Test the other variant too
@@ -2505,6 +2506,7 @@ mod tests {
             AppEvent::AgentReplaced { .. } => assert!(true),
             AppEvent::ExecuteTask { .. } => assert!(true),
             AppEvent::CheckAndExecuteTask => assert!(true),
+            AppEvent::ToolExecutionComplete { .. } => assert!(true),
         }
     }
 
