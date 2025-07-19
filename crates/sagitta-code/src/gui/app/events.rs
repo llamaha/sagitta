@@ -2,6 +2,7 @@
 
 use uuid::{self};
 use futures_util::StreamExt;
+use std::sync::Arc;
 
 use crate::agent::message::types::{AgentMessage, ToolCall};
 use crate::agent::state::types::AgentState;
@@ -190,7 +191,119 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                     );
                     
                     // Store the tool call ID for later result updates
-                    app.state.active_tool_calls.insert(tool_call.id.clone(), message_id);
+                    app.state.active_tool_calls.insert(tool_call.id.clone(), message_id.clone());
+                    
+                    // For OpenAI-compatible providers, we need to execute the tool ourselves
+                    // through the internal MCP server
+                    let should_execute_tool = if let Ok(config) = app.config.try_lock() {
+                        matches!(config.current_provider, crate::providers::ProviderType::OpenAICompatible)
+                    } else {
+                        false
+                    };
+                    
+                    if should_execute_tool {
+                        log::info!("OpenAI-compatible provider detected, executing tool {} through internal MCP", tool_call.name);
+                        
+                        // Clone necessary data for the async task
+                        let tool_call_id = tool_call.id.clone();
+                        let tool_name = tool_call.name.clone();
+                        let tool_arguments = tool_call.arguments.clone();
+                        let message_id_clone = message_id.clone();
+                        let chat_manager_clone = app.chat_manager.clone();
+                        let agent_clone = app.agent.clone();
+                        let app_event_sender_clone = app.app_event_sender.clone();
+                        let config_clone = app.config.clone();
+                        
+                        // Execute tool in background task
+                        tokio::spawn(async move {
+                            // Call the internal MCP server to execute the tool
+                            let (success, result_json) = match execute_mcp_tool(&tool_name, tool_arguments).await {
+                                Ok(result) => {
+                                    log::info!("Tool {} executed successfully through MCP", tool_name);
+                                    (true, result)
+                                },
+                                Err(e) => {
+                                    log::error!("Tool {} execution failed: {}", tool_name, e);
+                                    (false, serde_json::json!({
+                                        "error": e.to_string()
+                                    }))
+                                }
+                            };
+                            
+                            // Update the tool result in the message
+                            chat_manager_clone.update_tool_result_in_message(
+                                &message_id_clone,
+                                &tool_call_id,
+                                result_json,
+                                success
+                            );
+                            
+                            // For OpenAI-compatible providers, immediately trigger continuation
+                            // after tool execution completes
+                            log::info!("Tool execution complete for OpenAI-compatible provider, triggering continuation");
+                            
+                            if let Some(agent) = &agent_clone {
+                                let agent_clone = agent.clone();
+                                let app_event_sender_clone = app_event_sender_clone.clone();
+                                
+                                // Add a small delay to ensure the tool result is properly processed
+                                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                                
+                                // Process in background task with STREAMING
+                                tokio::spawn(async move {
+                                    log::info!("Starting continuation stream after tool completion");
+                                    
+                                    // Send an empty message to continue the conversation with tool results
+                                    match agent_clone.process_message_stream("").await {
+                                        Ok(mut stream) => {
+                                            log::info!("Successfully created continuation stream");
+                                            let mut chunk_count = 0;
+                                            
+                                            // Consume the stream
+                                            loop {
+                                                match tokio::time::timeout(
+                                                    std::time::Duration::from_secs(60),
+                                                    stream.next()
+                                                ).await {
+                                                    Ok(Some(chunk_result)) => {
+                                                        chunk_count += 1;
+                                                        
+                                                        match chunk_result {
+                                                            Ok(chunk) => {
+                                                                if chunk.is_final {
+                                                                    log::info!("Received final chunk in continuation, stream complete");
+                                                                    break;
+                                                                }
+                                                            },
+                                                            Err(e) => {
+                                                                log::error!("Error in continuation streaming response: {e}");
+                                                                break;
+                                                            }
+                                                        }
+                                                    },
+                                                    Ok(None) => {
+                                                        log::info!("Continuation stream ended after {chunk_count} chunks");
+                                                        break;
+                                                    },
+                                                    Err(_timeout) => {
+                                                        log::error!("Timeout waiting for continuation chunk");
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            
+                                            // Send completion event
+                                            let _ = app_event_sender_clone.send(AppEvent::ResponseProcessingComplete);
+                                        },
+                                        Err(e) => {
+                                            log::error!("Failed to create continuation stream: {e}");
+                                            let _ = app_event_sender_clone.send(AppEvent::ResponseProcessingComplete);
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                    }
                 },
                 AgentEvent::ToolCallComplete { tool_call_id, tool_name, result } => {
                     log::info!("Tool call {tool_call_id} ({tool_name}) completed");
@@ -3130,4 +3243,54 @@ fn handle_agent_replaced(app: &mut SagittaCodeApp, new_agent: std::sync::Arc<cra
     // The provider should already be set in the config from the reinitialization
     
     log::info!("Agent replacement completed successfully");
+}
+
+/// Execute a tool through the internal MCP server
+async fn execute_mcp_tool(tool_name: &str, arguments: serde_json::Value) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+    use serde_json::json;
+    
+    // Create the MCP tool call request
+    let request = json!({
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": {
+            "name": tool_name,
+            "arguments": arguments
+        },
+        "id": uuid::Uuid::new_v4().to_string()
+    });
+    
+    log::debug!("Sending MCP tool call request: {}", serde_json::to_string_pretty(&request)?);
+    
+    // Send HTTP request to the internal MCP server
+    // The internal MCP server runs on localhost:8765
+    let client = reqwest::Client::new();
+    let response = client
+        .post("http://localhost:8765/mcp")
+        .json(&request)
+        .send()
+        .await?;
+    
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("MCP server error: {}", error_text).into());
+    }
+    
+    let response_json: serde_json::Value = response.json().await?;
+    log::debug!("Received MCP response: {}", serde_json::to_string_pretty(&response_json)?);
+    
+    // Check for JSON-RPC error
+    if let Some(error) = response_json.get("error") {
+        let error_message = error.get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("Unknown MCP error");
+        return Err(format!("MCP error: {}", error_message).into());
+    }
+    
+    // Extract the result
+    if let Some(result) = response_json.get("result") {
+        Ok(result.clone())
+    } else {
+        Err("No result in MCP response".into())
+    }
 } 

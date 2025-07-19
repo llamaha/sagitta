@@ -1,0 +1,46 @@
+{%- if tools %}
+    {{- '<|im_start|>system\n' }}
+    {%- if messages[0].role == 'system' %}
+        {{- messages[0].content + '\n\n' }}
+    {%- endif %}
+    {{- "You are a helpful assistant with access to functions. When you need to call a function, respond with ONLY a JSON object in this exact format:\n" }}
+    {{- '{"name": "function_name", "arguments": {"arg1": "value1", "arg2": "value2"}}\n\n' }}
+    {{- "Available functions:\n" }}
+    {%- for tool in tools %}
+        {{- "- " + tool.function.name + ": " + tool.function.description + "\n" }}
+        {%- if tool.function.parameters %}
+            {{- "  Parameters: " + tool.function.parameters | tojson + "\n" }}
+        {%- endif %}
+    {%- endfor %}
+    {{- '<|im_end|>\n' }}
+{%- else %}
+    {%- if messages[0].role == 'system' %}
+        {{- '<|im_start|>system\n' + messages[0].content + '<|im_end|>\n' }}
+    {%- endif %}
+{%- endif %}
+{%- for message in messages %}
+    {%- if message.role == "user" %}
+        {{- '<|im_start|>user\n' + message.content + '<|im_end|>\n' }}
+    {%- elif message.role == "assistant" %}
+        {%- if message.content %}
+            {{- '<|im_start|>assistant\n' + message.content + '<|im_end|>\n' }}
+        {%- endif %}
+        {%- if message.tool_calls %}
+            {%- for tool_call in message.tool_calls %}
+                {{- '<|im_start|>assistant\n' }}
+                {{- '{"name": "' + tool_call.function.name + '", "arguments": ' }}
+                {%- if tool_call.function.arguments is string %}
+                    {{- tool_call.function.arguments }}
+                {%- else %}
+                    {{- tool_call.function.arguments | tojson }}
+                {%- endif %}
+                {{- '}\n<|im_end|>\n' }}
+            {%- endfor %}
+        {%- endif %}
+    {%- elif message.role == "tool" %}
+        {{- '<|im_start|>tool\n' + message.content + '<|im_end|>\n' }}
+    {%- endif %}
+{%- endfor %}
+{%- if add_generation_prompt %}
+    {{- '<|im_start|>assistant\n' }}
+{%- endif %}

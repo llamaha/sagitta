@@ -1,113 +1,99 @@
-use crate::llm::client::{Message, MessagePart, Role, ToolDefinition};
-use crate::providers::openai_compatible::client::OpenAICompatibleClient;
-use crate::utils::errors::SagittaCodeError;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use futures_util::StreamExt;
-use log::{info, debug};
+use uuid::Uuid;
 
-/// Manages conversation continuation for OpenAI-compatible APIs
+use crate::llm::client::{LlmClient, Message, MessagePart, Role, ToolDefinition};
+use crate::agent::message::types::ToolCall;
+
+/// Manages conversation continuation for OpenAI-compatible providers
 /// 
-/// OpenAI's API pattern requires explicit continuation after tool calls:
-/// 1. User sends message
-/// 2. Assistant responds with tool calls
-/// 3. Tools are executed and results added as function messages  
-/// 4. Another API call is made to get the final response
-/// 5. Assistant provides final answer
+/// OpenAI-style APIs require explicit continuation after tool calls:
+/// 1. Model returns tool_calls with finish_reason: "tool_calls"
+/// 2. Client executes tools
+/// 3. Client sends new request with tool results
+/// 4. Model provides final response
+#[derive(Debug, Clone)]
 pub struct ContinuationManager {
-    client: Arc<OpenAICompatibleClient>,
-    pending_tool_calls: Arc<Mutex<Vec<String>>>, // Track tool call IDs
+    /// Track pending tool calls per conversation
+    pending_tool_calls: Arc<Mutex<HashMap<Uuid, Vec<ToolCall>>>>,
+    
+    /// Track tool results per conversation
+    tool_results: Arc<Mutex<HashMap<Uuid, Vec<(String, serde_json::Value)>>>>,
 }
 
 impl ContinuationManager {
-    pub fn new(client: Arc<OpenAICompatibleClient>) -> Self {
+    pub fn new() -> Self {
         Self {
-            client,
-            pending_tool_calls: Arc::new(Mutex::new(Vec::new())),
+            pending_tool_calls: Arc::new(Mutex::new(HashMap::new())),
+            tool_results: Arc::new(Mutex::new(HashMap::new())),
         }
     }
     
-    /// Register a tool call that needs completion
-    pub async fn register_tool_call(&self, tool_call_id: String) {
+    /// Register tool calls that need execution
+    pub async fn register_tool_calls(&self, conversation_id: Uuid, tool_calls: Vec<ToolCall>) {
         let mut pending = self.pending_tool_calls.lock().await;
-        pending.push(tool_call_id);
-        debug!("Registered pending tool call, total pending: {}", pending.len());
+        pending.insert(conversation_id, tool_calls);
     }
     
-    /// Mark a tool call as completed
-    pub async fn complete_tool_call(&self, tool_call_id: &str) -> bool {
-        let mut pending = self.pending_tool_calls.lock().await;
-        pending.retain(|id| id != tool_call_id);
-        let all_complete = pending.is_empty();
-        debug!("Completed tool call {}, remaining pending: {}", tool_call_id, pending.len());
-        all_complete
+    /// Add a tool result
+    pub async fn add_tool_result(&self, conversation_id: Uuid, tool_call_id: String, result: serde_json::Value) {
+        let mut results = self.tool_results.lock().await;
+        let conv_results = results.entry(conversation_id).or_insert_with(Vec::new);
+        conv_results.push((tool_call_id, result));
     }
     
-    /// Check if all tool calls are complete
-    pub async fn all_tools_complete(&self) -> bool {
+    /// Check if all tools have been executed for a conversation
+    pub async fn all_tools_complete(&self, conversation_id: Uuid) -> bool {
         let pending = self.pending_tool_calls.lock().await;
-        pending.is_empty()
+        let results = self.tool_results.lock().await;
+        
+        if let Some(tool_calls) = pending.get(&conversation_id) {
+            if let Some(tool_results) = results.get(&conversation_id) {
+                // Check if we have results for all tool calls
+                tool_calls.len() == tool_results.len()
+            } else {
+                false
+            }
+        } else {
+            // No pending tool calls
+            true
+        }
     }
     
-    /// Clear all pending tool calls
-    pub async fn clear_pending(&self) {
+    /// Get tool results for building continuation message
+    pub async fn get_tool_results(&self, conversation_id: Uuid) -> Vec<(String, serde_json::Value)> {
+        let results = self.tool_results.lock().await;
+        results.get(&conversation_id).cloned().unwrap_or_default()
+    }
+    
+    /// Clear tool state for a conversation
+    pub async fn clear_conversation(&self, conversation_id: Uuid) {
         let mut pending = self.pending_tool_calls.lock().await;
-        pending.clear();
+        let mut results = self.tool_results.lock().await;
+        pending.remove(&conversation_id);
+        results.remove(&conversation_id);
     }
     
-    /// Check if we should continue the conversation after tool execution
-    /// Returns true if we have tool results in the message history but no pending tools
-    pub async fn should_continue(&self, messages: &[Message]) -> bool {
-        // Check if we have any function role messages (tool results)
-        let has_tool_results = messages.iter().any(|msg| msg.role == Role::Function);
-        
-        // Check if the last assistant message had tool calls
-        let last_assistant_had_tools = messages.iter()
-            .rev()
-            .find(|msg| msg.role == Role::Assistant)
-            .map(|msg| !msg.parts.is_empty() && msg.parts.iter().any(|part| {
-                matches!(part, MessagePart::ToolCall { .. })
-            }))
-            .unwrap_or(false);
-        
-        // Continue if we have tool results and the last assistant message had tool calls
-        has_tool_results && last_assistant_had_tools && self.all_tools_complete().await
+    /// Build tool result messages for OpenAI API
+    pub fn build_tool_result_messages(&self, tool_results: Vec<(String, serde_json::Value)>) -> Vec<Message> {
+        tool_results.into_iter().map(|(tool_call_id, result)| {
+            Message {
+                id: Uuid::new_v4(),
+                role: Role::Function,
+                parts: vec![MessagePart::ToolResult {
+                    tool_call_id: tool_call_id.clone(),
+                    name: String::new(), // Tool name would need to be tracked separately
+                    result,
+                }],
+                metadata: HashMap::new(),
+            }
+        }).collect()
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[tokio::test]
-    async fn test_continuation_tracking() {
-        let client = Arc::new(OpenAICompatibleClient::new(
-            "http://localhost:1234/v1".to_string(),
-            None,
-            None,
-            Arc::new(crate::providers::claude_code::mcp_integration::McpIntegration::new()),
-            120,
-            3,
-        ));
-        
-        let manager = ContinuationManager::new(client);
-        
-        // Initially no pending tools
-        assert!(manager.all_tools_complete().await);
-        
-        // Register some tool calls
-        manager.register_tool_call("tool1".to_string()).await;
-        manager.register_tool_call("tool2".to_string()).await;
-        assert!(!manager.all_tools_complete().await);
-        
-        // Complete one tool
-        let all_done = manager.complete_tool_call("tool1").await;
-        assert!(!all_done);
-        assert!(!manager.all_tools_complete().await);
-        
-        // Complete the other tool
-        let all_done = manager.complete_tool_call("tool2").await;
-        assert!(all_done);
-        assert!(manager.all_tools_complete().await);
+impl Default for ContinuationManager {
+    fn default() -> Self {
+        Self::new()
     }
 }

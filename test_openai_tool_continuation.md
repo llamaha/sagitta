@@ -1,52 +1,61 @@
-# Test Plan for OpenAI-Compatible Tool Continuation
+# Testing OpenAI Tool Continuation
 
-## Problem Statement
-When using OpenAI-compatible providers (like OpenRouter), after tools are executed, the conversation stops instead of automatically continuing with the LLM processing the tool results.
+This document explains how to test the OpenAI-style tool continuation feature that has been implemented.
 
-## Solution Implemented
-Added logic in the `ToolCallComplete` event handler to:
-1. Check if all tools are complete (`active_tool_calls.is_empty()`)
-2. Check if we're using an OpenAI-compatible provider
-3. If both conditions are met, automatically trigger a new LLM call to continue the conversation
+## Background
 
-## Testing Steps
+OpenAI-compatible APIs follow a specific pattern for tool execution:
+1. User sends a message
+2. LLM responds with tool calls and `finish_reason: "tool_calls"`
+3. Stream ends (this is where the issue was - it used to just stop)
+4. Client executes tools and sends results back
+5. LLM provides final response
 
-1. **Configure OpenAI-Compatible Provider**
-   - Set up OpenRouter or another OpenAI-compatible provider in settings
-   - Ensure proper API key is configured
+## What Was Fixed
 
-2. **Test Tool Execution Flow**
-   - Send a message that requires tool use (e.g., "What files are in the current directory?")
-   - Observe that:
-     a. The LLM requests a tool call
-     b. The tool executes and returns results
-     c. **NEW**: The conversation automatically continues without user input
-     d. The LLM processes the tool results and provides a final response
+1. **Streaming Processor** (`agent/streaming.rs`):
+   - Now properly checks `finish_reason` in stream chunks
+   - When `finish_reason` is "stop", it emits `ConversationCompleted` event
+   - When `finish_reason` is "tool_calls", it sets state to "Waiting for tool execution"
 
-3. **Test Multiple Tools**
-   - Send a message requiring multiple tools (e.g., "Read the README.md file and tell me what this project is about")
-   - Verify that all tools complete before continuation is triggered
+2. **Tool Completion Handler** (`gui/app/events.rs`):
+   - Tracks active tool calls
+   - When all tools complete AND we're using an OpenAI-compatible provider
+   - Automatically sends an empty message to trigger continuation
+   - Creates a new streaming session for the final response
 
-4. **Test Non-OpenAI Providers**
-   - Switch to Claude or another non-OpenAI provider
-   - Verify that the behavior doesn't change for these providers
+## How to Test
 
-## Expected Behavior
+1. **Configure an OpenAI-compatible provider** (e.g., OpenRouter, local Mistral.rs server)
 
-### Before Fix
-1. User asks question requiring tools
-2. LLM requests tool execution
-3. Tools execute and return results
-4. **Conversation stops - user must send another message**
+2. **Send a message that requires tool use**, for example:
+   ```
+   Search for the main function in this codebase and tell me what it does
+   ```
 
-### After Fix
-1. User asks question requiring tools
-2. LLM requests tool execution
-3. Tools execute and return results
-4. **Conversation automatically continues**
-5. LLM processes tool results and provides final answer
+3. **Expected behavior**:
+   - LLM will request tool execution (e.g., semantic_code_search)
+   - Tool will execute and show results in the UI
+   - **Automatically** (without user input), the LLM will continue and provide a final response
+   - The conversation will be marked as complete
 
-## Code Changes
-- Modified `crates/sagitta-code/src/gui/app/events.rs`
-- Added check in `ToolCallComplete` event handler
-- When all tools complete for OpenAI-compatible provider, triggers continuation stream
+4. **What to look for in logs**:
+   ```
+   Stream: Response complete with tool calls - conversation will continue
+   Tool call semantic_code_search completed
+   All tools complete for OpenAI-compatible provider, triggering continuation
+   Starting continuation stream after tool completion
+   Stream: Conversation completed (finish_reason: stop)
+   ```
+
+## Comparison with Previous Behavior
+
+**Before**: After tool execution, the conversation would stop. User had to send another message (even empty) to get the final response.
+
+**After**: Tool execution automatically triggers continuation, and the LLM provides its final response without user intervention.
+
+## Notes
+
+- This behavior only applies to OpenAI-compatible providers
+- Claude's native API handles tool execution differently (all in one stream)
+- The continuation uses an empty message to trigger the agent to process tool results
