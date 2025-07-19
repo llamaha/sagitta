@@ -754,6 +754,11 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                         }),
                     };
                     
+                    // Store tool result for adding to conversation history (same as AgentEvent::ToolCallComplete)
+                    if !app.state.completed_tool_results.contains_key(&tool_call_id) {
+                        app.state.completed_tool_results.insert(tool_call_id.clone(), (tool_name.clone(), result.clone()));
+                    }
+                    
                     // Clean up
                     app.state.active_tool_calls.remove(&tool_call_id);
                     
@@ -775,8 +780,11 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                         if should_continue {
                             log::info!("All tools complete for OpenAI-compatible provider, triggering continuation");
                             
-                            // Trigger a continuation message to the agent
-                            // We send an empty message to trigger the agent to process the tool results
+                            // CRITICAL FIX: Add all completed tool results to agent history BEFORE continuation
+                            // This is the same logic as in the CLI test tool and AgentEvent::ToolCallComplete handler
+                            let completed_results = app.state.completed_tool_results.clone();
+                            app.state.completed_tool_results.clear(); // Clear to prevent duplicate additions
+                            
                             if let Some(agent) = &app.agent {
                                 let agent_clone = agent.clone();
                                 let app_event_sender_clone = app.app_event_sender.clone();
@@ -786,6 +794,27 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                                 // Process in background task with STREAMING
                                 tokio::spawn(async move {
                                     log::info!("Starting continuation stream after tool completion");
+                                    
+                                    // CRITICAL FIX: Add tool results to conversation history before continuation
+                                    for (tool_call_id_inner, (tool_name_inner, tool_result)) in completed_results.iter() {
+                                        log::info!("Adding tool result to agent history: {} -> {:?}", tool_call_id_inner, tool_result);
+                                        
+                                        let tool_result_json = match tool_result {
+                                            crate::agent::events::ToolResult::Success { output } => {
+                                                serde_json::from_str(output).unwrap_or(serde_json::Value::String(output.clone()))
+                                            },
+                                            crate::agent::events::ToolResult::Error { error } => {
+                                                serde_json::json!({ "error": error })
+                                            }
+                                        };
+                                        
+                                        // Add tool result to conversation history using the agent's method
+                                        if let Err(e) = agent_clone.add_tool_result_to_history(tool_call_id_inner, tool_name_inner, &tool_result_json).await {
+                                            log::error!("Failed to add tool result to history: {}", e);
+                                        } else {
+                                            log::info!("Successfully added tool result to conversation history: {}", tool_call_id_inner);
+                                        }
+                                    }
                                     
                                     // Send an empty message to continue the conversation with tool results
                                     match agent_clone.process_message_stream("").await {
