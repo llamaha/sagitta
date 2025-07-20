@@ -1682,9 +1682,11 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                     }
                 }
                 
-                // Save the repository context to config
+                // Save the repository context to config and write state file
                 let config = app.config.clone();
                 let repo_context_for_save = repo_context.clone();
+                let repo_name_for_state = new_repo.clone();
+                let repo_manager_for_state = app.repo_panel.get_repo_manager();
                 tokio::spawn(async move {
                     match config.try_lock() {
                         Ok(mut config_guard) => {
@@ -1699,6 +1701,30 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                         }
                         Err(e) => {
                             log::error!("Failed to lock config for saving repository context: {e}");
+                        }
+                    }
+                    
+                    // Write the repository state file for MCP server
+                    if let Some(repo_name) = repo_name_for_state {
+                        let repo_manager_guard = repo_manager_for_state.lock().await;
+                        if let Ok(repositories) = repo_manager_guard.list_repositories().await {
+                            if let Some(repo_config) = repositories.iter().find(|r| r.name == repo_name) {
+                                // Write the current repository path to state file
+                                let mut state_path = dirs::config_dir().unwrap_or_default();
+                                state_path.push("sagitta-code");
+                                
+                                // Ensure directory exists
+                                if let Err(e) = tokio::fs::create_dir_all(&state_path).await {
+                                    log::warn!("Failed to create state directory: {e}");
+                                } else {
+                                    state_path.push("current_repository.txt");
+                                    if let Err(e) = tokio::fs::write(&state_path, repo_config.local_path.to_string_lossy().as_bytes()).await {
+                                        log::warn!("Failed to write repository state file: {e}");
+                                    } else {
+                                        log::info!("Wrote current repository path to state file: {}", state_path.display());
+                                    }
+                                }
+                            }
                         }
                     }
                 });
