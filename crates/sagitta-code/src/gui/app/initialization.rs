@@ -8,7 +8,7 @@ use super::events::AppEvent;
 use super::super::repository::manager::RepositoryManager;
 use super::super::repository::RepoPanel;
 use super::super::theme::AppTheme;
-use super::super::chat::view::{StreamingMessage, MessageAuthor};
+use super::super::chat::{StreamingMessage, MessageAuthor};
 use crate::config::loader::load_all_configs;
 use crate::llm::client::LlmClient;
 use crate::agent::Agent;

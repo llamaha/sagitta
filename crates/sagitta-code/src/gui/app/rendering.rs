@@ -304,7 +304,7 @@ fn render_file_content_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                         };
                         
                         // Use syntax highlighting for the content
-                        use crate::gui::chat::view::render_syntax_highlighted_code;
+                        use crate::gui::chat::syntax_highlighting::render_syntax_highlighted_code;
                         render_syntax_highlighted_code(ui, &content_clone, language, &egui::Color32::TRANSPARENT, ui.available_width());
                     });
                     
@@ -1513,8 +1513,8 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                     let repo_context = if new_repo.is_empty() { None } else { Some(new_repo.clone()) };
                     app.state.set_repository_context(repo_context.clone());
                 
-                // Write the repository state file for MCP server
-                if let Some(repo_name) = &repo_context {
+                    // Write the repository state file for MCP server
+                    if let Some(repo_name) = &repo_context {
                     let repo_manager = app.repo_panel.get_repo_manager();
                     let repo_name_for_state = repo_name.clone();
                     

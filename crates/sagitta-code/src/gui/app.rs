@@ -228,7 +228,7 @@ impl SagittaCodeApp {
     }
     
     /// Create a chat message from an agent message
-    fn make_chat_message_from_agent_message(&self, agent_msg: &AgentMessage) -> super::chat::view::ChatMessage {
+    fn make_chat_message_from_agent_message(&self, agent_msg: &AgentMessage) -> super::chat::ChatMessage {
         events::make_chat_message_from_agent_message(agent_msg)
     }
     

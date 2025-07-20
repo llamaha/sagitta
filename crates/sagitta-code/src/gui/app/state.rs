@@ -4,7 +4,7 @@ use crate::agent::state::types::{AgentMode, AgentState};
 use crate::agent::message::types::{ToolCall, AgentMessage};
 use crate::agent::events::ToolRunId;
 use crate::gui::conversation::sidebar::SidebarAction;
-use crate::gui::chat::view::CopyButtonState;
+use crate::gui::chat::CopyButtonState;
 use super::super::theme::AppTheme;
 use crate::providers::types::ProviderType;
 use egui_notify::Toasts;

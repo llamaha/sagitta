@@ -45,7 +45,7 @@ impl PreviewPanel {
 
         egui::SidePanel::right("preview_panel")
             .resizable(true)
-            .default_width(400.0)
+            .default_width(600.0)  // Wider default for better file viewing
             .frame(theme.side_panel_frame())
             .show(ctx, |ui| {
                 ui.vertical(|ui| {
@@ -55,9 +55,19 @@ impl PreviewPanel {
                     ui.horizontal(|ui| {
                         ui.heading(&self.title);
                         ui.add_space(8.0);
-                        if ui.button("×").clicked() {
-                            self.visible = false;
+                        
+                        // Copy button for file content
+                        if self.title.contains("File") || self.title.contains("Read") {
+                            if ui.button("📋 Copy").clicked() {
+                                ui.output_mut(|o| o.copied_text = self.content.clone());
+                            }
                         }
+                        
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("×").clicked() {
+                                self.visible = false;
+                            }
+                        });
                     });
                     ui.separator();
                     
@@ -65,7 +75,15 @@ impl PreviewPanel {
                     ScrollArea::vertical()
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            ui.label(&self.content);
+                            // Check if this is file content (based on title)
+                            if self.title.contains("File") || self.title.contains("Read") {
+                                // For file content, use monospace font and preserve formatting
+                                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                                ui.monospace(&self.content);
+                            } else {
+                                // For other content, use regular label
+                                ui.label(&self.content);
+                            }
                         });
                 });
             });

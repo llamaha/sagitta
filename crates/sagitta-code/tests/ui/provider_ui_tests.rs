@@ -200,7 +200,7 @@ mod provider_settings_tests {
         // Add Mistral.rs config
         let mut mistral_config = ProviderConfig::new(ProviderType::MistralRs);
         mistral_config.set_option("base_url", &"http://localhost:1234".to_string()).unwrap();
-        mistral_config.set_option("api_token", &"test-key".to_string()).unwrap();
+        mistral_config.set_option("api_key", &"test-key".to_string()).unwrap();
         mistral_config.set_option("model", &"mistral-7b".to_string()).unwrap();
         mistral_config.set_option("temperature", &Some(0.7)).unwrap();
         
