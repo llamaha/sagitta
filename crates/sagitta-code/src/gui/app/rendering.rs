@@ -1705,7 +1705,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                     }
                     
                     // Write the repository state file for MCP server
-                    if let Some(repo_name) = repo_name_for_state {
+                    let repo_name = repo_name_for_state;
                         let repo_manager_guard = repo_manager_for_state.lock().await;
                         if let Ok(repositories) = repo_manager_guard.list_repositories().await {
                             if let Some(repo_config) = repositories.iter().find(|r| r.name == repo_name) {
@@ -1726,7 +1726,6 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                                 }
                             }
                         }
-                    }
                 });
                 
                 log::info!("Repository context changed to: {new_repo:?}");

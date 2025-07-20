@@ -11,6 +11,7 @@ use colored::*;
 use tokio::task::JoinSet;
 use crate::cli::CliArgs;
 
+#[deprecated(since = "0.3.0", note = "Branch tracking now uses filesystem state. This command will be removed in a future version.")]
 #[derive(Args, Debug, Clone)]
 pub struct SyncBranchesArgs {
     /// Optional repository name (defaults to active repository)
@@ -37,6 +38,7 @@ pub struct SyncBranchesArgs {
     pub include_remote: bool,
 }
 
+#[deprecated(since = "0.3.0", note = "Branch tracking now uses filesystem state. This command will be removed in a future version.")]
 pub async fn handle_sync_branches<C>(
     args: SyncBranchesArgs,
     config: &mut AppConfig,
@@ -57,6 +59,10 @@ where
         .position(|r| r.name == *repo_name)
         .ok_or_else(|| anyhow!("Repository '{}' not found", repo_name))?;
 
+    println!("{}", "⚠️  WARNING: The sync-branches command is deprecated and will be removed in a future version.".yellow().bold());
+    println!("{}", "Branch synchronization now uses the current filesystem branch state.".yellow());
+    println!("{}", "Use 'repo sync' after checking out each branch manually instead.\n".yellow());
+    
     let repo_config = config.repositories[repo_config_index].clone();
     let repo_path = PathBuf::from(&repo_config.local_path);
     
@@ -68,14 +74,21 @@ where
 
     // Determine which branches to sync
     let branches_to_sync = if args.branches.is_empty() {
-        // Use tracked branches or discover branches
-        let mut branches = repo_config.tracked_branches.clone();
+        // Discover branches from repository
+        let mut branches = Vec::new();
         
         if args.include_remote {
             let all_branches = git_manager.list_branches(&repo_path)?;
-            for branch in all_branches {
-                if !branches.contains(&branch) {
-                    branches.push(branch);
+            branches = all_branches;
+        } else {
+            // Just list local branches
+            let git_repo = git2::Repository::open(&repo_path)?;
+            let local_branches = git_repo.branches(Some(git2::BranchType::Local))?;
+            for branch in local_branches {
+                if let Ok((branch, _)) = branch {
+                    if let Some(name) = branch.name()? {
+                        branches.push(name.to_string());
+                    }
                 }
             }
         }
@@ -161,8 +174,8 @@ where
             let config_clone = config.clone();
             let mut repo_config_clone = repo_config.clone();
             
-            // Set the branch as active for this sync
-            repo_config_clone.active_branch = Some(branch.clone());
+            // Create a temporary repository configuration for this branch sync
+            // We'll temporarily checkout the branch and then sync
             repo_config_clone.target_ref = None; // Clear target_ref when syncing branches
             
             let sync_options = SyncOptions {
@@ -173,14 +186,32 @@ where
             println!("  🔄 Starting sync for branch '{}'...", branch.cyan());
             
             join_set.spawn(async move {
-                let result = sync_repository(
-                    client_clone,
-                    &repo_config_clone,
-                    sync_options,
-                    &config_clone,
-                    None, // No progress reporter for now
-                ).await;
-                (branch, result)
+                // First checkout the branch
+                let repo_path = repo_config_clone.local_path.clone();
+                let checkout_result = tokio::process::Command::new("git")
+                    .current_dir(&repo_path)
+                    .arg("checkout")
+                    .arg(&branch)
+                    .output()
+                    .await;
+                
+                match checkout_result {
+                    Ok(output) if output.status.success() => {
+                        // Branch checkout successful, proceed with sync
+                        let result = sync_repository(
+                            client_clone,
+                            &repo_config_clone,
+                            sync_options,
+                            &config_clone,
+                            None, // No progress reporter for now
+                        ).await;
+                        (branch, result)
+                    }
+                    _ => {
+                        // Checkout failed
+                        (branch, Err(sagitta_search::error::SagittaError::GitMessageError("Failed to checkout branch".to_string())))
+                    }
+                }
             });
             
             active_syncs += 1;
@@ -223,7 +254,7 @@ where
                 let config_clone = config.clone();
                 let mut repo_config_clone = repo_config.clone();
                 
-                repo_config_clone.active_branch = Some(branch.clone());
+                // Temporarily checkout and sync this branch
                 repo_config_clone.target_ref = None;
                 
                 let sync_options = SyncOptions {
@@ -234,14 +265,32 @@ where
                 println!("  🔄 Starting sync for branch '{}'...", branch.cyan());
                 
                 join_set.spawn(async move {
-                    let result = sync_repository(
-                        client_clone,
-                        &repo_config_clone,
-                        sync_options,
-                        &config_clone,
-                        None,
-                    ).await;
-                    (branch, result)
+                    // First checkout the branch
+                    let repo_path = repo_config_clone.local_path.clone();
+                    let checkout_result = tokio::process::Command::new("git")
+                        .current_dir(&repo_path)
+                        .arg("checkout")
+                        .arg(&branch)
+                        .output()
+                        .await;
+                    
+                    match checkout_result {
+                        Ok(output) if output.status.success() => {
+                            // Branch checkout successful, proceed with sync
+                            let result = sync_repository(
+                                client_clone,
+                                &repo_config_clone,
+                                sync_options,
+                                &config_clone,
+                                None,
+                            ).await;
+                            (branch, result)
+                        }
+                        _ => {
+                            // Checkout failed
+                            (branch, Err(sagitta_search::error::SagittaError::GitMessageError("Failed to checkout branch".to_string())))
+                        }
+                    }
                 });
                 
                 active_syncs += 1;
@@ -259,14 +308,8 @@ where
         println!("  ❌ Failed: {}", failed_syncs.to_string().red());
     }
     
-    // Update config with any new tracked branches
-    let repo_config_mut = &mut config.repositories[repo_config_index];
-    for branch in &branches_to_sync {
-        if !repo_config_mut.tracked_branches.contains(branch) {
-            repo_config_mut.tracked_branches.push(branch.clone());
-        }
-    }
-    
+    // No need to update config since branch tracking is deprecated
+    // Just save any other changes that might have occurred
     save_config(config, override_path)?;
 
     Ok(())
