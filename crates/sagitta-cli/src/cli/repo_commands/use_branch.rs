@@ -74,20 +74,15 @@ where
     let switch_result = git_manager.switch_branch(&repo_path, &target_ref_to_checkout).await
         .context("Failed to switch repository branch/ref")?;
 
-    // Update config with new branch/ref
+    // Update config with new target_ref if specified
     let repo_config_mut = &mut config.repositories[repo_config_index];
     
     if is_target_ref {
-        // If using target_ref, update the target_ref field and set active_branch to the ref
+        // If using target_ref, update the target_ref field
         repo_config_mut.target_ref = Some(target_ref_to_checkout.clone());
-        repo_config_mut.active_branch = Some(target_ref_to_checkout.clone());
     } else {
-        // If using branch name, clear target_ref and set active_branch
+        // If using branch name, clear target_ref
         repo_config_mut.target_ref = None;
-        repo_config_mut.active_branch = Some(target_ref_to_checkout.clone());
-        if !repo_config_mut.tracked_branches.contains(&target_ref_to_checkout) {
-            repo_config_mut.tracked_branches.push(target_ref_to_checkout.clone());
-        }
     }
 
     save_config(config, override_path)?;

@@ -1053,6 +1053,9 @@ impl RepositoryManager {
         // Save configuration
         self.save_core_config_with_guard(&config_guard).await?;
         
+        // Write the repository state file for MCP server
+        self.write_repository_state_file(repo_name).await;
+        
         // Convert to GUI result type
         let sync_type = if let Some(ref sync_result) = switch_result.sync_result {
             if sync_result.files_added > 0 || sync_result.files_updated > 0 || sync_result.files_removed > 0 {
@@ -1232,6 +1235,29 @@ impl RepositoryManager {
             .ok_or_else(|| anyhow!("Repository '{}' not found", repo_name))?;
         
         Ok(repo_config.local_path.clone())
+    }
+    
+    /// Write the repository state file for the MCP server
+    pub async fn write_repository_state_file(&self, repo_name: &str) {
+        let config_guard = self.config.lock().await;
+        
+        if let Some(repo_config) = config_guard.repositories.iter().find(|r| r.name == repo_name) {
+            // Write the current repository path to state file
+            let mut state_path = dirs::config_dir().unwrap_or_default();
+            state_path.push("sagitta-code");
+            
+            // Ensure directory exists
+            if let Err(e) = tokio::fs::create_dir_all(&state_path).await {
+                log::warn!("Failed to create state directory: {e}");
+            } else {
+                state_path.push("current_repository.txt");
+                if let Err(e) = tokio::fs::write(&state_path, repo_config.local_path.to_string_lossy().as_bytes()).await {
+                    log::warn!("Failed to write repository state file: {e}");
+                } else {
+                    log::info!("Wrote current repository path to state file: {}", state_path.display());
+                }
+            }
+        }
     }
 }
 

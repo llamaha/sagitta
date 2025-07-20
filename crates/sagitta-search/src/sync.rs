@@ -28,7 +28,7 @@ use log::{info, warn, debug, trace};
 type GitOperationResult = Result<(String, Vec<PathBuf>, Vec<PathBuf>, bool, Option<String>)>;
 
 // Import git-manager traits for integration
-use git_manager::{VectorSyncTrait, VectorSyncResult};
+use git_manager::{VectorSyncTrait, VectorSyncResult, GitRepository};
 use async_trait::async_trait;
  // Added for Mock
 use sagitta_embed::EmbeddingProcessor; // Added EmbeddingProcessor trait
@@ -97,26 +97,37 @@ where
     let repo_name = &repo_config.name;
     let repo_path = &repo_config.local_path;
     let is_local_path_repo = repo_config.added_as_local_path;
-    let active_branch = repo_config.active_branch.as_deref().unwrap_or("main"); // Default branch if not set
     let remote_name = repo_config.remote_name.as_deref().unwrap_or("origin");
-    let last_synced_commits = &repo_config.last_synced_commits;
     let target_ref = repo_config.target_ref.as_deref();
     let force_sync = options.force;
     let extensions_filter = &options.extensions;
+    
+    // Get the current branch from filesystem
+    let git_repo = GitRepository::open(repo_path)
+        .with_context(|| format!("Failed to open repository at {}", repo_path.display()))?;
+    let current_branch = git_repo.current_branch()
+        .with_context(|| format!("Failed to get current branch for repository at {}", repo_path.display()))?;
+    
+    // Use filesystem branch unless target_ref is specified
+    let branch_to_sync = if target_ref.is_some() {
+        target_ref.unwrap()
+    } else {
+        &current_branch
+    };
 
     // Clone values needed inside the blocking task
     let repo_path_clone = repo_path.clone();
     let remote_name_clone = remote_name.to_string();
-    let active_branch_clone = active_branch.to_string();
-    let last_synced_commit_map_clone = last_synced_commits.clone(); // Clone the map
+    let branch_to_sync_clone = branch_to_sync.to_string();
     let target_ref_clone = target_ref.map(String::from);
     let is_local_path_repo_clone = is_local_path_repo;
+    let last_synced_commit = repo_config.last_synced_commit.clone();
     
     info!(
         "Starting sync: repo='{}', path='{}', branch/ref='{}', remote='{}', local={}, force={}",
         repo_name,
         repo_path.display(),
-        target_ref.unwrap_or(active_branch),
+        branch_to_sync,
         remote_name,
         is_local_path_repo,
         force_sync
@@ -130,7 +141,7 @@ where
         
         let commit_oid_str: String;
         let branch_commit: git2::Commit;
-        let current_branch_name = target_ref_clone.as_deref().unwrap_or(&active_branch_clone);
+        let current_branch_name = target_ref_clone.as_deref().unwrap_or(&branch_to_sync_clone);
 
         // Determine target commit (based on target_ref or branch)
         if let Some(target_ref) = &target_ref_clone {
@@ -143,7 +154,7 @@ where
             debug!("Found commit {commit_oid_str} for target_ref '{target_ref}'");
         } else {
             // Logic for syncing a branch (either remote-tracking or local)
-            let branch_name = &active_branch_clone;
+            let branch_name = &branch_to_sync_clone;
             if !is_local_path_repo_clone {
                 debug!("Repository treated as remote. Fetching...");
                 // Fetch from remote
@@ -244,7 +255,7 @@ where
         let mut files_to_delete = Vec::new();
         let mut diff_message = None;
 
-        let last_synced_oid_str = last_synced_commit_map_clone.get(current_branch_name);
+        let last_synced_oid_str = last_synced_commit.as_ref();
 
         if force_sync {
             sync_type = SyncType::Full;
@@ -331,7 +342,7 @@ where
         // Check if the collection exists in Qdrant
         let collection_name = repo_helpers::get_branch_aware_collection_name(
             repo_name, 
-            target_ref.unwrap_or(active_branch), 
+            branch_to_sync, 
             app_config
         );
         
@@ -401,14 +412,14 @@ where
         reporter.report(SyncProgress::new(
             SyncStage::Completed { 
                 message: format!("Repository '{}' branch/ref '{}' already synced to commit {}", 
-                    repo_name, target_ref.unwrap_or(active_branch), commit_oid_str)
+                    repo_name, branch_to_sync, commit_oid_str)
             }
         )).await;
         
         return Ok(SyncResult {
             success: true,
             message: format!("Repository '{}' branch/ref '{}' already synced to commit {}", 
-                repo_name, target_ref.unwrap_or(active_branch), commit_oid_str),
+                repo_name, branch_to_sync, commit_oid_str),
             indexed_languages: Vec::new(), // Or query existing?
             last_synced_commit: Some(commit_oid_str),
             files_indexed: 0,
@@ -435,7 +446,7 @@ where
     
     // --- Qdrant Operations ---
     
-    let current_sync_branch_or_ref = target_ref.unwrap_or(active_branch);
+    let current_sync_branch_or_ref = branch_to_sync;
     
     // Use branch-aware collection naming for better sync management
     let collection_name = repo_helpers::get_branch_aware_collection_name(

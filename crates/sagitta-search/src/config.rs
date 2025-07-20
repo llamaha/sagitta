@@ -23,17 +23,26 @@ pub struct RepositoryConfig {
     /// The local filesystem path where the repository is cloned.
     pub local_path: PathBuf,
     /// The default branch name (e.g., "main", "master").
+    #[deprecated(since = "0.3.0", note = "Branch tracking now uses filesystem state. This field will be removed in a future version.")]
+    #[serde(skip_serializing_if = "String::is_empty", default)]
     pub default_branch: String,
     /// List of branches currently tracked for synchronization.
+    #[deprecated(since = "0.3.0", note = "Branch tracking now uses filesystem state. This field will be removed in a future version.")]
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub tracked_branches: Vec<String>,
     /// The name of the Git remote to use (usually "origin").
     #[serde(default)]
     pub remote_name: Option<String>,
     /// Map of branch names to the last commit hash synced for that branch.
-    #[serde(default)]
+    #[deprecated(since = "0.3.0", note = "Use last_synced_commit instead. This field will be removed in a future version.")]
+    #[serde(skip_serializing_if = "HashMap::is_empty", default)]
     pub last_synced_commits: HashMap<String, String>,
+    /// The last commit hash synced for this repository.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub last_synced_commit: Option<String>,
     /// The currently checked-out branch in the local repository.
-    #[serde(default)]
+    #[deprecated(since = "0.3.0", note = "Branch tracking now uses filesystem state. This field will be removed in a future version.")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub active_branch: Option<String>,
     /// Optional path to an SSH private key for authentication.
     #[serde(default)]
@@ -310,6 +319,42 @@ pub fn get_repo_base_path(config: Option<&AppConfig>) -> Result<PathBuf> {
 }
 
 impl AppConfig {
+    /// Migrates deprecated fields in repository configurations.
+    /// This handles the transition from branch-based tracking to filesystem-based detection.
+    pub fn migrate(&mut self) {
+        for repo in &mut self.repositories {
+            // Migrate last_synced_commits to last_synced_commit if needed
+            #[allow(deprecated)]
+            if repo.last_synced_commit.is_none() && !repo.last_synced_commits.is_empty() {
+                // Find the most recent commit across all branches
+                if let Some(active_branch) = &repo.active_branch {
+                    // First try the active branch
+                    if let Some(commit) = repo.last_synced_commits.get(active_branch) {
+                        repo.last_synced_commit = Some(commit.clone());
+                    }
+                } 
+                
+                // If still no commit, just take any commit (they should all be relatively recent)
+                if repo.last_synced_commit.is_none() {
+                    if let Some((_, commit)) = repo.last_synced_commits.iter().next() {
+                        repo.last_synced_commit = Some(commit.clone());
+                    }
+                }
+                
+                log::info!("Migrated last_synced_commits to last_synced_commit for repository '{}'", repo.name);
+            }
+            
+            // Clear deprecated fields after migration
+            #[allow(deprecated)]
+            {
+                repo.last_synced_commits.clear();
+                repo.default_branch = String::new();
+                repo.tracked_branches.clear();
+                repo.active_branch = None;
+            }
+        }
+    }
+
     /// Validates that the configuration is valid.
     /// Returns an error if mutually exclusive options are set.
     pub fn validate(&self) -> Result<()> {
@@ -385,8 +430,10 @@ pub fn load_config(override_path: Option<&PathBuf>) -> Result<AppConfig> {
         log::debug!("Read config file content successfully.");
 
         match toml::from_str::<AppConfig>(&config_content) {
-            Ok(config) => {
+            Ok(mut config) => {
                 log::debug!("Parsed config successfully: {config:?}");
+                // Migrate deprecated fields
+                config.migrate();
                 // Validate the configuration
                 config.validate()?;
                 Ok(config)
