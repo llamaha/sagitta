@@ -88,6 +88,8 @@ pub struct CustomThemeColors {
     pub border_color: Color32,
     #[serde(with = "color32_serde")]
     pub focus_border_color: Color32,
+    #[serde(with = "color32_serde")]
+    pub tool_card_border_color: Color32,
     
     // Button states
     #[serde(with = "color32_serde")]
@@ -162,6 +164,7 @@ impl Default for CustomThemeColors {
             // Border and stroke colors
             border_color: Color32::from_rgb(60, 60, 60),
             focus_border_color: Color32::from_rgb(100, 149, 237),
+            tool_card_border_color: Color32::from_rgb(50, 50, 60),
             
             // Button states
             button_hover_color: Color32::from_rgb(80, 80, 80),
@@ -325,6 +328,15 @@ impl AppTheme {
             AppTheme::Dark => Color32::from_rgb(60, 60, 60),
             AppTheme::Light => Color32::from_rgb(200, 200, 200),
             AppTheme::Custom => get_custom_theme_colors().border_color,
+        }
+    }
+
+    /// Get tool card border color
+    pub fn tool_card_border_color(&self) -> Color32 {
+        match self {
+            AppTheme::Dark => Color32::from_rgb(50, 50, 60),
+            AppTheme::Light => Color32::from_rgb(180, 180, 190),
+            AppTheme::Custom => get_custom_theme_colors().tool_card_border_color,
         }
     }
 

@@ -65,9 +65,9 @@ mod provider_switching_tests {
         // Start with Claude Code
         assert_eq!(app.get_current_provider(), ProviderType::ClaudeCode);
         
-        // Switch to Mistral.rs
-        app.set_provider(ProviderType::MistralRs).await.unwrap();
-        assert_eq!(app.get_current_provider(), ProviderType::MistralRs);
+        // Switch to OpenAI Compatible
+        app.set_provider(ProviderType::OpenAICompatible).await.unwrap();
+        assert_eq!(app.get_current_provider(), ProviderType::OpenAICompatible);
         
         // Switch back to Claude Code
         app.set_provider(ProviderType::ClaudeCode).await.unwrap();
@@ -80,12 +80,12 @@ mod provider_switching_tests {
         
         let mut app = TestApp::new().await.unwrap();
         
-        // Create invalid config for Mistral.rs (empty base URL)
-        let invalid_config = ProviderConfig::new(ProviderType::MistralRs);
-        app.config.provider_configs.insert(ProviderType::MistralRs, invalid_config);
+        // Create invalid config for OpenAI Compatible (empty base URL)
+        let invalid_config = ProviderConfig::new(ProviderType::OpenAICompatible);
+        app.config.provider_configs.insert(ProviderType::OpenAICompatible, invalid_config);
         
         // Attempt to switch should handle the error gracefully
-        let result = app.set_provider(ProviderType::MistralRs).await;
+        let result = app.set_provider(ProviderType::OpenAICompatible).await;
         
         // Should either fail gracefully or use default config
         // The exact behavior depends on implementation details
@@ -199,7 +199,7 @@ mod performance_tests {
         let start = Instant::now();
         
         for _ in 0..10 {
-            app.set_provider(ProviderType::MistralRs).await.unwrap();
+            app.set_provider(ProviderType::OpenAICompatible).await.unwrap();
             app.set_provider(ProviderType::ClaudeCode).await.unwrap();
         }
         
@@ -252,18 +252,18 @@ mod configuration_tests {
         let claude_provider = factory.create_provider(ProviderType::ClaudeCode).unwrap();
         assert!(claude_provider.validate_config(&claude_config).is_ok());
         
-        // Test Mistral.rs config validation with valid config
-        let mut mistral_config = ProviderConfig::new(ProviderType::MistralRs);
-        mistral_config.set_option("base_url", &"http://localhost:1234".to_string()).unwrap();
-        mistral_config.set_option("model", &"test-model".to_string()).unwrap();
+        // Test OpenAI Compatible config validation with valid config
+        let mut openai_config = ProviderConfig::new(ProviderType::OpenAICompatible);
+        openai_config.set_option("base_url", &"http://localhost:1234".to_string()).unwrap();
+        openai_config.set_option("model", &"test-model".to_string()).unwrap();
         
-        let mistral_provider = factory.create_provider(ProviderType::MistralRs).unwrap();
-        assert!(mistral_provider.validate_config(&mistral_config).is_ok());
+        let openai_provider = factory.create_provider(ProviderType::OpenAICompatible).unwrap();
+        assert!(openai_provider.validate_config(&openai_config).is_ok());
         
-        // Test Mistral.rs config validation with invalid config
-        let invalid_mistral_config = ProviderConfig::new(ProviderType::MistralRs);
+        // Test OpenAI Compatible config validation with invalid config
+        let invalid_openai_config = ProviderConfig::new(ProviderType::OpenAICompatible);
         // Empty base_url should be invalid
-        assert!(mistral_provider.validate_config(&invalid_mistral_config).is_err());
+        assert!(openai_provider.validate_config(&invalid_openai_config).is_err());
     }
     
     #[test]
@@ -277,8 +277,8 @@ mod configuration_tests {
         let claude_default = claude_provider.default_config();
         assert!(claude_provider.validate_config(&claude_default).is_ok());
         
-        let mistral_provider = factory.create_provider(ProviderType::MistralRs).unwrap();
-        let mistral_default = mistral_provider.default_config();
-        assert!(mistral_provider.validate_config(&mistral_default).is_ok());
+        let openai_provider = factory.create_provider(ProviderType::OpenAICompatible).unwrap();
+        let openai_default = openai_provider.default_config();
+        assert!(openai_provider.validate_config(&openai_default).is_ok());
     }
 }

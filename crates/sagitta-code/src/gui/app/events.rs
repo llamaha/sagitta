@@ -8,7 +8,7 @@ use crate::agent::message::types::{AgentMessage, ToolCall};
 use crate::agent::state::types::AgentState;
 use crate::agent::events::{AgentEvent, ToolRunId};
 use crate::llm::client::Role;
-use super::super::chat::view::{ChatMessage, MessageAuthor, StreamingMessage, MessageStatus, ToolCall as ViewToolCall};
+use super::super::chat::{ChatMessage, MessageAuthor, StreamingMessage, MessageStatus, ToolCall as ViewToolCall};
 use super::panels::{SystemEventType};
 use super::SagittaCodeApp;
 use serde_json::Value;
@@ -943,15 +943,15 @@ pub fn make_chat_message_from_agent_message(agent_msg: &AgentMessage) -> ChatMes
     chat_message.id = Some(agent_msg.id.to_string());
     chat_message.timestamp = agent_msg.timestamp; // Preserve original timestamp
     chat_message.tool_calls = agent_msg.tool_calls.iter().map(|tool_call| {
-        crate::gui::chat::view::ToolCall {
+        crate::gui::chat::ToolCall {
             id: tool_call.id.clone(),
             name: tool_call.name.clone(),
             arguments: tool_call.arguments.to_string(),
             result: tool_call.result.as_ref().map(|r| r.to_string()),
             status: if tool_call.successful { 
-                crate::gui::chat::view::MessageStatus::Complete 
+                crate::gui::chat::MessageStatus::Complete 
             } else { 
-                crate::gui::chat::view::MessageStatus::Error("Tool call failed".to_string()) 
+                crate::gui::chat::MessageStatus::Error("Tool call failed".to_string()) 
             },
             content_position: None,
         }
@@ -2478,6 +2478,7 @@ mod tests {
             AppEvent::AgentReplaced { .. } => assert!(true),
             AppEvent::ExecuteTask { .. } => assert!(true),
             AppEvent::CheckAndExecuteTask => assert!(true),
+            AppEvent::ToolExecutionComplete { .. } => assert!(true),
         }
         
         // Test the other variant too
@@ -2505,6 +2506,7 @@ mod tests {
             AppEvent::AgentReplaced { .. } => assert!(true),
             AppEvent::ExecuteTask { .. } => assert!(true),
             AppEvent::CheckAndExecuteTask => assert!(true),
+            AppEvent::ToolExecutionComplete { .. } => assert!(true),
         }
     }
 
@@ -2543,7 +2545,7 @@ mod tests {
     #[test]
     fn test_make_chat_message_from_agent_message() {
         use crate::llm::client::Role;
-        use crate::gui::chat::view::MessageAuthor;
+        use crate::gui::chat::MessageAuthor;
         
         // Test user message
         let user_msg = create_test_agent_message(Role::User, "Hello, world!");
@@ -2571,7 +2573,7 @@ mod tests {
 
     #[test]
     fn test_tool_call_preservation_in_chat_message_conversion() {
-        use crate::gui::chat::view::StreamingMessage;
+        use crate::gui::chat::StreamingMessage;
 
         // Create an agent tool call with the correct structure
         let agent_tool_call = AgentToolCall {
@@ -2608,7 +2610,7 @@ mod tests {
 
     #[test]
     fn test_tool_call_preservation_with_multiple_tool_calls() {
-        use crate::gui::chat::view::StreamingMessage;
+        use crate::gui::chat::StreamingMessage;
 
         // Create multiple agent tool calls
         let agent_tool_call1 = AgentToolCall {
@@ -2668,7 +2670,7 @@ mod tests {
         assert_eq!(chat_message.tool_calls.len(), 0);
 
         // Convert to StreamingMessage
-        let streaming_message: crate::gui::chat::view::StreamingMessage = chat_message.into();
+        let streaming_message: crate::gui::chat::StreamingMessage = chat_message.into();
 
         // Verify empty tool calls list is preserved
         assert_eq!(streaming_message.tool_calls.len(), 0);
@@ -2908,7 +2910,7 @@ mod tests {
         assert_eq!(messages.len(), 1); // Still 1 message
         
         // Verify message is agent message and tool result is stored
-        assert_eq!(messages[0].author, crate::gui::chat::view::MessageAuthor::Agent);
+        assert_eq!(messages[0].author, crate::gui::chat::MessageAuthor::Agent);
         
         // Verify tool result is stored in state
         let stored_result = app.state.tool_results.get(&tool_call.id);

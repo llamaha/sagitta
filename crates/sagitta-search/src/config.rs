@@ -409,8 +409,42 @@ pub fn load_config(override_path: Option<&PathBuf>) -> Result<AppConfig> {
 ///
 /// Creates the configuration directory if it doesn't exist.
 /// Overwrites the existing configuration file at the target path.
+///
+/// # WARNING FOR TEST AUTHORS
+/// 
+/// DO NOT CALL THIS FUNCTION IN TESTS! It will panic in test builds to prevent
+/// overwriting user configuration files. This has been a recurring issue that has
+/// caused data loss multiple times.
+///
+/// If you're writing tests:
+/// - Use in-memory configs only
+/// - Let handlers call save_config internally (protected by SAGITTA_TEST_MODE)
+/// - Never save configs to disk in tests
 pub fn save_config(config: &AppConfig, override_path: Option<&PathBuf>) -> Result<()> {
-    // IMPORTANT: Check if we're in test mode to prevent overwriting real configs
+    // CRITICAL: Prevent config saves in test mode to protect user data
+    #[cfg(test)]
+    {
+        // In test builds, ALWAYS panic unless explicitly allowed
+        if std::env::var("SAGITTA_ALLOW_TEST_CONFIG_SAVE").is_err() {
+            panic!(
+                "\n\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\
+                FATAL: save_config() called in test build!\n\
+                \n\
+                This is FORBIDDEN to prevent overwriting user configs.\n\
+                This has happened 5+ times and caused data loss.\n\
+                \n\
+                If you REALLY need to test config saving:\n\
+                1. Set SAGITTA_ALLOW_TEST_CONFIG_SAVE=1\n\
+                2. Use a custom override_path to a temp directory\n\
+                3. But seriously, you probably don't need this\n\
+                \n\
+                DO NOT CALL save_config() IN TESTS!\n\
+                !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+            );
+        }
+    }
+    
+    // Runtime check for test mode (for non-test builds running tests)
     if std::env::var("SAGITTA_TEST_MODE").is_ok() {
         log::debug!("Test mode detected - skipping config save to prevent overwriting real config");
         return Ok(());

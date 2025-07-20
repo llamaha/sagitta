@@ -1072,6 +1072,15 @@ pub async fn handle_repository_list_branches(
 
 #[cfg(test)]
 mod tests {
+    // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    // WARNING: NEVER EVER CALL save_config() IN TESTS!
+    // 
+    // This has been a recurring issue where tests overwrite user configuration files.
+    // See the warnings in tests/dependency_integration_test.rs for full details.
+    // 
+    // ALWAYS use in-memory configs. NEVER save to disk in tests.
+    // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    
     use super::*;
     use sagitta_search::config::{AppConfig, IndexingConfig, PerformanceConfig, RepositoryConfig};
     use tempfile::tempdir;

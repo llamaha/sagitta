@@ -8,7 +8,7 @@ use super::events::AppEvent;
 use super::super::repository::manager::RepositoryManager;
 use super::super::repository::RepoPanel;
 use super::super::theme::AppTheme;
-use super::super::chat::view::{StreamingMessage, MessageAuthor};
+use super::super::chat::{StreamingMessage, MessageAuthor};
 use crate::config::loader::load_all_configs;
 use crate::llm::client::LlmClient;
 use crate::agent::Agent;
@@ -328,6 +328,33 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     if let Some(saved_repo_context) = saved_repo_context {
         app.state.set_repository_context(Some(saved_repo_context.clone()));
         log::info!("Restored repository context from config: {saved_repo_context}");
+        
+        // Write the repository state file for MCP server on initialization
+        let repo_manager = app.repo_panel.get_repo_manager();
+        let repo_name_for_state = saved_repo_context.clone();
+        
+        tokio::spawn(async move {
+            let repo_manager_guard = repo_manager.lock().await;
+            if let Ok(repositories) = repo_manager_guard.list_repositories().await {
+                if let Some(repo_config) = repositories.iter().find(|r| r.name == repo_name_for_state) {
+                    // Write the current repository path to state file
+                    let mut state_path = dirs::config_dir().unwrap_or_default();
+                    state_path.push("sagitta-code");
+                    
+                    // Ensure directory exists
+                    if let Err(e) = tokio::fs::create_dir_all(&state_path).await {
+                        log::warn!("Failed to create state directory during initialization: {e}");
+                    } else {
+                        state_path.push("current_repository.txt");
+                        if let Err(e) = tokio::fs::write(&state_path, repo_config.local_path.to_string_lossy().as_bytes()).await {
+                            log::warn!("Failed to write repository state file during initialization: {e}");
+                        } else {
+                            log::info!("Wrote current repository path to state file during initialization: {}", state_path.display());
+                        }
+                    }
+                }
+            }
+        });
         
         // Initialize git history modal with the restored repository
         let repo_manager = app.repo_panel.get_repo_manager();

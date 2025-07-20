@@ -1,11 +1,19 @@
 // Chat UI module
 pub mod input;
 pub mod view;
+pub mod types;
+pub mod tool_mappings;
+pub mod syntax_highlighting;
+pub mod rendering;
 
 #[cfg(test)]
 mod collapsing_tests;
 
-use view::{StreamingMessage, MessageAuthor, MessageStatus, ToolCall, MessageType};
+// Re-export types for external use
+pub use types::{
+    StreamingMessage, MessageAuthor, MessageStatus, ToolCall, 
+    MessageType, CopyButtonState, ChatMessage
+};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use chrono::{DateTime, Utc};
@@ -110,12 +118,12 @@ impl StreamingChatManager {
         {
             let mut active_streams = self.active_streams.lock().unwrap();
             if let Some(message) = active_streams.get_mut(message_id) {
-                let tool_call = view::ToolCall {
+                let tool_call = ToolCall {
                     id: tool_id,
                     name: tool_name,
                     arguments: serde_json::to_string(&arguments).unwrap_or_default(),
                     result: None,
-                    status: view::MessageStatus::Streaming,
+                    status: MessageStatus::Streaming,
                     content_position: Some(message.content.len()),
                 };
                 message.tool_calls.push(tool_call);
@@ -128,12 +136,12 @@ impl StreamingChatManager {
         for item in messages.iter_mut().rev() {
             if let ChatItem::Message(message) = item {
                 if message.id == message_id {
-                    let tool_call = view::ToolCall {
+                    let tool_call = ToolCall {
                         id: tool_id,
                         name: tool_name,
                         arguments: serde_json::to_string(&arguments).unwrap_or_default(),
                         result: None,
-                        status: view::MessageStatus::Streaming,
+                        status: MessageStatus::Streaming,
                         content_position: Some(message.content.len()),
                     };
                     message.tool_calls.push(tool_call);
@@ -153,9 +161,9 @@ impl StreamingChatManager {
                     if tool_call.id == tool_id {
                         tool_call.result = Some(serde_json::to_string_pretty(&result).unwrap_or_default());
                         tool_call.status = if success {
-                            view::MessageStatus::Complete
+                            MessageStatus::Complete
                         } else {
-                            view::MessageStatus::Error("Tool execution failed".to_string())
+                            MessageStatus::Error("Tool execution failed".to_string())
                         };
                         return;
                     }
@@ -172,9 +180,9 @@ impl StreamingChatManager {
                         if tool_call.id == tool_id {
                             tool_call.result = Some(serde_json::to_string_pretty(&result).unwrap_or_default());
                             tool_call.status = if success {
-                                view::MessageStatus::Complete
+                                MessageStatus::Complete
                             } else {
-                                view::MessageStatus::Error("Tool execution failed".to_string())
+                                MessageStatus::Error("Tool execution failed".to_string())
                             };
                             return;
                         }
