@@ -13,7 +13,7 @@ use serde_json::json;
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// The prompt to send to the model
-    #[arg(short, long, default_value = "Please ping the server and tell me if it responds")]
+    #[arg(short, long, default_value = "Please read the file /home/adam/repos/sagitta/README.md and tell me what the project is about")]
     prompt: String,
 
     /// API endpoint
@@ -138,7 +138,7 @@ async fn run_direct_llm_with_tool_execution(
         }
     ];
 
-    // Define some tools
+    // Define some tools including read_file to test streaming issue
     let tools = vec![
         ToolDefinition {
             name: "ping".to_string(),
@@ -147,6 +147,29 @@ async fn run_direct_llm_with_tool_execution(
                 "type": "object",
                 "properties": {},
                 "required": []
+            }),
+            is_required: false,
+        },
+        ToolDefinition {
+            name: "read_file".to_string(),
+            description: "Reads content from a file with optional line range support.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "file_path": { 
+                        "type": "string", 
+                        "description": "The absolute path to the file to read" 
+                    },
+                    "start_line": { 
+                        "type": "integer", 
+                        "description": "Optional line number to start reading from (1-based)" 
+                    },
+                    "end_line": { 
+                        "type": "integer", 
+                        "description": "Optional line number to stop reading at (inclusive)" 
+                    }
+                },
+                "required": ["file_path"]
             }),
             is_required: false,
         },
@@ -453,6 +476,29 @@ async fn run_direct_llm(
                 "type": "object",
                 "properties": {},
                 "required": []
+            }),
+            is_required: false,
+        },
+        ToolDefinition {
+            name: "read_file".to_string(),
+            description: "Reads content from a file with optional line range support.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "file_path": { 
+                        "type": "string", 
+                        "description": "The absolute path to the file to read" 
+                    },
+                    "start_line": { 
+                        "type": "integer", 
+                        "description": "Optional line number to start reading from (1-based)" 
+                    },
+                    "end_line": { 
+                        "type": "integer", 
+                        "description": "Optional line number to stop reading at (inclusive)" 
+                    }
+                },
+                "required": ["file_path"]
             }),
             is_required: false,
         },
