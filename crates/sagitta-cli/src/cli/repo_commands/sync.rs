@@ -54,24 +54,20 @@ where
     
     let app_config_clone = config.clone();
 
-    let active_branch_str = repo_config.active_branch
-        .as_ref()
-        .ok_or_else(|| anyhow!("Repository '{}' has no active branch set. Use 'use-branch' command.", repo_name_str))?;
-    let target_ref_str_opt = repo_config.target_ref.clone();
-    let current_sync_identifier = target_ref_str_opt.as_deref().unwrap_or(active_branch_str).to_string();
-
     println!(
-        "Syncing repository '{}' (Branch/Ref: {})...", 
-        repo_name_str.cyan(), 
-        current_sync_identifier.cyan()
+        "Syncing repository '{}'...", 
+        repo_name_str.cyan()
     );
 
     // Initialize git manager for enhanced sync detection
     let mut git_manager = GitManager::new();
     git_manager.initialize_repository(&repo_path).await?;
 
-    // Calculate sync requirements
-    let sync_req = git_manager.calculate_sync_requirements(&repo_path, &current_sync_identifier).await?;
+    // Get current branch from filesystem
+    let current_branch = git_manager.get_repository_info(&repo_path)?.current_branch;
+    
+    // Calculate sync requirements based on current branch
+    let sync_req = git_manager.calculate_sync_requirements(&repo_path, &current_branch).await?;
     
     match sync_req.sync_type {
         SyncType::None => {
@@ -109,15 +105,10 @@ where
                 
                 // Update the config with the new commit hash
                 if let Some(commit) = sync_result.last_synced_commit {
-                    let current_sync_identifier = repo_config.active_branch.as_deref()
-                        .or(repo_config.target_ref.as_deref())
-                        .unwrap_or(&repo_config.default_branch)
-                        .to_string();
-                    
                     let repo_name_for_update = repo_config.name.clone();
                     if let Some(repo_mut) = config.repositories.iter_mut().find(|r| r.name == repo_name_for_update) {
-                        // Update last_synced_commits map
-                        repo_mut.last_synced_commits.insert(current_sync_identifier, commit);
+                        // Update last_synced_commit field
+                        repo_mut.last_synced_commit = Some(commit);
                         repo_mut.indexed_languages = Some(sync_result.indexed_languages);
                     }
                 }

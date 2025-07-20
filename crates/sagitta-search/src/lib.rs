@@ -1515,17 +1515,19 @@ pub async fn add_orphaned_repository(
     };
     
     // Create repository configuration
+    #[allow(deprecated)]
     let repo_config = RepositoryConfig {
         name: name.clone(),
         url: url.clone(),
         local_path: orphaned_repo.local_path.clone(),
-        default_branch: default_branch.clone(),
-        tracked_branches: vec![default_branch.clone()],
+        default_branch: String::new(), // Deprecated field
+        tracked_branches: Vec::new(), // Deprecated field
         remote_name: Some("origin".to_string()),
-        active_branch: Some(default_branch),
+        active_branch: None, // Deprecated field
         ssh_key_path: None,
         ssh_key_passphrase: None,
-        last_synced_commits: std::collections::HashMap::new(),
+        last_synced_commits: std::collections::HashMap::new(), // Deprecated field
+        last_synced_commit: None,
         indexed_languages: None,
         added_as_local_path: true, // Mark as added from local path
         target_ref: None,

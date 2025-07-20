@@ -24,8 +24,8 @@ use tokio;
 use crate::sync_progress::{SyncProgressReporter, AddProgressReporter, AddProgress, RepoAddStage};
 use sagitta_embed::EmbeddingProcessor;
 
-/// Updates the last synced commit for a branch in the AppConfig and refreshes the
-/// list of indexed languages for that branch by querying Qdrant.
+/// Updates the last synced commit for a repository in the AppConfig and refreshes the
+/// list of indexed languages by querying Qdrant.
 pub async fn update_sync_status_and_languages<
     C: QdrantClientTrait + Send + Sync + 'static,
 >(
@@ -38,8 +38,8 @@ pub async fn update_sync_status_and_languages<
 ) -> Result<(), SagittaError> {
     let repo_config = config.repositories.get_mut(repo_config_index)
         .ok_or_else(|| SagittaError::ConfigurationError(format!("Repository index {repo_config_index} out of bounds")))?;
-    log::debug!("Updating last synced commit for branch '{branch_name}' to {commit_oid_str}");
-    repo_config.last_synced_commits.insert(branch_name.to_string(), commit_oid_str.to_string());
+    log::debug!("Updating last synced commit to {commit_oid_str}");
+    repo_config.last_synced_commit = Some(commit_oid_str.to_string());
     log::debug!("Querying Qdrant for distinct languages in collection '{collection_name}' for branch '{branch_name}'");
     let mut languages = HashSet::new();
     let mut offset: Option<PointId> = None;
@@ -613,15 +613,12 @@ where
         name: repo_name.to_string(),
         url: final_url_to_store, // Use the potentially updated URL
         local_path: final_local_path,
-        default_branch: final_active_branch.clone(),
-        tracked_branches: if final_active_branch != final_branch && params.target_ref_opt.is_some() {
-            vec![final_branch.to_string(), final_active_branch.clone()]
-        } else {
-            vec![final_active_branch.clone()]
-        },
-        active_branch: Some(final_active_branch),
+        default_branch: String::new(), // Deprecated field
+        tracked_branches: Vec::new(), // Deprecated field
+        active_branch: None, // Deprecated field
         remote_name: Some(final_remote.to_string()),
-        last_synced_commits: HashMap::new(),
+        last_synced_commits: HashMap::new(), // Deprecated field
+        last_synced_commit: None, // New field
         indexed_languages: None,
         ssh_key_path: params.ssh_key_path_opt.cloned(),
         ssh_key_passphrase: params.ssh_passphrase_opt.map(String::from),
