@@ -12,6 +12,7 @@ use sagitta_search::{
     constants::{FIELD_BRANCH, FIELD_LANGUAGE, FIELD_ELEMENT_TYPE},
 };
 use qdrant_client::qdrant::{Filter, QueryResponse, Condition};
+use git_manager::GitRepository;
 
 // Use config types from sagitta_search
 
@@ -69,9 +70,33 @@ where
         .find(|r| r.name == repo_name)
         .ok_or_else(|| anyhow!("Configuration for repository '{}' not found.", repo_name))?;
 
-    let branch_name = args.branch.clone()
-        .or_else(|| repo_config.active_branch.clone())
-        .unwrap_or_else(|| repo_config.default_branch.clone());
+    // Get the current branch from filesystem, just like sync and stats do
+    let branch_name = if let Some(branch) = args.branch.clone() {
+        // If branch is explicitly specified in args, use that
+        branch
+    } else if let Some(target_ref) = repo_config.target_ref.as_deref() {
+        // If target_ref is specified in config, use that
+        target_ref.to_string()
+    } else {
+        // Otherwise, get the current branch from the filesystem
+        match GitRepository::open(&repo_config.local_path) {
+            Ok(git_repo) => {
+                match git_repo.current_branch() {
+                    Ok(current_branch) => current_branch,
+                    Err(e) => {
+                        // If we can't get the current branch, try common defaults
+                        eprintln!("Warning: Could not determine current branch: {}. Using 'main' as default.", e);
+                        "main".to_string()
+                    }
+                }
+            }
+            Err(e) => {
+                // If we can't open the repository, try common defaults
+                eprintln!("Warning: Could not open repository: {}. Using 'main' as default.", e);
+                "main".to_string()
+            }
+        }
+    };
 
     let collection_name = get_branch_aware_collection_name(&repo_name, &branch_name, config);
 

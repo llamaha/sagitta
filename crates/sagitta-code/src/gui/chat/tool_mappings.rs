@@ -27,7 +27,7 @@ pub fn get_human_friendly_tool_name(tool_name: &str) -> String {
         
         // Search operations
         "search_file" | "Glob" => "🔍 Search Files".to_string(),
-        "semantic_code_search" | "Search" => "🔎 Search Code".to_string(),
+        "semantic_code_search" | "Search" | "query" => "🔎 Semantic Code Search".to_string(),
         "repository_search" => "🔍 Search Repository".to_string(),
         "grep" | "Grep" => "🔍 Grep".to_string(),
         
@@ -36,12 +36,12 @@ pub fn get_human_friendly_tool_name(tool_name: &str) -> String {
         "repository_list" => "📋 List Repositories".to_string(),
         "repository_sync" => "🔄 Sync Repository".to_string(),
         "repository_switch_branch" => "🔀 Switch Branch".to_string(),
-        "repository_list_branches" => "🌿 List Branches".to_string(),
-        "repository_view_file" => "👁️ View Repository File".to_string(),
+        "repository_list_branches" => "📑 List Branches".to_string(),
+        "repository_view_file" => "📄 View Repository File".to_string(),
         
         // Shell and system
-        "shell_execute" | "Bash" => "🖥️ Shell Command".to_string(),
-        "streaming_shell_execution" => "🖥️ Streaming Shell".to_string(),
+        "shell_execute" | "Bash" => "💻 Shell Command".to_string(),
+        "streaming_shell_execution" => "💻 Streaming Shell".to_string(),
         
         // Task management
         "todo_read" | "TodoRead" => "📋 Read TODOs".to_string(),
@@ -108,7 +108,7 @@ pub fn get_tool_icon(tool_name: &str) -> &'static str {
         
         // Search operations
         "search_file" | "Glob" => "🔍",
-        "semantic_code_search" | "Search" => "🔎",
+        "semantic_code_search" | "Search" | "query" => "🔎",
         "repository_search" => "🔍",
         "grep" | "Grep" => "🔍",
         
@@ -117,12 +117,12 @@ pub fn get_tool_icon(tool_name: &str) -> &'static str {
         "repository_list" => "📋",
         "repository_sync" => "🔄",
         "repository_switch_branch" => "🔀",
-        "repository_list_branches" => "🌿",
-        "repository_view_file" => "👁️",
+        "repository_list_branches" => "📑",
+        "repository_view_file" => "📄",
         
         // Shell and system
-        "shell_execute" | "Bash" => "🖥️",
-        "streaming_shell_execution" => "🖥️",
+        "shell_execute" | "Bash" => "💻",
+        "streaming_shell_execution" => "💻",
         
         // Task management
         "todo_read" | "TodoRead" => "📋",
@@ -209,7 +209,7 @@ pub fn format_tool_parameters_for_inline(tool_name: &str, args: &serde_json::Val
         },
         
         // Search operations - show query/pattern
-        "semantic_code_search" | "Search" | "repository_search" => {
+        "semantic_code_search" | "Search" | "repository_search" | "query" => {
             if let Some(query) = args.get("queryText").or_else(|| args.get("query")).and_then(|v| v.as_str()) {
                 let truncated = if query.len() > 40 {
                     format!("{}...", &query[..37])

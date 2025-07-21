@@ -581,6 +581,50 @@ impl StreamingChatManager {
         }
     }
     
+    /// Restore a tool card from persistence (used when loading conversations)
+    pub fn restore_tool_card(&self, tool_call: &crate::agent::message::types::ToolCall, message_timestamp: DateTime<Utc>) {
+        use crate::agent::events::ToolRunId;
+        
+        // Generate a ToolRunId from the tool call ID (try to parse as UUID, or generate new one)
+        let run_id = tool_call.id.parse::<ToolRunId>().unwrap_or_else(|_| ToolRunId::new_v4());
+        
+        let tool_card = ToolCard {
+            run_id,
+            tool_name: tool_call.name.clone(),
+            status: if tool_call.successful {
+                ToolCardStatus::Completed { success: true }
+            } else if tool_call.result.is_some() {
+                ToolCardStatus::Completed { success: false }
+            } else {
+                ToolCardStatus::Running
+            },
+            progress: if tool_call.result.is_some() { Some(1.0) } else { None },
+            logs: Vec::new(),
+            started_at: tool_call.execution_time.unwrap_or(message_timestamp),
+            completed_at: if tool_call.result.is_some() { 
+                Some(tool_call.execution_time.unwrap_or(message_timestamp)) 
+            } else { 
+                None 
+            },
+            input_params: tool_call.arguments.clone(),
+            result: tool_call.result.clone(),
+        };
+        
+        // Store in tool_cards map
+        {
+            let mut tool_cards = self.tool_cards.lock().unwrap();
+            tool_cards.insert(run_id, tool_card.clone());
+        }
+        
+        // Add to messages list as a ChatItem::ToolCard
+        {
+            let mut messages = self.messages.lock().unwrap();
+            messages.push(ChatItem::ToolCard(tool_card));
+        }
+        
+        log::debug!("Restored tool card for tool '{}' with run_id {}", tool_call.name, run_id);
+    }
+    
     /// Get all items for display (includes active streams and tool cards)
     pub fn get_all_items(&self) -> Vec<ChatItem> {
         let messages = self.messages.lock().unwrap();

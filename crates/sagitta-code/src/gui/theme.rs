@@ -149,11 +149,11 @@ impl Default for CustomThemeColors {
             tool_card_background: Color32::from_rgb(32, 32, 40),
             
             // Text colors
-            text_color: Color32::from_rgb(220, 220, 220),
-            hint_text_color: Color32::from_rgb(128, 128, 128),
-            code_text_color: Color32::from_rgb(200, 200, 200),
-            thinking_text_color: Color32::from_rgb(180, 180, 180),
-            timestamp_color: Color32::from_rgb(128, 128, 128),
+            text_color: Color32::from_rgb(235, 235, 235),      // Improved contrast
+            hint_text_color: Color32::from_rgb(160, 160, 160), // Better visibility
+            code_text_color: Color32::from_rgb(210, 210, 210), // Slightly brighter
+            thinking_text_color: Color32::from_rgb(190, 190, 190), // More visible
+            timestamp_color: Color32::from_rgb(150, 150, 150), // Better contrast
             
             // Accent and highlight colors
             accent_color: Color32::from_rgb(100, 149, 237),
@@ -298,8 +298,8 @@ impl AppTheme {
     /// Get text color
     pub fn text_color(&self) -> Color32 {
         match self {
-            AppTheme::Dark => Color32::from_rgb(220, 220, 220),
-            AppTheme::Light => Color32::from_rgb(60, 60, 60),
+            AppTheme::Dark => Color32::from_rgb(235, 235, 235), // Increased from 220 for better contrast
+            AppTheme::Light => Color32::from_rgb(40, 40, 40),   // Darker for better contrast
             AppTheme::Custom => get_custom_theme_colors().text_color,
         }
     }
@@ -370,8 +370,8 @@ impl AppTheme {
     /// Get hint text color
     pub fn hint_text_color(&self) -> Color32 {
         match self {
-            AppTheme::Dark => Color32::from_rgb(128, 128, 128),
-            AppTheme::Light => Color32::from_rgb(128, 128, 128),
+            AppTheme::Dark => Color32::from_rgb(160, 160, 160), // Increased from 128 for better contrast
+            AppTheme::Light => Color32::from_rgb(100, 100, 100), // Slightly darker for light theme
             AppTheme::Custom => get_custom_theme_colors().hint_text_color,
         }
     }

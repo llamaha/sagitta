@@ -3,10 +3,11 @@ use crate::mcp::types::{
     RepositoryListDependenciesResult, DependencyInfo,
 };
 use anyhow::Result;
-use sagitta_search::config::{save_config, RepositoryDependency};
+use sagitta_search::config::{save_config, RepositoryDependency, RepositoryConfig};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
+use std::collections::HashSet;
 
 /// Adds or updates a dependency for a repository
 pub async fn handle_repository_add_dependency(
@@ -43,36 +44,42 @@ pub async fn handle_repository_add_dependency(
         ));
     }
     
-    // Find the main repository and update dependencies
+    // Find the main repository
     let main_repo_index = config.repositories.iter()
         .position(|r| r.name == params.repository_name)
         .ok_or_else(|| anyhow::anyhow!("Repository '{}' not found", params.repository_name))?;
     
-    let main_repo = &mut config.repositories[main_repo_index];
+    let main_repo = &config.repositories[main_repo_index];
     
     // Check if dependency already exists
-    if let Some(existing) = main_repo.dependencies.iter_mut()
-        .find(|d| d.repository_name == params.dependency_name) 
+    if main_repo.dependencies.iter()
+        .any(|d| d.repository_name == params.dependency_name) 
     {
-        // Update existing dependency
-        existing.target_ref = params.target_ref.clone();
-        existing.purpose = params.purpose.clone();
-        info!(
-            "Updated dependency '{}' for repository '{}'",
-            params.dependency_name, params.repository_name
-        );
-    } else {
-        // Add new dependency
-        main_repo.dependencies.push(RepositoryDependency {
-            repository_name: params.dependency_name.clone(),
-            target_ref: params.target_ref.clone(),
-            purpose: params.purpose.clone(),
-        });
-        info!(
-            "Added dependency '{}' to repository '{}'",
-            params.dependency_name, params.repository_name
-        );
+        return Err(anyhow::anyhow!(
+            "Repository '{}' already depends on '{}'",
+            params.repository_name, params.dependency_name
+        ));
     }
+    
+    // Check for circular dependencies
+    if would_create_circular_dependency(&config.repositories, &params.repository_name, &params.dependency_name) {
+        return Err(anyhow::anyhow!(
+            "Adding '{}' as a dependency of '{}' would create a circular dependency",
+            params.dependency_name, params.repository_name
+        ));
+    }
+    
+    // Add new dependency
+    let main_repo = &mut config.repositories[main_repo_index];
+    main_repo.dependencies.push(RepositoryDependency {
+        repository_name: params.dependency_name.clone(),
+        target_ref: params.target_ref.clone(),
+        purpose: params.purpose.clone(),
+    });
+    info!(
+        "Added dependency '{}' to repository '{}'",
+        params.dependency_name, params.repository_name
+    );
     
     // Save configuration
     save_config(&config, None)?;
@@ -126,13 +133,10 @@ pub async fn handle_repository_remove_dependency(
             ),
         })
     } else {
-        Ok(RepositoryDependencyResult {
-            success: false,
-            message: format!(
-                "Dependency '{}' not found in repository '{}'",
-                params.dependency_name, params.repository_name
-            ),
-        })
+        Err(anyhow::anyhow!(
+            "Repository '{}' does not have a dependency on '{}'",
+            params.repository_name, params.dependency_name
+        ))
     }
 }
 
@@ -170,4 +174,36 @@ pub async fn handle_repository_list_dependencies(
         repository_name: params.repository_name,
         dependencies,
     })
+}
+
+/// Helper function to check if adding a dependency would create a circular dependency
+fn would_create_circular_dependency(
+    repositories: &[RepositoryConfig],
+    repo_name: &str,
+    dependency_name: &str,
+) -> bool {
+    // Use depth-first search to check if dependency_name can reach repo_name
+    let mut visited = HashSet::new();
+    let mut stack = vec![dependency_name.to_string()];
+    
+    while let Some(current) = stack.pop() {
+        // If we've reached the original repository, we have a cycle
+        if current == repo_name {
+            return true;
+        }
+        
+        // Skip if already visited
+        if !visited.insert(current.clone()) {
+            continue;
+        }
+        
+        // Find the current repository and add its dependencies to the stack
+        if let Some(repo) = repositories.iter().find(|r| r.name == current) {
+            for dep in &repo.dependencies {
+                stack.push(dep.repository_name.clone());
+            }
+        }
+    }
+    
+    false
 }

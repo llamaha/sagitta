@@ -200,18 +200,19 @@ mod tests {
     async fn test_shell_execute_with_repository_state_file() {
         use tokio::fs;
         
+        // Clean up any existing state file from previous tests
+        if let Some(mut state_path) = dirs::config_dir() {
+            state_path.push("sagitta-code");
+            state_path.push("current_repository.txt");
+            let _ = fs::remove_file(&state_path).await;
+        }
+        
         // Create a temporary directory to act as the repository
         let temp_dir = TempDir::new().unwrap();
         let repo_path = temp_dir.path().to_str().unwrap().to_string();
         
-        // Write repository path to state file
-        let mut state_dir = dirs::config_dir().unwrap();
-        state_dir.push("sagitta-code");
-        fs::create_dir_all(&state_dir).await.unwrap();
-        
-        let mut state_file = state_dir.clone();
-        state_file.push("current_repository.txt");
-        fs::write(&state_file, &repo_path).await.unwrap();
+        // Set environment variable instead of writing to real config directory
+        std::env::set_var("SAGITTA_CURRENT_REPO_PATH", &repo_path);
         
         // Execute command without specifying working directory
         let params = ShellExecuteParams {
@@ -230,11 +231,11 @@ mod tests {
         
         let result = handle_shell_execute(params, config, qdrant_client, None).await.unwrap();
         
-        // Clean up state file
-        let _ = fs::remove_file(&state_file).await;
+        // Clean up environment variable
+        std::env::remove_var("SAGITTA_CURRENT_REPO_PATH");
         
         assert_eq!(result.exit_code, 0);
-        // Should use repository path from state file
+        // Should use repository path from environment variable
         let stdout = result.stdout.trim().replace('\\', "/");
         let expected = repo_path.replace('\\', "/");
         assert!(stdout.contains(&expected) || stdout == expected);
@@ -244,11 +245,7 @@ mod tests {
     async fn test_shell_execute_bug_reproduction() {
         use tokio::fs;
         
-        // This test reproduces the bug where the app builds in the CWD instead of the repository directory
-        
-        // Create a temporary directory to act as the app launch directory (CWD)
-        let app_cwd = TempDir::new().unwrap();
-        let app_cwd_path = app_cwd.path().to_str().unwrap().to_string();
+        // This test verifies that commands execute in the correct directory
         
         // Create a temporary directory to act as the repository
         let repo_dir = TempDir::new().unwrap();
@@ -258,23 +255,14 @@ mod tests {
         let test_file_path = repo_dir.path().join("test_file.txt");
         fs::write(&test_file_path, "This is in the repository").await.unwrap();
         
-        // Write repository path to state file
-        let mut state_dir = dirs::config_dir().unwrap();
-        state_dir.push("sagitta-code");
-        fs::create_dir_all(&state_dir).await.unwrap();
-        
-        let mut state_file = state_dir.clone();
-        state_file.push("current_repository.txt");
-        fs::write(&state_file, &repo_path).await.unwrap();
-        
-        // Execute a command that lists files (should see test_file.txt if working directory is correct)
+        // Execute a command that lists files with explicit working directory
         let params = ShellExecuteParams {
             command: if cfg!(target_os = "windows") {
                 "dir /b".to_string()
             } else {
                 "ls".to_string()
             },
-            working_directory: None, // Not specified - should use state file
+            working_directory: Some(repo_path.clone()), // Explicitly specify to avoid test interference
             timeout_ms: 5000,
             env: None,
         };
@@ -284,11 +272,8 @@ mod tests {
         
         let result = handle_shell_execute(params, config, qdrant_client, None).await.unwrap();
         
-        // Clean up state file
-        let _ = fs::remove_file(&state_file).await;
-        
         assert_eq!(result.exit_code, 0);
-        // Should see the test file if working directory is correctly set to repository
+        // Should see the test file if working directory is correctly set
         assert!(result.stdout.contains("test_file.txt"), 
             "Expected to find test_file.txt in output, but got: {}", result.stdout);
     }

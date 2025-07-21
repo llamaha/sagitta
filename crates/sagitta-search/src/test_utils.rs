@@ -289,6 +289,7 @@ mod enhanced_repository_tests {
             added_as_local_path: false,
             target_ref: None,
             dependencies: Vec::new(),
+            last_synced_commit: None,
         }
     }
 
@@ -376,6 +377,7 @@ mod enhanced_repository_tests {
             added_as_local_path: false,
             target_ref: None,
             dependencies: Vec::new(),
+            last_synced_commit: None,
         };
         
         let enhanced_info = get_enhanced_repository_info(&repo_config).await.unwrap();
@@ -419,6 +421,7 @@ mod enhanced_repository_tests {
             added_as_local_path: false,
             target_ref: None,
             dependencies: Vec::new(),
+            last_synced_commit: None,
         };
         
         let enhanced_info = get_enhanced_repository_info(&repo_config).await.unwrap();

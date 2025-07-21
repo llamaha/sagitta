@@ -12,6 +12,7 @@ use qdrant_client::qdrant::CountPointsBuilder;
 use serde::Serialize;
 use serde_json;
 use sagitta_search::repo_helpers::get_branch_aware_collection_name;
+use git_manager::GitRepository;
 
 // use super::commands::CODE_SEARCH_COLLECTION; // REMOVED
 
@@ -80,12 +81,37 @@ where
         .find(|r| r.name == target_repo_name)
         .ok_or_else(|| anyhow!("Repository '{}' not found.", target_repo_name))?;
 
-    let branch_name = repo_config.target_ref.as_deref()
-        .or(repo_config.active_branch.as_deref())
-        .unwrap_or(&repo_config.default_branch);
+    // Get the current branch from filesystem, just like sync does
+    let branch_name = if let Some(target_ref) = repo_config.target_ref.as_deref() {
+        // If target_ref is specified, use that
+        target_ref.to_string()
+    } else {
+        // Otherwise, get the current branch from the filesystem
+        match GitRepository::open(&repo_config.local_path) {
+            Ok(git_repo) => {
+                match git_repo.current_branch() {
+                    Ok(current_branch) => current_branch,
+                    Err(e) => {
+                        // If we can't get the current branch, try common defaults
+                        if !args.json {
+                            eprintln!("Warning: Could not determine current branch: {}. Using 'main' as default.", e);
+                        }
+                        "main".to_string()
+                    }
+                }
+            }
+            Err(e) => {
+                // If we can't open the repository, try common defaults
+                if !args.json {
+                    eprintln!("Warning: Could not open repository: {}. Using 'main' as default.", e);
+                }
+                "main".to_string()
+            }
+        }
+    };
 
     // Use branch-aware collection naming to match the new sync behavior
-    let collection_name = get_branch_aware_collection_name(&repo_config.name, branch_name, &config);
+    let collection_name = get_branch_aware_collection_name(&repo_config.name, &branch_name, &config);
 
     if !args.json {
         println!("Fetching stats for repository: {}", repo_config.name.cyan());

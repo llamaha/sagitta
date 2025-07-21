@@ -38,8 +38,9 @@ async fn test_repository_context_state_file_written() {
 /// Test that clearing repository context removes the state file
 #[tokio::test]
 async fn test_repository_context_state_file_cleared() {
-    // Setup
-    let mut state_path = dirs::config_dir().unwrap_or_default();
+    // Setup - use a temporary directory to avoid permission issues
+    let temp_dir = tempfile::tempdir().unwrap();
+    let mut state_path = temp_dir.path().to_path_buf();
     state_path.push("sagitta-code");
     fs::create_dir_all(&state_path).await.unwrap();
     

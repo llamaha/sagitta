@@ -39,6 +39,9 @@ impl OpenAICompatibleClient {
             .build()
             .expect("Failed to create HTTP client");
 
+        // Normalize base_url by removing trailing slash
+        let base_url = base_url.trim_end_matches('/').to_string();
+        
         Self {
             base_url,
             api_key,
@@ -327,19 +330,36 @@ impl LlmClient for OpenAICompatibleClient {
         
         let request = self.build_request(messages, tools, true)?;
         
-        let response = self.http_client
-            .post(&format!("{}/chat/completions", self.base_url))
+        let url = format!("{}/chat/completions", self.base_url);
+        log::debug!("OpenAICompatible: Sending streaming request to {}", url);
+        
+        let mut req_builder = self.http_client
+            .post(&url)
+            .header("Accept", "text/event-stream")
+            .header("Content-Type", "application/json")
             .json(&request)
-            .timeout(self.timeout)
+            .timeout(self.timeout);
+        
+        // Add API key if provided
+        if let Some(ref api_key) = &self.api_key {
+            log::debug!("OpenAICompatible: Adding API key authentication");
+            req_builder = req_builder.bearer_auth(api_key);
+        } else {
+            log::debug!("OpenAICompatible: No API key provided");
+        }
+        
+        let response = req_builder
             .send()
             .await
             .map_err(|e| SagittaCodeError::NetworkError(e.to_string()))?;
         
         if !response.status().is_success() {
+            let status = response.status();
             let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            log::error!("OpenAICompatible: Streaming request failed with status {} at URL {}", status, url);
             return Err(SagittaCodeError::LlmError(format!(
-                "OpenAI-compatible API error: {}",
-                error_text
+                "OpenAI-compatible API error: {} {}",
+                status, error_text
             )));
         }
         
@@ -476,55 +496,110 @@ where
                                         }
                                     }
                                     
+                                    // Also check if tool_calls are at the choice level (some providers do this)
+                                    if let Some(tool_calls) = choice.get("delta").and_then(|d| d.get("tool_calls")).and_then(|v| v.as_array()) {
+                                        log::debug!("OpenAICompatible: Found {} tool calls in delta", tool_calls.len());
+                                    }
+                                    
                                     // Check for finish reason
-                                    if let Some(finish_reason) = choice.get("finish_reason")
+                                    let finish_reason_value = choice.get("finish_reason");
+                                    log::debug!("OpenAICompatible: Raw finish_reason value: {:?}", finish_reason_value);
+                                    
+                                    if let Some(finish_reason) = finish_reason_value
                                         .and_then(|v| v.as_str())
                                         .filter(|s| !s.is_empty() && *s != "null")
                                     {
-                                        // Get any remaining tool calls
-                                        let tool_calls = this.stream_processor.get_completed_tool_calls();
-                                        if !tool_calls.is_empty() {
-                                            // Buffer tool calls before final chunk
-                                            for tool_call in tool_calls {
-                                                this.buffered_tool_calls.push(StreamChunk {
-                                                    part: MessagePart::ToolCall {
-                                                        tool_call_id: tool_call.id,
-                                                        name: tool_call.name,
-                                                        parameters: tool_call.arguments,
-                                                    },
-                                                    is_final: false,
-                                                    finish_reason: None,
-                                                    token_usage: None,
-                                                });
+                                        // Check if we have any tool calls buffered
+                                        // Some providers (like Ollama) send finish_reason="stop" even with tool calls
+                                        let has_buffered_tool_calls = !this.buffered_tool_calls.is_empty();
+                                        let pending_tool_calls = this.stream_processor.get_completed_tool_calls();
+                                        let has_pending_tool_calls = !pending_tool_calls.is_empty();
+                                        
+                                        // Important: Don't mark as final if we have tool calls
+                                        // This allows the conversation to continue after tool execution
+                                        let is_tool_calls = finish_reason == "tool_calls" || 
+                                                          finish_reason == "function_call" || 
+                                                          has_buffered_tool_calls || 
+                                                          has_pending_tool_calls;
+                                        
+                                        log::info!("OpenAICompatible: Finish reason: '{}', is_tool_calls: {}, buffered: {}, pending: {}", 
+                                            finish_reason, is_tool_calls, has_buffered_tool_calls, has_pending_tool_calls);
+                                        
+                                        if is_tool_calls {
+                                            // Get any remaining tool calls (already retrieved above)
+                                            let tool_calls = pending_tool_calls;
+                                            if !tool_calls.is_empty() {
+                                                // Buffer tool calls but DON'T mark as final
+                                                for tool_call in tool_calls {
+                                                    this.buffered_tool_calls.push(StreamChunk {
+                                                        part: MessagePart::ToolCall {
+                                                            tool_call_id: tool_call.id,
+                                                            name: tool_call.name,
+                                                            parameters: tool_call.arguments,
+                                                        },
+                                                        is_final: false, // Not final - conversation continues
+                                                        finish_reason: None,
+                                                        token_usage: None,
+                                                    });
+                                                }
+                                                
+                                                // Return the first tool call
+                                                if !this.buffered_tool_calls.is_empty() {
+                                                    let chunk = this.buffered_tool_calls.remove(0);
+                                                    return Poll::Ready(Some(Ok(chunk)));
+                                                }
                                             }
                                             
-                                            // Return the first tool call
-                                            if !this.buffered_tool_calls.is_empty() {
-                                                let chunk = this.buffered_tool_calls.remove(0);
-                                                return Poll::Ready(Some(Ok(chunk)));
-                                            }
-                                        }
-                                        
-                                        // Create final chunk
-                                        if let Some(final_chunk) = this.stream_processor.create_final_chunk(Some(finish_reason.to_string())) {
-                                            return Poll::Ready(Some(Ok(StreamChunk {
-                                                part: MessagePart::Text { 
-                                                    text: final_chunk.content 
-                                                },
-                                                is_final: true,
-                                                finish_reason: Some(finish_reason.to_string()),
-                                                token_usage: None, // TODO: Extract token usage if available
-                                            })));
+                                            // For tool_calls, we DON'T emit a final chunk
+                                            // The stream will continue after tool execution
+                                            continue;
                                         } else {
-                                            // Even if no content, emit an empty final chunk to signal completion
-                                            return Poll::Ready(Some(Ok(StreamChunk {
-                                                part: MessagePart::Text { 
-                                                    text: String::new()
-                                                },
-                                                is_final: true,
-                                                finish_reason: Some(finish_reason.to_string()),
-                                                token_usage: None,
-                                            })));
+                                            // Normal completion (not tool_calls)
+                                            // Get any remaining tool calls first
+                                            let tool_calls = this.stream_processor.get_completed_tool_calls();
+                                            if !tool_calls.is_empty() {
+                                                // Buffer tool calls before final chunk
+                                                for tool_call in tool_calls {
+                                                    this.buffered_tool_calls.push(StreamChunk {
+                                                        part: MessagePart::ToolCall {
+                                                            tool_call_id: tool_call.id,
+                                                            name: tool_call.name,
+                                                            parameters: tool_call.arguments,
+                                                        },
+                                                        is_final: false,
+                                                        finish_reason: None,
+                                                        token_usage: None,
+                                                    });
+                                                }
+                                                
+                                                // Return the first tool call
+                                                if !this.buffered_tool_calls.is_empty() {
+                                                    let chunk = this.buffered_tool_calls.remove(0);
+                                                    return Poll::Ready(Some(Ok(chunk)));
+                                                }
+                                            }
+                                            
+                                            // Create final chunk for normal completion
+                                            if let Some(final_chunk) = this.stream_processor.create_final_chunk(Some(finish_reason.to_string())) {
+                                                return Poll::Ready(Some(Ok(StreamChunk {
+                                                    part: MessagePart::Text { 
+                                                        text: final_chunk.content 
+                                                    },
+                                                    is_final: true,
+                                                    finish_reason: Some(finish_reason.to_string()),
+                                                    token_usage: None, // TODO: Extract token usage if available
+                                                })));
+                                            } else {
+                                                // Even if no content, emit an empty final chunk to signal completion
+                                                return Poll::Ready(Some(Ok(StreamChunk {
+                                                    part: MessagePart::Text { 
+                                                        text: String::new()
+                                                    },
+                                                    is_final: true,
+                                                    finish_reason: Some(finish_reason.to_string()),
+                                                    token_usage: None,
+                                                })));
+                                            }
                                         }
                                     }
                                 }

@@ -42,7 +42,7 @@ pub fn render_syntax_highlighted_code(ui: &mut Ui, text: &str, language: &str, _
     // Use a more compact approach by building the layout job directly
     let mut layout_job = egui::text::LayoutJob::default();
     
-    for (_line_index, line) in LinesWithEndings::from(text).enumerate().take(20) {
+    for (_line_index, line) in LinesWithEndings::from(text).enumerate() {
         let ranges = highlighter.highlight_line(line, syntax_set).unwrap_or_default();
             
             for (style, text_part) in ranges {

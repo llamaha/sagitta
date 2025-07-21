@@ -99,9 +99,24 @@ impl OpenAITranslator {
                 result,
             } = part
             {
+                // Format the result content in a more readable way for the model
+                let content = match result {
+                    Value::String(s) => s.clone(),
+                    Value::Object(obj) => {
+                        // Check if it's an error response
+                        if let Some(error) = obj.get("error").and_then(|e| e.as_str()) {
+                            format!("Error: {}", error)
+                        } else {
+                            // Format as readable JSON with indentation
+                            serde_json::to_string_pretty(result).unwrap_or_else(|_| result.to_string())
+                        }
+                    },
+                    _ => serde_json::to_string_pretty(result).unwrap_or_else(|_| result.to_string())
+                };
+                
                 openai_messages.push(OpenAIMessage {
                     role: "tool".to_string(),
-                    content: Some(serde_json::to_string(result).unwrap_or_default()),
+                    content: Some(content),
                     tool_calls: None,
                     tool_call_id: Some(tool_call_id.clone()),
                     name: Some(name.clone()),

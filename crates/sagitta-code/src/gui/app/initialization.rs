@@ -329,10 +329,35 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
         app.state.set_repository_context(Some(saved_repo_context.clone()));
         log::info!("Restored repository context from config: {saved_repo_context}");
         
-        // Write the repository state file for MCP server on initialization
+        // Change working directory and write the repository state file on initialization
         let repo_manager = app.repo_panel.get_repo_manager();
+        let repo_name_for_cwd = saved_repo_context.clone();
         let repo_name_for_state = saved_repo_context.clone();
         
+        // Clone for the working directory change
+        let repo_manager_for_cwd = repo_manager.clone();
+        
+        // Change working directory on startup
+        tokio::spawn(async move {
+            let repo_manager_guard = repo_manager_for_cwd.lock().await;
+            if let Ok(repositories) = repo_manager_guard.list_repositories().await {
+                if let Some(repo_config) = repositories.iter().find(|r| r.name == repo_name_for_cwd) {
+                    let repo_path = repo_config.local_path.clone();
+                    
+                    // Change the process working directory
+                    match std::env::set_current_dir(&repo_path) {
+                        Ok(_) => {
+                            log::info!("Changed working directory to saved repository on startup: {}", repo_path.display());
+                        }
+                        Err(e) => {
+                            log::error!("Failed to change working directory to saved repository {}: {}", repo_path.display(), e);
+                        }
+                    }
+                }
+            }
+        });
+        
+        // Write the repository state file for MCP server
         tokio::spawn(async move {
             let repo_manager_guard = repo_manager.lock().await;
             if let Ok(repositories) = repo_manager_guard.list_repositories().await {

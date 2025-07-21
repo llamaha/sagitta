@@ -59,6 +59,7 @@ mod qdrant_wipe_recovery_tests {
             added_as_local_path: true,
             target_ref: None,
             dependencies: Vec::new(),
+            last_synced_commit: None,
         };
         
         let app_config = AppConfig {
@@ -178,6 +179,7 @@ mod qdrant_wipe_recovery_tests {
             added_as_local_path: true,
             target_ref: None,
             dependencies: Vec::new(),
+            last_synced_commit: None,
         };
         
         let app_config = AppConfig {
@@ -271,6 +273,7 @@ mod qdrant_wipe_recovery_tests {
             added_as_local_path: true,
             target_ref: None,
             dependencies: Vec::new(),
+            last_synced_commit: None,
         };
         
         let app_config = AppConfig {

@@ -59,6 +59,7 @@ fn create_test_config_with_dependencies() -> (Arc<RwLock<AppConfig>>, TempDir) {
                         purpose: Some("Test framework".to_string()),
                     },
                 ],
+                last_synced_commit: None,
             },
             RepositoryConfig {
                 name: "dep-repo-1".to_string(),
@@ -75,6 +76,7 @@ fn create_test_config_with_dependencies() -> (Arc<RwLock<AppConfig>>, TempDir) {
                 added_as_local_path: false,
                 target_ref: None,
                 dependencies: vec![],
+                last_synced_commit: None,
             },
             RepositoryConfig {
                 name: "dep-repo-2".to_string(),
@@ -91,6 +93,7 @@ fn create_test_config_with_dependencies() -> (Arc<RwLock<AppConfig>>, TempDir) {
                 added_as_local_path: false,
                 target_ref: None,
                 dependencies: vec![],
+                last_synced_commit: None,
             },
         ],
         repositories_base_path: Some(base_path.to_string_lossy().into_owned()),

@@ -91,13 +91,21 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
             if let Ok(file_data) = serde_json::from_str::<serde_json::Value>(&tool_args) {
                 if let Some(file_path) = file_data.get("file_path").and_then(|v| v.as_str()) {
                     // Read the full file content
-                    match std::fs::read_to_string(file_path) {
+                    // Try as-is first, then try relative to current directory
+                    let path = std::path::Path::new(file_path);
+                    let full_path = if path.is_absolute() {
+                        path.to_path_buf()
+                    } else {
+                        std::env::current_dir().unwrap_or_default().join(path)
+                    };
+                    
+                    match std::fs::read_to_string(&full_path) {
                         Ok(content) => {
                             app.state.file_content_modal_data = Some((file_path.to_string(), content));
                             app.state.show_file_content_modal = true;
                         }
                         Err(e) => {
-                            app.state.toasts.error(format!("Failed to read file: {}", e));
+                            app.state.toasts.error(format!("Failed to read file {}: {}", full_path.display(), e));
                         }
                     }
                 }
@@ -1488,6 +1496,8 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
 
             // Handle repository context changes
             if let Some(new_repo) = app.state.pending_repository_context_change.take() {
+                let repo_context = if new_repo.is_empty() { None } else { Some(new_repo.clone()) };
+                
                 // Check for special flags to open repository panel with specific tabs
                 if new_repo == "__CREATE_NEW_REPOSITORY__" {
                     // Open the repository panel
@@ -1510,51 +1520,76 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                     app.repo_panel.set_active_tab(crate::gui::repository::types::RepoPanelTab::Add);
                     // Don't process this as a normal repository change
                 } else {
-                    let repo_context = if new_repo.is_empty() { None } else { Some(new_repo.clone()) };
                     app.state.set_repository_context(repo_context.clone());
                 
-                    // Write the repository state file for MCP server
+                    // Get repository path and change working directory
                     if let Some(repo_name) = &repo_context {
-                    let repo_manager = app.repo_panel.get_repo_manager();
-                    let repo_name_for_state = repo_name.clone();
-                    
-                    tokio::spawn(async move {
-                        let repo_manager_guard = repo_manager.lock().await;
-                        if let Ok(repositories) = repo_manager_guard.list_repositories().await {
-                            if let Some(repo_config) = repositories.iter().find(|r| r.name == repo_name_for_state) {
-                                // Write the current repository path to state file
-                                let mut state_path = dirs::config_dir().unwrap_or_default();
-                                state_path.push("sagitta-code");
-                                
-                                // Ensure directory exists
-                                if let Err(e) = tokio::fs::create_dir_all(&state_path).await {
-                                    log::warn!("Failed to create state directory: {e}");
-                                } else {
-                                    state_path.push("current_repository.txt");
-                                    if let Err(e) = tokio::fs::write(&state_path, repo_config.local_path.to_string_lossy().as_bytes()).await {
-                                        log::warn!("Failed to write repository state file: {e}");
-                                    } else {
-                                        log::debug!("Wrote current repository path to state file: {}", state_path.display());
+                        let repo_manager = app.repo_panel.get_repo_manager();
+                        let repo_name_for_cwd = repo_name.clone();
+                        let repo_name_for_state = repo_name.clone();
+                        
+                        // Clone for the closure
+                        let repo_manager_for_cwd = repo_manager.clone();
+                        
+                        // Change working directory synchronously to ensure it happens immediately
+                        tokio::spawn(async move {
+                            let repo_manager_guard = repo_manager_for_cwd.lock().await;
+                            if let Ok(repositories) = repo_manager_guard.list_repositories().await {
+                                if let Some(repo_config) = repositories.iter().find(|r| r.name == repo_name_for_cwd) {
+                                    let repo_path = repo_config.local_path.clone();
+                                    
+                                    // Change the process working directory
+                                    match std::env::set_current_dir(&repo_path) {
+                                        Ok(_) => {
+                                            log::info!("Changed working directory to: {}", repo_path.display());
+                                        }
+                                        Err(e) => {
+                                            log::error!("Failed to change working directory to {}: {}", repo_path.display(), e);
+                                        }
                                     }
                                 }
                             }
-                        }
-                    });
-                } else {
-                    // No repository selected, clear the state file
-                    tokio::spawn(async {
-                        let mut state_path = dirs::config_dir().unwrap_or_default();
-                        state_path.push("sagitta-code");
-                        state_path.push("current_repository.txt");
-                        
-                        if let Err(e) = tokio::fs::remove_file(&state_path).await {
-                            if e.kind() != std::io::ErrorKind::NotFound {
-                                log::warn!("Failed to remove repository state file: {e}");
+                        });
+                    
+                        // Write the repository state file for MCP server
+                        tokio::spawn(async move {
+                            let repo_manager_guard = repo_manager.lock().await;
+                            if let Ok(repositories) = repo_manager_guard.list_repositories().await {
+                                if let Some(repo_config) = repositories.iter().find(|r| r.name == repo_name_for_state) {
+                                    // Write the current repository path to state file
+                                    let mut state_path = dirs::config_dir().unwrap_or_default();
+                                    state_path.push("sagitta-code");
+                                    
+                                    // Ensure directory exists
+                                    if let Err(e) = tokio::fs::create_dir_all(&state_path).await {
+                                        log::warn!("Failed to create state directory: {e}");
+                                    } else {
+                                        state_path.push("current_repository.txt");
+                                        if let Err(e) = tokio::fs::write(&state_path, repo_config.local_path.to_string_lossy().as_bytes()).await {
+                                            log::warn!("Failed to write repository state file: {e}");
+                                        } else {
+                                            log::debug!("Wrote current repository path to state file: {}", state_path.display());
+                                        }
+                                    }
+                                }
                             }
-                        } else {
-                            log::debug!("Cleared repository state file");
-                        }
-                    });
+                        });
+                    } else {
+                        // No repository selected, clear the state file
+                        tokio::spawn(async {
+                            let mut state_path = dirs::config_dir().unwrap_or_default();
+                            state_path.push("sagitta-code");
+                            state_path.push("current_repository.txt");
+                            
+                            if let Err(e) = tokio::fs::remove_file(&state_path).await {
+                                if e.kind() != std::io::ErrorKind::NotFound {
+                                    log::warn!("Failed to remove repository state file: {e}");
+                                }
+                            } else {
+                                log::debug!("Cleared repository state file");
+                            }
+                        });
+                    }
                 }
                 
                 // Check if auto-create CLAUDE.md is enabled and ensure it exists
@@ -1737,7 +1772,6 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                             log::error!("Failed to send RepositorySwitched event: {e}");
                         }
                     }
-                }
                 }
             }
             

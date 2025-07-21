@@ -244,6 +244,7 @@ mod tests {
                     added_as_local_path: false,
                     target_ref: None,
                     dependencies: Vec::new(),
+                    last_synced_commit: None,
                 }
             ],
             ..Default::default()
@@ -373,6 +374,7 @@ mod tests {
                     added_as_local_path: false,
                     target_ref: None,
                     dependencies: Vec::new(),
+                    last_synced_commit: None,
                 }
             ],
             ..Default::default()
@@ -467,6 +469,7 @@ mod tests {
                     added_as_local_path: false,
                     target_ref: None,
                     dependencies: Vec::new(),
+                    last_synced_commit: None,
                 },
                 RepositoryConfig {
                     name: "missing-repo".to_string(),
@@ -483,6 +486,7 @@ mod tests {
                     added_as_local_path: false,
                     target_ref: None,
                     dependencies: Vec::new(),
+                    last_synced_commit: None,
                 }
             ],
             ..Default::default()
@@ -538,6 +542,7 @@ mod tests {
                     added_as_local_path: true, // This makes it non-reclonable
                     target_ref: None,
                     dependencies: Vec::new(),
+                    last_synced_commit: None,
                 }
             ],
             ..Default::default()
@@ -607,6 +612,7 @@ mod tests {
             added_as_local_path: false,
             target_ref: None,
             dependencies: Vec::new(),
+            last_synced_commit: None,
         };
         
         let enhanced_info = get_enhanced_repository_info(&repo_config).await.unwrap();
