@@ -9,6 +9,9 @@ pub mod rendering;
 #[cfg(test)]
 mod collapsing_tests;
 
+#[cfg(test)]
+mod tests;
+
 // Re-export types for external use
 pub use types::{
     StreamingMessage, MessageAuthor, MessageStatus, ToolCall, 
