@@ -1208,6 +1208,7 @@ mod tests {
             added_as_local_path: false,
             target_ref: None,
             dependencies: Vec::new(),
+            last_synced_commit: None,
         };
 
         let app_config = AppConfig {
@@ -1252,6 +1253,7 @@ mod tests {
             added_as_local_path: false,
             target_ref: None,
             dependencies: Vec::new(),
+            last_synced_commit: None,
         });
 
         let repo_index = 0;
@@ -1302,9 +1304,9 @@ mod tests {
 
         assert!(result.is_ok());
         
-        // Verify the commit was updated
+        // Verify the commit was updated (using the non-deprecated field)
         let repo = &config.repositories[repo_index];
-        assert_eq!(repo.last_synced_commits.get(branch_name), Some(&commit_hash.to_string()));
+        assert_eq!(repo.last_synced_commit, Some(commit_hash.to_string()));
         
         // Verify languages were set (at least rust from our mock)
         assert!(repo.indexed_languages.is_some());
@@ -1490,6 +1492,7 @@ mod tests {
                 added_as_local_path: false,
                 target_ref: None,
                 dependencies: Vec::new(),
+                last_synced_commit: None,
                 };
             
             let mut mock_client = MockQdrantClientTrait::new();

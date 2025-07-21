@@ -170,15 +170,9 @@ mod integration_tests {
         
         // Should either fail with clear error or handle gracefully
         match result {
-            Ok(repo_config) => {
-                // If it succeeds, it should have the branch name (may include refs/heads/)
-                assert!(
-                    repo_config.default_branch == "main" || 
-                    repo_config.default_branch == "refs/heads/main" ||
-                    repo_config.default_branch == "HEAD",
-                    "Unexpected branch name: {}",
-                    repo_config.default_branch
-                );
+            Ok(_repo_config) => {
+                // The deprecated default_branch field is cleared by migration
+                // Just verify the operation succeeded
             }
             Err(e) => {
                 // Error should be clear about the issue
@@ -233,8 +227,8 @@ mod integration_tests {
         
         // Should handle detached HEAD gracefully
         assert!(result.is_ok(), "Failed with detached HEAD: {:?}", result);
-        let repo_config = result.unwrap();
-        assert!(!repo_config.default_branch.is_empty());
+        let _repo_config = result.unwrap();
+        // The deprecated default_branch field is cleared by migration
     }
     
     #[tokio::test]
@@ -415,6 +409,7 @@ mod integration_tests {
                 added_as_local_path: false,
                 target_ref: None,
                 dependencies: Vec::new(),
+                last_synced_commit: None,
             },
             client,
             &config,

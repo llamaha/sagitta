@@ -1362,6 +1362,7 @@ mod tests {
             added_as_local_path: false,
             target_ref: None,
             dependencies: Vec::new(),
+            last_synced_commit: None,
         };
         config.repositories.push(test_repo);
 

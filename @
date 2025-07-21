@@ -1,0 +1,18 @@
+{
+  "APIKEY": "",
+  "LOG": true,
+  "Providers": [
+    {
+      "name": "ollama",
+      "api_base_url": "http://localhost:11434/v1/chat/completions",
+      "api_key": "ollama",
+      "models": ["devstral:latest"]
+    }
+  ],
+  "Router": {
+    "default": "ollama,devstral:latest",
+    "background": "ollama,devstral:latest",
+    "think": "ollama,devstral:latest",
+    "longContext": "ollama,devstral:latest"
+  }
+}

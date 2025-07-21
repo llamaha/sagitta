@@ -36,6 +36,7 @@ fn create_test_repo_config(name: &str, url: &str, local_path: PathBuf, added_as_
         added_as_local_path: added_as_local,
         target_ref: None,
         dependencies: Vec::new(),
+        last_synced_commit: None,
     }
 }
 

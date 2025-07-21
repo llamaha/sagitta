@@ -362,8 +362,9 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                                         
                                         log::info!("Starting continuation stream after tool completion and history update");
                                         
-                                        // Send a continuation message to help the model understand it should continue
-                                        match agent_clone.process_message_stream("Please continue analyzing the results.").await {
+                                        // Send an empty message to continue the conversation
+                                        // The model will see the tool results and provide its analysis
+                                        match agent_clone.process_message_stream("").await {
                                             Ok(mut stream) => {
                                                 log::info!("Successfully created continuation stream");
                                                 let mut chunk_count = 0;
@@ -1806,6 +1807,11 @@ impl SagittaCodeApp {
                 let chat_message = make_chat_message_from_agent_message(&agent_message);
                 let streaming_message: StreamingMessage = chat_message.into();
                 self.chat_manager.add_complete_message(streaming_message);
+                
+                // CRITICAL FIX: Restore tool cards from agent message tool calls
+                for tool_call in &agent_message.tool_calls {
+                    self.chat_manager.restore_tool_card(tool_call, agent_message.timestamp);
+                }
             }
             
             log::info!("Successfully loaded {} messages into chat UI for conversation {}", 

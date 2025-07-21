@@ -33,8 +33,9 @@ impl Provider for ClaudeCodeRouterProvider {
         config: &ProviderConfig,
         mcp_integration: Arc<super::claude_code::mcp_integration::McpIntegration>
     ) -> Result<Box<dyn LlmClient>, SagittaCodeError> {
-        // Ensure the use_claude_code_router flag is set
+        // Create a modified config with ClaudeCode provider type for compatibility
         let mut router_config = config.clone();
+        router_config.provider_type = ProviderType::ClaudeCode;
         router_config.set_option("use_claude_code_router", true)?;
         
         // Delegate to the inner provider

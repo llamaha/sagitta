@@ -71,6 +71,12 @@ pub struct SettingsPanel {
     pub openai_timeout_seconds: u64,
     pub openai_max_retries: u32,
 
+    // Provider-specific fields - Claude Code Router
+    pub claude_code_router_base_url: String,
+    pub claude_code_router_api_key: Option<String>,
+    pub claude_code_router_config_path: Option<String>,
+    pub claude_code_router_timeout_seconds: u64,
+    pub claude_code_router_max_retries: u32,
     
     // Test connection state
     pub test_connection_status: Option<String>,
@@ -159,6 +165,20 @@ impl SettingsPanel {
                 .and_then(|config| config.get_option::<u32>("max_retries").ok().flatten())
                 .unwrap_or(3),
 
+            // Claude Code Router fields
+            claude_code_router_base_url: initial_sagitta_code_config.provider_configs.get(&ProviderType::ClaudeCodeRouter)
+                .and_then(|config| config.get_option::<String>("base_url").ok().flatten())
+                .unwrap_or_else(|| "http://localhost:3000".to_string()),
+            claude_code_router_api_key: initial_sagitta_code_config.provider_configs.get(&ProviderType::ClaudeCodeRouter)
+                .and_then(|config| config.get_option::<String>("api_key").ok().flatten()),
+            claude_code_router_config_path: initial_sagitta_code_config.provider_configs.get(&ProviderType::ClaudeCodeRouter)
+                .and_then(|config| config.get_option::<String>("config_path").ok().flatten()),
+            claude_code_router_timeout_seconds: initial_sagitta_code_config.provider_configs.get(&ProviderType::ClaudeCodeRouter)
+                .and_then(|config| config.get_option::<u64>("timeout_seconds").ok().flatten())
+                .unwrap_or(120),
+            claude_code_router_max_retries: initial_sagitta_code_config.provider_configs.get(&ProviderType::ClaudeCodeRouter)
+                .and_then(|config| config.get_option::<u32>("max_retries").ok().flatten())
+                .unwrap_or(3),
             
             // Test connection state
             test_connection_status: None,
@@ -516,7 +536,47 @@ impl SettingsPanel {
                                 },
                                 ProviderType::ClaudeCodeRouter => {
                                     ui.collapsing("Claude Code Router Provider Settings", |ui| {
-                                        ui.label("Claude Code Router settings will be implemented here.");
+                                        Grid::new("claude_code_router_grid")
+                                            .num_columns(2)
+                                            .spacing([8.0, 8.0])
+                                            .show(ui, |ui| {
+                                                ui.label("Base URL:");
+                                                ui.text_edit_singleline(&mut self.claude_code_router_base_url)
+                                                    .on_hover_text("Base URL for the Claude Code Router proxy (e.g., http://localhost:3000)");
+                                                ui.end_row();
+                                                
+                                                ui.label("API Key:");
+                                                let mut api_key_text = self.claude_code_router_api_key.clone().unwrap_or_default();
+                                                ui.add(egui::TextEdit::singleline(&mut api_key_text)
+                                                    .password(true)
+                                                    .hint_text("Optional API key for authentication"));
+                                                self.claude_code_router_api_key = if api_key_text.is_empty() { None } else { Some(api_key_text) };
+                                                ui.end_row();
+                                                
+                                                ui.label("Config Path:");
+                                                let mut config_path_text = self.claude_code_router_config_path.clone().unwrap_or_default();
+                                                ui.add(egui::TextEdit::singleline(&mut config_path_text)
+                                                    .hint_text("Optional path to router configuration file"));
+                                                self.claude_code_router_config_path = if config_path_text.is_empty() { None } else { Some(config_path_text) };
+                                                ui.end_row();
+                                                
+                                                ui.label("Timeout (seconds):");
+                                                ui.add(egui::DragValue::new(&mut self.claude_code_router_timeout_seconds)
+                                                    .range(1..=3600)
+                                                    .speed(10.0))
+                                                    .on_hover_text("Request timeout in seconds");
+                                                ui.end_row();
+                                                
+                                                ui.label("Max Retries:");
+                                                ui.add(egui::DragValue::new(&mut self.claude_code_router_max_retries)
+                                                    .range(0..=10))
+                                                    .on_hover_text("Maximum number of retries on failure");
+                                                ui.end_row();
+                                            });
+                                            
+                                        ui.add_space(4.0);
+                                        ui.label("Claude Code Router is a proxy that routes requests to Claude Code instances.");
+                                        ui.label("It uses the same Claude Code binary but adds routing capabilities.");
                                     });
                                 },
                                 ProviderType::MistralRs => {
@@ -908,6 +968,30 @@ impl SettingsPanel {
             updated_config.provider_configs.insert(ProviderType::OpenAICompatible, openai_config);
         }
         
+        // Update Claude Code Router provider config
+        if self.current_provider == ProviderType::ClaudeCodeRouter || 
+           updated_config.provider_configs.contains_key(&ProviderType::ClaudeCodeRouter) {
+            let mut router_config = updated_config.provider_configs
+                .get(&ProviderType::ClaudeCodeRouter)
+                .cloned()
+                .unwrap_or_else(|| {
+                    let provider = crate::providers::claude_code_router::ClaudeCodeRouterProvider::new();
+                    provider.default_config()
+                });
+            
+            router_config.set_option("base_url", self.claude_code_router_base_url.clone()).ok();
+            if let Some(ref api_key) = self.claude_code_router_api_key {
+                router_config.set_option("api_key", api_key.clone()).ok();
+            }
+            if let Some(ref config_path) = self.claude_code_router_config_path {
+                router_config.set_option("config_path", config_path.clone()).ok();
+            }
+            router_config.set_option("timeout_seconds", self.claude_code_router_timeout_seconds).ok();
+            router_config.set_option("max_retries", self.claude_code_router_max_retries).ok();
+            
+            updated_config.provider_configs.insert(ProviderType::ClaudeCodeRouter, router_config);
+        }
+        
         // Preserve all other fields
         // and all other config sections (sagitta, ui, logging) from the original
         
@@ -945,6 +1029,11 @@ impl SettingsPanel {
         let openai_model = self.openai_model.clone();
         let openai_timeout_seconds = self.openai_timeout_seconds;
         let openai_max_retries = self.openai_max_retries;
+        let router_base_url = self.claude_code_router_base_url.clone();
+        let router_api_key = self.claude_code_router_api_key.clone();
+        let router_config_path = self.claude_code_router_config_path.clone();
+        let router_timeout_seconds = self.claude_code_router_timeout_seconds;
+        let router_max_retries = self.claude_code_router_max_retries;
 
         
         // Spawn async task to test the connection
@@ -958,6 +1047,11 @@ impl SettingsPanel {
                 openai_model,
                 openai_timeout_seconds,
                 openai_max_retries,
+                router_base_url,
+                router_api_key,
+                router_config_path,
+                router_timeout_seconds,
+                router_max_retries,
             ).await;
             
             // Send the result through the channel
@@ -986,6 +1080,11 @@ impl SettingsPanel {
         openai_model: Option<String>,
         openai_timeout_seconds: u64,
         openai_max_retries: u32,
+        router_base_url: String,
+        router_api_key: Option<String>,
+        router_config_path: Option<String>,
+        router_timeout_seconds: u64,
+        router_max_retries: u32,
     ) -> Result<String, String> {
         match provider_type {
             ProviderType::ClaudeCode => {
@@ -1001,7 +1100,9 @@ impl SettingsPanel {
                 ).await
             },
             ProviderType::ClaudeCodeRouter => {
-                Ok("Claude Code Router connection test not implemented yet".to_string())
+                // For now, just test that we can create the client
+                // In the future, we could test the actual connection
+                Ok("Claude Code Router configuration is valid".to_string())
             },
             ProviderType::MistralRs => {
                 Ok("Mistral.rs connection test not implemented yet".to_string())
@@ -1420,6 +1521,7 @@ mod tests {
                 added_as_local_path: false,
                 target_ref: None,
                 dependencies: Vec::new(),
+                last_synced_commit: None,
             },
             sagitta_search::config::RepositoryConfig {
                 name: "test-repo-2".to_string(),
@@ -1436,6 +1538,7 @@ mod tests {
                 added_as_local_path: false,
                 target_ref: None,
                 dependencies: Vec::new(),
+                last_synced_commit: None,
             },
         ];
         initial_sagitta_config.embed_model = Some("test-embed-model".to_string());

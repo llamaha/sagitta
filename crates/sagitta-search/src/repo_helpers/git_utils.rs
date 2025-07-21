@@ -216,6 +216,7 @@ mod tests {
             added_as_local_path: false,
             target_ref: None,
             dependencies: vec![],
+            last_synced_commit: None,
         };
         
         let repo_configs = vec![repo_config];

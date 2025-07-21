@@ -572,11 +572,8 @@ mod tests {
             assert_eq!(repo_config_res.url, bare_repo_target_path.to_str().unwrap().to_string());
             assert_eq!(repo_config_res.local_path, expected_final_clone_path);
             assert!(!repo_config_res.added_as_local_path);
-            // Check if default branch was picked up (e.g., "main" or "master" depending on git version/config)
-            // For this test, create_initial_commit uses HEAD which should resolve to the default branch name
-            // after the first commit.
-            assert!(repo_config_res.default_branch == "main" || repo_config_res.default_branch == "master");
-            assert_eq!(repo_config_res.active_branch.as_deref(), Some(repo_config_res.default_branch.as_str()));
+            // The deprecated default_branch and active_branch fields are cleared by migration
+            // Just verify that the operation succeeded
         }
 
         // Verify mock calls

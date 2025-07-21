@@ -67,6 +67,7 @@ mod tests {
             added_as_local_path: false,
             target_ref: None,
             dependencies: vec![],
+            last_synced_commit: None,
         });
         config.active_repository = Some(repo_name.to_string());
         config

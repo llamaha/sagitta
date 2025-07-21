@@ -207,6 +207,27 @@ impl MessageHistory {
                 trace!("MessageHistory: Added {:?} message directly.", agent_msg.role);
                 continue;
             }
+            
+            // Handle Function role messages (tool results)
+            if agent_msg.role == Role::Function {
+                // Function messages contain tool results
+                for tc in &agent_msg.tool_calls {
+                    if let Some(result_val) = &tc.result {
+                        llm_messages.push(LlmMessage {
+                            id: agent_msg.id,
+                            role: Role::Function,
+                            parts: vec![MessagePart::ToolResult {
+                                tool_call_id: tc.id.clone(),
+                                name: tc.name.clone(),
+                                result: result_val.clone(),
+                            }],
+                            metadata: HashMap::new(),
+                        });
+                        trace!("MessageHistory: Added Function message with tool result for {}", tc.name);
+                    }
+                }
+                continue;
+            }
 
             if agent_msg.role == Role::Assistant {
                 let mut assistant_parts = Vec::new();

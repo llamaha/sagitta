@@ -95,6 +95,33 @@ pub fn render_query_repo(
                         ).clicked() {
                             // Also update the selected_repo to maintain consistency
                             state.selected_repo = Some(name.clone());
+                            
+                            // Write the repository state file for MCP server
+                            let repo_manager_clone = repo_manager.clone();
+                            let repo_name_for_state = name.clone();
+                            
+                            tokio::spawn(async move {
+                                let repo_manager_guard = repo_manager_clone.lock().await;
+                                if let Ok(repositories) = repo_manager_guard.list_repositories().await {
+                                    if let Some(repo_config) = repositories.iter().find(|r| r.name == repo_name_for_state) {
+                                        // Write the current repository path to state file
+                                        let mut state_path = dirs::config_dir().unwrap_or_default();
+                                        state_path.push("sagitta-code");
+                                        
+                                        // Ensure directory exists
+                                        if let Err(e) = tokio::fs::create_dir_all(&state_path).await {
+                                            log::warn!("Failed to create state directory: {e}");
+                                        } else {
+                                            state_path.push("current_repository.txt");
+                                            if let Err(e) = tokio::fs::write(&state_path, repo_config.local_path.to_string_lossy().as_bytes()).await {
+                                                log::warn!("Failed to write repository state file: {e}");
+                                            } else {
+                                                log::debug!("Wrote current repository path to state file: {}", state_path.display());
+                                            }
+                                        }
+                                    }
+                                }
+                            });
                         }
                     }
                 });

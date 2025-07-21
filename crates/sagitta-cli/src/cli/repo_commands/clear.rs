@@ -9,7 +9,7 @@ use sagitta_search::qdrant_client_trait::QdrantClientTrait;
 use sagitta_search::qdrant_ops::delete_collection_by_name;
 use std::fmt::Debug;
 use std::io::{self, Write};
-use git_manager::GitManager;
+use git_manager::{GitManager, GitRepository};
 
 #[derive(Args, Debug)]
 #[derive(Clone)]
@@ -45,11 +45,32 @@ where
         .ok_or_else(|| anyhow!("Configuration for repository '{}' not found.", repo_name_to_clear))?;
 
     let repo_config = &config.repositories[repo_config_index];
-    let branch_name = repo_config.target_ref.as_deref()
-        .or(repo_config.active_branch.as_deref())
-        .unwrap_or(&repo_config.default_branch);
+    // Get the current branch from filesystem, just like sync, stats, and query do
+    let branch_name = if let Some(target_ref) = repo_config.target_ref.as_deref() {
+        // If target_ref is specified, use that
+        target_ref.to_string()
+    } else {
+        // Otherwise, get the current branch from the filesystem
+        match GitRepository::open(&repo_config.local_path) {
+            Ok(git_repo) => {
+                match git_repo.current_branch() {
+                    Ok(current_branch) => current_branch,
+                    Err(e) => {
+                        // If we can't get the current branch, try common defaults
+                        log::warn!("Could not determine current branch: {}. Using 'main' as default.", e);
+                        "main".to_string()
+                    }
+                }
+            }
+            Err(e) => {
+                // If we can't open the repository, try common defaults
+                log::warn!("Could not open repository: {}. Using 'main' as default.", e);
+                "main".to_string()
+            }
+        }
+    };
 
-    let collection_name = get_branch_aware_collection_name(&repo_name_to_clear, branch_name, config);
+    let collection_name = get_branch_aware_collection_name(&repo_name_to_clear, &branch_name, config);
     let collection_existed_before_clear = match client.collection_exists(collection_name.clone()).await {
         Ok(exists) => exists,
         Err(e) => {

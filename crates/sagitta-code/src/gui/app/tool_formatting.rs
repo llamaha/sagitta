@@ -89,6 +89,7 @@ impl ToolResultFormatter {
             name if name.contains("__repository_list_branches") => self.format_mcp_repo_list_branches_result(value),
             name if name.contains("__repository_list") => self.format_mcp_repo_list_result(value),
             name if name.contains("__repository_search_file") => self.format_mcp_file_search_result(value),
+            name if name.contains("__web_search") => self.format_web_search_result(value),
             _ => {
                 // Fallback: try to extract key information from any JSON
                 self.format_generic_result(value)

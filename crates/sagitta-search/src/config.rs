@@ -638,6 +638,7 @@ mod tests {
             added_as_local_path: false,
             target_ref: None,
             dependencies: Vec::new(),
+            last_synced_commit: None,
         };
 
         let repo2_path = data_path.join("repo2");
@@ -656,6 +657,7 @@ mod tests {
             added_as_local_path: false,
             target_ref: None,
             dependencies: Vec::new(),
+            last_synced_commit: None,
         };
 
         let config = AppConfig {
@@ -757,6 +759,7 @@ mod tests {
             added_as_local_path: false,
             target_ref: None,
             dependencies: Vec::new(),
+            last_synced_commit: None,
         };
         assert_eq!(repo_config.local_path, base_path.join("my-test-repo"));
     }
@@ -883,6 +886,9 @@ mod tests {
         // Ensure the directory does not exist initially
         assert!(!new_config_dir.exists());
 
+        // Allow test config save and ensure we use the temp directory
+        std::env::set_var("SAGITTA_ALLOW_TEST_CONFIG_SAVE", "1");
+
         // Temporarily clear the env var to ensure this test uses the override_path
         let original_env_var = std::env::var("SAGITTA_TEST_CONFIG_PATH").ok();
         std::env::remove_var("SAGITTA_TEST_CONFIG_PATH");
@@ -894,6 +900,9 @@ mod tests {
         if let Some(val) = original_env_var {
             std::env::set_var("SAGITTA_TEST_CONFIG_PATH", val);
         }
+        
+        // Clean up
+        std::env::remove_var("SAGITTA_ALLOW_TEST_CONFIG_SAVE");
         
         save_result.unwrap(); // Check result after restoring env var
 
@@ -916,6 +925,9 @@ mod tests {
         assert!(!new_config_dir.exists());
         assert!(!config_path.exists());
 
+        // Allow test config save and ensure we use the temp directory
+        std::env::set_var("SAGITTA_ALLOW_TEST_CONFIG_SAVE", "1");
+        
         // Temporarily clear the env var to ensure this test uses the override_path
         let original_env_var = std::env::var("SAGITTA_TEST_CONFIG_PATH").ok();
         std::env::remove_var("SAGITTA_TEST_CONFIG_PATH");
@@ -927,6 +939,9 @@ mod tests {
         if let Some(val) = original_env_var {
             std::env::set_var("SAGITTA_TEST_CONFIG_PATH", val);
         }
+        
+        // Clean up
+        std::env::remove_var("SAGITTA_ALLOW_TEST_CONFIG_SAVE");
 
         let loaded_config = load_result.unwrap();
         let default_config = AppConfig::default();

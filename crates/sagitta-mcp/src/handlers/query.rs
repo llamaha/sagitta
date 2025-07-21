@@ -18,6 +18,7 @@ use sagitta_search::{
     repo_helpers::get_branch_aware_collection_name,
     search_impl::{search_collection, SearchParams},
 };
+use git_manager::GitRepository;
 use qdrant_client::qdrant::{value::Kind, Condition, Filter};
 use anyhow::Result;
 use axum::Extension;
@@ -46,16 +47,38 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
 
     info!(repo_name = %params.repository_name, "Processing query request");
 
-    let branch_name = params.branch_name.as_ref()
-        .or(repo_config.active_branch.as_ref())
-        .ok_or_else(|| ErrorObject {
-            code: error_codes::INVALID_QUERY_PARAMS,
-            message: format!("Cannot determine branch for repository '{}'. No branch specified and no active branch set.", params.repository_name),
-            data: None,
-        })?;
+    // Determine branch: first try params, then active_branch from config, finally get from Git
+    let branch_name = if let Some(branch) = params.branch_name.as_ref() {
+        branch.clone()
+    } else if let Some(branch) = repo_config.active_branch.as_ref() {
+        branch.clone()
+    } else {
+        // Get current branch from Git repository
+        match GitRepository::open(&repo_config.local_path) {
+            Ok(git_repo) => {
+                match git_repo.current_branch() {
+                    Ok(current_branch) => current_branch,
+                    Err(e) => {
+                        return Err(ErrorObject {
+                            code: error_codes::INVALID_QUERY_PARAMS,
+                            message: format!("Failed to determine current branch for repository '{}': {}", params.repository_name, e),
+                            data: None,
+                        });
+                    }
+                }
+            }
+            Err(e) => {
+                return Err(ErrorObject {
+                    code: error_codes::INVALID_QUERY_PARAMS,
+                    message: format!("Failed to open repository '{}' at path '{}': {}", params.repository_name, repo_config.local_path.display(), e),
+                    data: None,
+                });
+            }
+        }
+    };
 
     // Use branch-aware collection naming to match how collections are created during add/sync
-    let collection_name = get_branch_aware_collection_name(&params.repository_name, branch_name, &config_read_guard);
+    let collection_name = get_branch_aware_collection_name(&params.repository_name, &branch_name, &config_read_guard);
 
     info!(
         collection=%collection_name,
@@ -506,7 +529,13 @@ mod tests {
         assert!(result.is_err(), "Query should fail when no branch can be determined");
         if let Err(error) = result {
             assert_eq!(error.code, crate::mcp::error_codes::INVALID_QUERY_PARAMS);
-            assert!(error.message.contains("Cannot determine branch"));
+            // The error could be about failing to open the repository or determine the branch
+            assert!(
+                error.message.contains("Failed to open repository") || 
+                error.message.contains("Failed to determine current branch"),
+                "Expected error about branch/repository, got: {}", 
+                error.message
+            );
         }
     }
 

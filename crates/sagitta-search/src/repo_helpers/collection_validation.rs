@@ -153,6 +153,7 @@ mod tests {
             added_as_local_path: false,
             target_ref: None,
             dependencies: Vec::new(),
+            last_synced_commit: None,
         };
         
         let app_config = AppConfig {
@@ -189,6 +190,7 @@ mod tests {
             added_as_local_path: false,
             target_ref: None,
             dependencies: Vec::new(),
+            last_synced_commit: None,
         };
         
         let app_config = AppConfig {
@@ -223,6 +225,7 @@ mod tests {
             added_as_local_path: false,
             target_ref: None,
             dependencies: Vec::new(),
+            last_synced_commit: None,
         };
         
         assert_eq!(repo_config.last_synced_commits.len(), 2);

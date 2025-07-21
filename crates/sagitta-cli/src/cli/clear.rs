@@ -146,6 +146,7 @@ mod tests {
             added_as_local_path: false,
             target_ref: Some("v1.0".to_string()),
             dependencies: vec![],
+            last_synced_commit: None,
         };
         
         let branch = config.target_ref.as_deref()
