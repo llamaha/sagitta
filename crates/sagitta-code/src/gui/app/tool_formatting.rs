@@ -213,6 +213,55 @@ impl ToolResultFormatter {
             result.push_str(&format!("*Search was {}*\n", if grounded { "grounded with web results" } else { "not grounded" }));
         }
         
+        // If we haven't found any standard fields, try to display whatever we have
+        if result == "🔍 **Web Search Results**\n\n" {
+            // Try to intelligently format any JSON object
+            if let Some(obj) = value.as_object() {
+                for (key, val) in obj.iter() {
+                    match val {
+                        serde_json::Value::String(s) if !s.is_empty() && s.len() < 500 => {
+                            result.push_str(&format!("**{}:** {}\n", 
+                                key.chars().next().unwrap().to_uppercase().to_string() + &key[1..].replace('_', " "),
+                                s
+                            ));
+                        }
+                        serde_json::Value::Array(arr) if !arr.is_empty() => {
+                            result.push_str(&format!("**{}:** {} items\n", 
+                                key.chars().next().unwrap().to_uppercase().to_string() + &key[1..].replace('_', " "),
+                                arr.len()
+                            ));
+                            // Show first few items if they're strings
+                            for (i, item) in arr.iter().take(3).enumerate() {
+                                if let Some(s) = item.as_str() {
+                                    result.push_str(&format!("  {}. {}\n", i + 1, s));
+                                } else if let Some(obj) = item.as_object() {
+                                    // Try to find a title or name field
+                                    if let Some(title) = obj.get("title").or_else(|| obj.get("name")).and_then(|v| v.as_str()) {
+                                        result.push_str(&format!("  {}. {}\n", i + 1, title));
+                                    }
+                                }
+                            }
+                            if arr.len() > 3 {
+                                result.push_str(&format!("  ... and {} more\n", arr.len() - 3));
+                            }
+                        }
+                        serde_json::Value::Number(n) => {
+                            result.push_str(&format!("**{}:** {}\n", 
+                                key.chars().next().unwrap().to_uppercase().to_string() + &key[1..].replace('_', " "),
+                                n
+                            ));
+                        }
+                        _ => {}
+                    }
+                }
+                
+                if result == "🔍 **Web Search Results**\n\n" {
+                    // Still nothing meaningful found, return the generic formatter result
+                    return self.format_generic_result(value);
+                }
+            }
+        }
+        
         result
     }
     

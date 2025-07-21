@@ -26,6 +26,12 @@ pub const EXPANDED_DIFF_SCROLL_AREA_MAX_HEIGHT: f32 = 360.0;
 
 /// Render syntax highlighted code
 pub fn render_syntax_highlighted_code(ui: &mut Ui, text: &str, language: &str, _bg_color: &Color32, max_width: f32) {
+    // Default to 10.0 font size for backward compatibility
+    render_syntax_highlighted_code_with_font_size(ui, text, language, _bg_color, max_width, 10.0);
+}
+
+/// Render syntax highlighted code with adjustable font size
+pub fn render_syntax_highlighted_code_with_font_size(ui: &mut Ui, text: &str, language: &str, _bg_color: &Color32, max_width: f32, font_size: f32) {
     let syntax_set = get_syntax_set();
     let theme_set = get_theme_set();
     
@@ -42,6 +48,9 @@ pub fn render_syntax_highlighted_code(ui: &mut Ui, text: &str, language: &str, _
     // Use a more compact approach by building the layout job directly
     let mut layout_job = egui::text::LayoutJob::default();
     
+    // Calculate appropriate line height based on font size
+    let line_height = font_size * 1.2;
+    
     for (_line_index, line) in LinesWithEndings::from(text).enumerate() {
         let ranges = highlighter.highlight_line(line, syntax_set).unwrap_or_default();
             
@@ -51,8 +60,8 @@ pub fn render_syntax_highlighted_code(ui: &mut Ui, text: &str, language: &str, _
                 text_part,
                 0.0,
                 TextFormat {
-                    font_id: egui::FontId::monospace(10.0),
-                    line_height: Some(12.0), // Tight line height - 12.0 for 10.0 font
+                    font_id: egui::FontId::monospace(font_size),
+                    line_height: Some(line_height),
                     color,
                     ..Default::default()
                 },

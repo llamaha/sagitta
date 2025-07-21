@@ -43,7 +43,8 @@ use regex;
 
 // Import syntax highlighting functions
 use super::syntax_highlighting::{
-    render_syntax_highlighted_code, render_code_diff, detect_diff_content,
+    render_syntax_highlighted_code, render_syntax_highlighted_code_with_font_size,
+    render_code_diff, detect_diff_content,
     get_syntax_set, get_theme_set, DIFF_COLLAPSING_THRESHOLD_LINES,
     EXPANDED_DIFF_SCROLL_AREA_MAX_HEIGHT
 };
@@ -670,8 +671,8 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
                             // For search results, show more but don't force huge minimum
                             content_height.max(200.0).min(600.0)
                         } else if tool_card.tool_name.contains("shell") || tool_card.tool_name.contains("execute") {
-                            // For shell execution, similar to search
-                            content_height.max(150.0).min(500.0)
+                            // For shell execution, provide more vertical space by default
+                            content_height.max(SHELL_OUTPUT_MIN_HEIGHT).min(SHELL_OUTPUT_SCROLL_AREA_MAX_HEIGHT)
                         } else if actual_content_size > 0 {
                             // For file content, base on actual content
                             content_height.max(100.0).min(400.0)
@@ -684,7 +685,7 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_
                             .max_height(800.0)  // Reasonable max height
                             .min_scrolled_height(min_height)
                             .id_salt(format!("tool_result_{}", tool_card.run_id))
-                            .auto_shrink([false, true])  // Don't auto-shrink width, do auto-shrink height
+                            .auto_shrink([false, false])  // Don't auto-shrink to maintain consistent sizing
                             .show(ui, |ui| {
                                 ui.set_max_width(tool_card_width - 24.0);
                                 
@@ -1224,8 +1225,9 @@ fn is_reasoning_engine_summary_message(text: &str) -> bool {
 const MIN_ALLOCATED_HEIGHT_FOR_DIFF_FRAME: f32 = 400.0;
 
 /// Constants for shell output rendering
-const SHELL_OUTPUT_SCROLL_AREA_MAX_HEIGHT: f32 = 360.0;
+const SHELL_OUTPUT_SCROLL_AREA_MAX_HEIGHT: f32 = 600.0;  // Increased for better visibility
 const SHELL_OUTPUT_COLLAPSING_THRESHOLD_LINES: usize = 8;
+const SHELL_OUTPUT_MIN_HEIGHT: f32 = 300.0;  // Minimum height for shell output
 
 /// Helper function to wrap text at specified line length
 fn wrap_text_at_line_length(text: &str, max_line_length: usize) -> String {
@@ -2137,7 +2139,8 @@ fn render_terminal_output(ui: &mut egui::Ui, result: &serde_json::Value, app_the
             // Use scroll area for long output
             egui::ScrollArea::vertical()
                 .max_height(SHELL_OUTPUT_SCROLL_AREA_MAX_HEIGHT)
-                .auto_shrink([false, true])
+                .min_scrolled_height(SHELL_OUTPUT_MIN_HEIGHT)  // Ensure minimum height
+                .auto_shrink([false, false])  // Don't auto-shrink to prevent size jumping
                 .show(ui, |ui| {
                     ui.label(egui::RichText::new(output).monospace().color(app_theme.text_color()));
                 });
@@ -2226,13 +2229,51 @@ fn is_ping_result(tool_name: &str, _result: &serde_json::Value) -> bool {
     tool_name.contains("ping")
 }
 
-/// Render file read output with nice formatting
+/// Store file read font sizes (file path -> font size)
+thread_local! {
+    static FILE_READ_FONT_SIZES: RefCell<HashMap<String, f32>> = RefCell::new(HashMap::new());
+}
+
+/// Render file read output with nice formatting and font size controls
 fn render_file_read_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme: AppTheme) -> Option<(String, String)> {
+    // Get file path for font size tracking
+    let file_path_key = result.get("file_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("default")
+        .to_string();
+    
+    // Get current font size from thread local storage
+    let mut font_size = FILE_READ_FONT_SIZES.with(|sizes| {
+        *sizes.borrow().get(&file_path_key).unwrap_or(&12.0)
+    });
+    
     ui.group(|ui| {
-        // File path at the top
-        if let Some(file_path) = result.get("file_path").and_then(|v| v.as_str()) {
-            ui.label(egui::RichText::new(format!("`{file_path}`")).color(app_theme.hint_text_color()).small());
-        }
+        // Header with file path and font controls
+        ui.horizontal(|ui| {
+            // File path on the left
+            if let Some(file_path) = result.get("file_path").and_then(|v| v.as_str()) {
+                ui.label(egui::RichText::new(format!("`{file_path}`")).color(app_theme.hint_text_color()).small());
+            }
+            
+            // Font size controls on the right
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("🔍+").on_hover_text("Increase font size").clicked() {
+                    font_size = (font_size + 2.0).min(24.0);
+                    FILE_READ_FONT_SIZES.with(|sizes| {
+                        sizes.borrow_mut().insert(file_path_key.clone(), font_size);
+                    });
+                }
+                
+                ui.label(egui::RichText::new(format!("{}pt", font_size as i32)).color(app_theme.hint_text_color()).small());
+                
+                if ui.button("🔍-").on_hover_text("Decrease font size").clicked() {
+                    font_size = (font_size - 2.0).max(8.0);
+                    FILE_READ_FONT_SIZES.with(|sizes| {
+                        sizes.borrow_mut().insert(file_path_key.clone(), font_size);
+                    });
+                }
+            });
+        });
         
         // Get file content and metadata
         let content = result.get("content")
@@ -2274,8 +2315,8 @@ fn render_file_read_output(ui: &mut egui::Ui, result: &serde_json::Value, app_th
             "txt"
         };
         
-        // Always render with syntax highlighting, let the outer scroll area handle scrolling
-        render_syntax_highlighted_code(ui, content, language, &Color32::TRANSPARENT, ui.available_width());
+        // Render with adjustable font size
+        render_syntax_highlighted_code_with_font_size(ui, content, language, &Color32::TRANSPARENT, ui.available_width(), font_size);
         
         ui.add_space(4.0);
         
@@ -2355,6 +2396,8 @@ fn render_file_write_output(ui: &mut egui::Ui, result: &serde_json::Value, app_t
 
 /// Render search results with nice formatting
 fn render_search_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme: AppTheme) -> Option<(String, String)> {
+    let mut action = None;
+    
     ui.group(|ui| {
         // Search results display
         if let Some(query) = result.get("queryText").and_then(|v| v.as_str()) {
@@ -2366,79 +2409,20 @@ fn render_search_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme
             ui.label(egui::RichText::new(format!("Found {} results", results.len())).color(app_theme.success_color()).small());
             ui.add_space(4.0);
             
-            for (i, result_item) in results.iter().enumerate().take(5) {
-                ui.group(|ui| {
-                    if let Some(file_path) = result_item.get("filePath").and_then(|v| v.as_str()) {
-                        ui.label(egui::RichText::new(format!("{}. {}", i + 1, file_path)).color(app_theme.text_color()).small());
-                        
-                        // Show line range if available
-                        if let (Some(start), Some(end)) = (
-                            result_item.get("startLine").and_then(|v| v.as_i64()),
-                            result_item.get("endLine").and_then(|v| v.as_i64())
-                        ) {
-                            ui.label(egui::RichText::new(format!("   Lines {}-{}", start, end)).color(app_theme.hint_text_color()).small());
+            // Always use scroll area for consistent layout, but adjust height based on results
+            let max_height = if results.len() > 10 { 500.0 } else { 400.0 };
+            
+            egui::ScrollArea::vertical()
+                .max_height(max_height)
+                .auto_shrink([false, false]) // Don't auto-shrink to maintain consistent height
+                .show(ui, |ui| {
+                    for (i, result_item) in results.iter().enumerate() {
+                        if let Some(action_data) = render_search_result_item(ui, i, result_item, app_theme) {
+                            // Propagate the action up
+                            action = Some(action_data);
                         }
-                        
-                        // Show element type and language if available
-                        let mut meta_parts = Vec::new();
-                        if let Some(element_type) = result_item.get("elementType").and_then(|v| v.as_str()) {
-                            meta_parts.push(element_type.to_string());
-                        }
-                        if let Some(language) = result_item.get("language").and_then(|v| v.as_str()) {
-                            meta_parts.push(language.to_string());
-                        }
-                        if let Some(score) = result_item.get("score").and_then(|v| v.as_f64()) {
-                            meta_parts.push(format!("score: {:.3}", score));
-                        }
-                        
-                        // Add context info metadata
-                        if let Some(context_info) = result_item.get("contextInfo") {
-                            if let Some(identifiers) = context_info.get("identifiers").and_then(|v| v.as_array()) {
-                                meta_parts.push(format!("identifiers: {}", identifiers.len()));
-                            }
-                            if let Some(outgoing_calls) = context_info.get("outgoing_calls").and_then(|v| v.as_array()) {
-                                meta_parts.push(format!("calls: {}", outgoing_calls.len()));
-                            }
-                        }
-                        
-                        if !meta_parts.is_empty() {
-                            ui.label(egui::RichText::new(format!("   [{}]", meta_parts.join(", "))).color(app_theme.hint_text_color()).small());
-                        }
-                        
-                        // Show signature and description if available (avoid duplication)
-                        if let Some(context_info) = result_item.get("contextInfo") {
-                            let signature = context_info.get("signature").and_then(|v| v.as_str()).unwrap_or("");
-                            let preview = result_item.get("preview").and_then(|v| v.as_str()).unwrap_or("");
-                            
-                            // Signature removed per requirements (commented out below)
-                            // if !signature.is_empty() && signature != preview {
-                            //     ui.label(egui::RichText::new(format!("   {}", signature)).monospace().color(app_theme.hint_text_color()).small());
-                            // }
-                            
-                            if let Some(description) = context_info.get("description").and_then(|v| v.as_str()) {
-                                if !description.is_empty() {
-                                    ui.label(egui::RichText::new(format!("   {}", description)).color(app_theme.hint_text_color()).small().italics());
-                                }
-                            }
-                        }
-                        
-                        // Preview removed per requirements
-                        // if let Some(preview) = result_item.get("preview").and_then(|v| v.as_str()) {
-                        //     let preview_text = if preview.len() > 80 {
-                        //         format!("{}...", &preview[..77])
-                        //     } else {
-                        //         preview.to_string()
-                        //     };
-                        //     ui.label(egui::RichText::new(format!("   {}", preview_text)).monospace().color(app_theme.hint_text_color()).small());
-                        // }
                     }
                 });
-                ui.add_space(2.0);
-            }
-            
-            if results.len() > 5 {
-                ui.label(egui::RichText::new(format!("... and {} more results", results.len() - 5)).color(app_theme.hint_text_color()).small());
-            }
         } else if let Some(matches) = result.get("matchingFiles").and_then(|v| v.as_array()) {
             ui.label(egui::RichText::new(format!("Found {} files", matches.len())).color(app_theme.success_color()).small());
             ui.add_space(4.0);
@@ -2465,7 +2449,49 @@ fn render_search_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme
                 viewer.show(ui, &mut cache, &formatted_result);
             });
         } else {
-            ui.label(egui::RichText::new("No results found").color(app_theme.hint_text_color()).small());
+            // For any other search results, try to display whatever data we have
+            let has_content = result.as_object().map(|obj| !obj.is_empty()).unwrap_or(false);
+            
+            if has_content {
+                // Try using the formatter for generic web search results
+                let formatter = crate::gui::app::tool_formatting::ToolResultFormatter::new();
+                let tool_result = crate::agent::events::ToolResult::Success { output: result.to_string() };
+                let formatted_result = formatter.format_tool_result_for_preview("web_search", &tool_result);
+                
+                // Check if the formatter produced meaningful output (not just the fallback JSON)
+                if !formatted_result.starts_with("```json") {
+                    // Use the formatted result
+                    crate::gui::chat::view::COMMONMARK_CACHE.with(|cache| {
+                        let mut cache = cache.borrow_mut();
+                        let viewer = egui_commonmark::CommonMarkViewer::new();
+                        viewer.show(ui, &mut cache, &formatted_result);
+                    });
+                } else {
+                    // Show a more informative message with the actual data
+                    ui.label(egui::RichText::new("Search completed").color(app_theme.success_color()).small());
+                    ui.add_space(4.0);
+                    
+                    // Try to extract and display any meaningful fields
+                    if let Some(obj) = result.as_object() {
+                        for (key, value) in obj.iter().take(5) {
+                            let value_str = match value {
+                                serde_json::Value::String(s) => s.clone(),
+                                serde_json::Value::Number(n) => n.to_string(),
+                                serde_json::Value::Bool(b) => b.to_string(),
+                                serde_json::Value::Array(arr) => format!("[{} items]", arr.len()),
+                                serde_json::Value::Object(obj) => format!("{{...}} ({} fields)", obj.len()),
+                                serde_json::Value::Null => "null".to_string(),
+                            };
+                            ui.label(egui::RichText::new(format!("{}: {}", key, value_str)).color(app_theme.text_color()).small());
+                        }
+                        if obj.len() > 5 {
+                            ui.label(egui::RichText::new(format!("... and {} more fields", obj.len() - 5)).color(app_theme.hint_text_color()).small());
+                        }
+                    }
+                }
+            } else {
+                ui.label(egui::RichText::new("No results found").color(app_theme.hint_text_color()).small());
+            }
         }
         
         // Add small View JSON link
@@ -2481,6 +2507,121 @@ fn render_search_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme
         action
     })
     .inner
+}
+
+/// Render a single search result item as a clickable entry
+fn render_search_result_item(ui: &mut egui::Ui, index: usize, result_item: &serde_json::Value, app_theme: AppTheme) -> Option<(String, String)> {
+    let mut action = None;
+    
+    // Make the entire group clickable
+    let response = ui.group(|ui| {
+        if let Some(file_path) = result_item.get("filePath").and_then(|v| v.as_str()) {
+            // Create a clickable header with file path
+            let file_response = ui.add(
+                egui::Label::new(
+                    egui::RichText::new(format!("{}. {}", index + 1, file_path))
+                        .color(app_theme.accent_color())
+                        .small()
+                )
+                .sense(egui::Sense::click())
+            );
+            
+            if file_response.clicked() {
+                // Build action data with file path and line info
+                let mut action_data = serde_json::json!({
+                    "file_path": file_path
+                });
+                
+                if let Some(start_line) = result_item.get("startLine").and_then(|v| v.as_i64()) {
+                    action_data["start_line"] = serde_json::json!(start_line);
+                }
+                if let Some(end_line) = result_item.get("endLine").and_then(|v| v.as_i64()) {
+                    action_data["end_line"] = serde_json::json!(end_line);
+                }
+                
+                action = Some(("__OPEN_FILE__".to_string(), action_data.to_string()));
+            }
+            
+            if file_response.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            
+            // Show line range if available
+            if let (Some(start), Some(end)) = (
+                result_item.get("startLine").and_then(|v| v.as_i64()),
+                result_item.get("endLine").and_then(|v| v.as_i64())
+            ) {
+                ui.label(egui::RichText::new(format!("   Lines {}-{}", start, end)).color(app_theme.hint_text_color()).small());
+            }
+            
+            // Show element type and language if available in a compact table-like format
+            ui.horizontal(|ui| {
+                ui.add_space(12.0); // Indent
+                
+                if let Some(element_type) = result_item.get("elementType").and_then(|v| v.as_str()) {
+                    ui.label(egui::RichText::new(element_type).color(app_theme.warning_color()).small().strong());
+                    ui.add_space(8.0);
+                }
+                
+                if let Some(language) = result_item.get("language").and_then(|v| v.as_str()) {
+                    ui.label(egui::RichText::new(format!("[{}]", language)).color(app_theme.hint_text_color()).small());
+                    ui.add_space(8.0);
+                }
+                
+                if let Some(score) = result_item.get("score").and_then(|v| v.as_f64()) {
+                    ui.label(egui::RichText::new(format!("Score: {:.2}", score)).color(app_theme.hint_text_color()).small());
+                }
+            });
+            
+            // Add context info if available
+            if let Some(context_info) = result_item.get("contextInfo") {
+                let mut has_metadata = false;
+                ui.horizontal(|ui| {
+                    ui.add_space(12.0); // Indent
+                    
+                    if let Some(identifiers) = context_info.get("identifiers").and_then(|v| v.as_array()) {
+                        if !identifiers.is_empty() {
+                            ui.label(egui::RichText::new(format!("📌 {} identifiers", identifiers.len())).color(app_theme.hint_text_color()).small());
+                            ui.add_space(8.0);
+                            has_metadata = true;
+                        }
+                    }
+                    
+                    if let Some(outgoing_calls) = context_info.get("outgoing_calls").and_then(|v| v.as_array()) {
+                        if !outgoing_calls.is_empty() {
+                            ui.label(egui::RichText::new(format!("🔗 {} calls", outgoing_calls.len())).color(app_theme.hint_text_color()).small());
+                            has_metadata = true;
+                        }
+                    }
+                });
+                
+                // Show description if available
+                if let Some(description) = context_info.get("description").and_then(|v| v.as_str()) {
+                    if !description.is_empty() {
+                        if has_metadata {
+                            ui.add_space(2.0);
+                        }
+                        ui.horizontal(|ui| {
+                            ui.add_space(12.0); // Indent
+                            ui.label(egui::RichText::new(description).color(app_theme.text_color()).small().italics());
+                        });
+                    }
+                }
+            }
+        }
+    });
+    
+    // Make the whole group have hover effect
+    if response.response.hovered() {
+        ui.painter().rect_stroke(
+            response.response.rect,
+            egui::Rounding::same(4),
+            egui::Stroke::new(1.0, app_theme.accent_color().linear_multiply(0.3))
+        );
+    }
+    
+    ui.add_space(2.0);
+    action
 }
 
 /// Render repository operation results with nice formatting

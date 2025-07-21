@@ -773,6 +773,15 @@ pub struct ShellExecuteParams {
     /// Optional environment variables
     #[serde(skip_serializing_if = "Option::is_none")]
     pub env: Option<HashMap<String, String>>,
+    /// Optional grep pattern to filter output (applied to both stdout and stderr)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grep_pattern: Option<String>,
+    /// Optional number of lines to show from the beginning of output
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub head_lines: Option<usize>,
+    /// Optional number of lines to show from the end of output
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tail_lines: Option<usize>,
 }
 
 fn default_shell_timeout() -> u64 {

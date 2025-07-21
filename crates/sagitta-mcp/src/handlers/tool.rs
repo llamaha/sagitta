@@ -526,7 +526,10 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                         "type": "object",
                         "description": "Optional environment variables",
                         "additionalProperties": { "type": "string" }
-                    }
+                    },
+                    "grep_pattern": { "type": "string", "description": "Optional grep pattern to filter output (applied to both stdout and stderr)" },
+                    "head_lines": { "type": "integer", "description": "Optional number of lines to show from the beginning of output" },
+                    "tail_lines": { "type": "integer", "description": "Optional number of lines to show from the end of output" }
                 },
                 "required": ["command"]
             }),

@@ -254,7 +254,7 @@ fn render_json_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     // Copy button
                     if ui.button(egui::RichText::new("📋 Copy").color(theme.button_text_color())).clicked() {
                         if let Some(content) = &app.state.json_modal_content {
-                            ui.output_mut(|o| o.copied_text = content.clone());
+                            ui.ctx().copy_text(content.clone());
                             app.state.toasts.success("JSON copied to clipboard");
                         }
                     }
@@ -322,7 +322,7 @@ fn render_file_content_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     ui.horizontal(|ui| {
                         // Copy button
                         if ui.button(egui::RichText::new("📋 Copy").color(theme.button_text_color())).clicked() {
-                            ui.output_mut(|o| o.copied_text = content_clone.clone());
+                            ui.ctx().copy_text(content_clone.clone());
                             app.state.toasts.success("File content copied to clipboard");
                         }
                         

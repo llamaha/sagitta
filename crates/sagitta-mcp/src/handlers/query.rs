@@ -18,7 +18,6 @@ use sagitta_search::{
     repo_helpers::get_branch_aware_collection_name,
     search_impl::{search_collection, SearchParams},
 };
-use git_manager::GitRepository;
 use qdrant_client::qdrant::{value::Kind, Condition, Filter};
 use anyhow::Result;
 use axum::Extension;
@@ -53,24 +52,14 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
     } else if let Some(branch) = repo_config.active_branch.as_ref() {
         branch.clone()
     } else {
-        // Get current branch from Git repository
-        match GitRepository::open(&repo_config.local_path) {
-            Ok(git_repo) => {
-                match git_repo.current_branch() {
-                    Ok(current_branch) => current_branch,
-                    Err(e) => {
-                        return Err(ErrorObject {
-                            code: error_codes::INVALID_QUERY_PARAMS,
-                            message: format!("Failed to determine current branch for repository '{}': {}", params.repository_name, e),
-                            data: None,
-                        });
-                    }
-                }
-            }
+        // Get current branch from Git repository using GitManager
+        let git_manager = git_manager::GitManager::new();
+        match git_manager.get_repository_info(&repo_config.local_path) {
+            Ok(repo_info) => repo_info.current_branch,
             Err(e) => {
                 return Err(ErrorObject {
                     code: error_codes::INVALID_QUERY_PARAMS,
-                    message: format!("Failed to open repository '{}' at path '{}': {}", params.repository_name, repo_config.local_path.display(), e),
+                    message: format!("Failed to determine current branch for repository '{}': {}", params.repository_name, e),
                     data: None,
                 });
             }

@@ -22,6 +22,49 @@ fn get_shell_command(command: &str) -> (String, Vec<String>) {
     }
 }
 
+/// Apply grep, head, and tail filters to output
+fn apply_output_filters(mut output: String, params: &ShellExecuteParams) -> String {
+    // Apply grep filter first if specified
+    if let Some(ref pattern) = params.grep_pattern {
+        let lines: Vec<&str> = output.lines().collect();
+        let filtered_lines: Vec<&str> = lines
+            .into_iter()
+            .filter(|line| line.contains(pattern))
+            .collect();
+        output = filtered_lines.join("\n");
+        
+        // Add newline if output doesn't end with one and is not empty
+        if !output.is_empty() && !output.ends_with('\n') {
+            output.push('\n');
+        }
+    }
+    
+    // Apply head filter
+    if let Some(head_count) = params.head_lines {
+        let lines: Vec<&str> = output.lines().collect();
+        if lines.len() > head_count {
+            output = lines[..head_count].join("\n");
+            if !output.is_empty() {
+                output.push('\n');
+            }
+        }
+    }
+    
+    // Apply tail filter (takes precedence over head if both are specified)
+    if let Some(tail_count) = params.tail_lines {
+        let lines: Vec<&str> = output.lines().collect();
+        if lines.len() > tail_count {
+            let start = lines.len() - tail_count;
+            output = lines[start..].join("\n");
+            if !output.is_empty() {
+                output.push('\n');
+            }
+        }
+    }
+    
+    output
+}
+
 /// Get the current repository working directory from state file
 async fn get_current_repository_path() -> Option<PathBuf> {
     // Try to read from a state file in the config directory
@@ -101,9 +144,13 @@ pub async fn handle_shell_execute<C: QdrantClientTrait + Send + Sync + 'static>(
     match result {
         Ok(Ok(output)) => {
             // Command completed successfully
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let mut stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let mut stderr = String::from_utf8_lossy(&output.stderr).to_string();
             let exit_code = output.status.code().unwrap_or(-1);
+            
+            // Apply output filtering if requested
+            stdout = apply_output_filters(stdout, &params);
+            stderr = apply_output_filters(stderr, &params);
             
             Ok(ShellExecuteResult {
                 command: params.command,
@@ -156,6 +203,9 @@ mod tests {
             working_directory: None,
             timeout_ms: 5000,
             env: None,
+            grep_pattern: None,
+            head_lines: None,
+            tail_lines: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -182,6 +232,9 @@ mod tests {
             working_directory: Some(temp_path.clone()),
             timeout_ms: 5000,
             env: None,
+            grep_pattern: None,
+            head_lines: None,
+            tail_lines: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -265,6 +318,9 @@ mod tests {
             working_directory: Some(repo_path.clone()), // Explicitly specify to avoid test interference
             timeout_ms: 5000,
             env: None,
+            grep_pattern: None,
+            head_lines: None,
+            tail_lines: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -289,6 +345,9 @@ mod tests {
             working_directory: None,
             timeout_ms: 5000,
             env: None,
+            grep_pattern: None,
+            head_lines: None,
+            tail_lines: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -337,6 +396,9 @@ mod tests {
             working_directory: None,
             timeout_ms: 5000,
             env: Some(env),
+            grep_pattern: None,
+            head_lines: None,
+            tail_lines: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -359,6 +421,9 @@ mod tests {
             working_directory: None,
             timeout_ms: 5000,
             env: None,
+            grep_pattern: None,
+            head_lines: None,
+            tail_lines: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -368,5 +433,91 @@ mod tests {
         
         assert_eq!(result.exit_code, 0);
         assert!(result.stderr.contains("Error message"));
+    }
+    
+    #[tokio::test]
+    async fn test_shell_execute_with_grep_filter() {
+        let params = ShellExecuteParams {
+            command: if cfg!(target_os = "windows") {
+                "echo Line1 && echo Line2 && echo TestLine && echo Line3".to_string()
+            } else {
+                "echo -e 'Line1\nLine2\nTestLine\nLine3'".to_string()
+            },
+            working_directory: None,
+            timeout_ms: 5000,
+            env: None,
+            grep_pattern: Some("Test".to_string()),
+            head_lines: None,
+            tail_lines: None,
+        };
+        
+        let config = Arc::new(RwLock::new(AppConfig::default()));
+        let qdrant_client = create_mock_qdrant();
+        
+        let result = handle_shell_execute(params, config, qdrant_client, None).await.unwrap();
+        
+        assert_eq!(result.exit_code, 0);
+        assert!(result.stdout.contains("TestLine"));
+        assert!(!result.stdout.contains("Line1"));
+        assert!(!result.stdout.contains("Line2"));
+        assert!(!result.stdout.contains("Line3"));
+    }
+    
+    #[tokio::test]
+    async fn test_shell_execute_with_head_filter() {
+        let params = ShellExecuteParams {
+            command: if cfg!(target_os = "windows") {
+                "echo Line1 && echo Line2 && echo Line3 && echo Line4 && echo Line5".to_string()
+            } else {
+                "echo -e 'Line1\nLine2\nLine3\nLine4\nLine5'".to_string()
+            },
+            working_directory: None,
+            timeout_ms: 5000,
+            env: None,
+            grep_pattern: None,
+            head_lines: Some(3),
+            tail_lines: None,
+        };
+        
+        let config = Arc::new(RwLock::new(AppConfig::default()));
+        let qdrant_client = create_mock_qdrant();
+        
+        let result = handle_shell_execute(params, config, qdrant_client, None).await.unwrap();
+        
+        assert_eq!(result.exit_code, 0);
+        assert!(result.stdout.contains("Line1"));
+        assert!(result.stdout.contains("Line2"));
+        assert!(result.stdout.contains("Line3"));
+        assert!(!result.stdout.contains("Line4"));
+        assert!(!result.stdout.contains("Line5"));
+    }
+    
+    #[tokio::test]
+    async fn test_shell_execute_with_tail_filter() {
+        let params = ShellExecuteParams {
+            command: if cfg!(target_os = "windows") {
+                "echo Line1 && echo Line2 && echo Line3 && echo Line4 && echo Line5".to_string()
+            } else {
+                "echo -e 'Line1\nLine2\nLine3\nLine4\nLine5'".to_string()
+            },
+            working_directory: None,
+            timeout_ms: 5000,
+            env: None,
+            grep_pattern: None,
+            head_lines: None,
+            tail_lines: Some(2),
+        };
+        
+        let config = Arc::new(RwLock::new(AppConfig::default()));
+        let qdrant_client = create_mock_qdrant();
+        
+        let result = handle_shell_execute(params, config, qdrant_client, None).await.unwrap();
+        
+        assert_eq!(result.exit_code, 0);
+        assert!(!result.stdout.contains("Line1"));
+        assert!(!result.stdout.contains("Line2"));
+        assert!(!result.stdout.contains("Line3"));
+        assert!(result.stdout.contains("Line4"));
+        assert!(result.stdout.contains("Line5"));
     }
 }

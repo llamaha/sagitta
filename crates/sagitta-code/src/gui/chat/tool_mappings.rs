@@ -218,6 +218,28 @@ pub fn format_tool_parameters_for_inline(tool_name: &str, args: &serde_json::Val
                 };
                 params.push(("query".to_string(), truncated));
             }
+            
+            // Add repository name if present
+            if let Some(repo) = args.get("repositoryName").or_else(|| args.get("repository")).and_then(|v| v.as_str()) {
+                params.push(("repo".to_string(), repo.to_string()));
+            }
+            
+            // Add element type if present
+            if let Some(elem_type) = args.get("elementType").and_then(|v| v.as_str()) {
+                params.push(("type".to_string(), elem_type.to_string()));
+            }
+            
+            // Add language if present
+            if let Some(lang) = args.get("lang").or_else(|| args.get("language")).and_then(|v| v.as_str()) {
+                params.push(("lang".to_string(), lang.to_string()));
+            }
+            
+            // Add limit if present and not default
+            if let Some(limit) = args.get("limit").and_then(|v| v.as_u64()) {
+                if limit != 10 { // Only show if not default value
+                    params.push(("limit".to_string(), limit.to_string()));
+                }
+            }
         },
         
         "search_file" | "Glob" | "grep" | "Grep" => {
