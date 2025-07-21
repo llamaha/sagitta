@@ -86,6 +86,59 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
                 }
             }
             // clicked_tool_info already cleared by take()
+        } else if tool_name == "__OPEN_FILE__" {
+            // Handle opening a specific search result
+            if let Ok(file_data) = serde_json::from_str::<serde_json::Value>(&tool_args) {
+                if let Some(file_path) = file_data.get("file_path").and_then(|v| v.as_str()) {
+                    // Try to read a snippet of the file around the search result
+                    let start_line = file_data.get("start_line").and_then(|v| v.as_i64()).unwrap_or(1) as usize;
+                    let end_line = file_data.get("end_line").and_then(|v| v.as_i64()).unwrap_or(start_line as i64 + 10) as usize;
+                    
+                    // Try to read the file content for the specific lines
+                    let path = std::path::Path::new(file_path);
+                    let full_path = if path.is_absolute() {
+                        path.to_path_buf()
+                    } else {
+                        std::env::current_dir().unwrap_or_default().join(path)
+                    };
+                    
+                    match std::fs::read_to_string(&full_path) {
+                        Ok(content) => {
+                            // Extract the specific lines
+                            let lines: Vec<&str> = content.lines().collect();
+                            let snippet_start = start_line.saturating_sub(1).max(0);
+                            let snippet_end = end_line.min(lines.len());
+                            
+                            let snippet_lines: Vec<String> = lines[snippet_start..snippet_end]
+                                .iter()
+                                .enumerate()
+                                .map(|(i, line)| format!("{:>4}: {}", snippet_start + i + 1, line))
+                                .collect();
+                            
+                            let snippet = snippet_lines.join("\n");
+                            
+                            // Create enhanced data with the snippet
+                            let mut enhanced_data = file_data.clone();
+                            enhanced_data["code_snippet"] = serde_json::Value::String(snippet);
+                            
+                            let formatted_result = serde_json::to_string_pretty(&enhanced_data)
+                                .unwrap_or_else(|_| tool_args.clone());
+                            
+                            app.state.json_modal_content = Some(formatted_result);
+                            app.state.show_json_modal = true;
+                        }
+                        Err(_) => {
+                            // If we can't read the file, just show the search result data
+                            let formatted_result = serde_json::to_string_pretty(&file_data)
+                                .unwrap_or_else(|_| tool_args.clone());
+                            
+                            app.state.json_modal_content = Some(formatted_result);
+                            app.state.show_json_modal = true;
+                        }
+                    }
+                }
+            }
+            // clicked_tool_info already cleared by take()
         } else if tool_name == "__READ_FULL_FILE__" {
             // Handle full file read request
             if let Ok(file_data) = serde_json::from_str::<serde_json::Value>(&tool_args) {

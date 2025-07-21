@@ -380,7 +380,7 @@ pub fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Co
                                 .max_height(800.0)  // Reasonable max height
                                 .min_scrolled_height(min_height)
                                 .id_salt(format!("tool_result_{}", tool_call.id))
-                                .auto_shrink([false, true])  // Don't auto-shrink width, do auto-shrink height
+                                .auto_shrink([false, false])  // Don't auto-shrink to maintain consistent height
                                 .show(ui, |ui| {
                                     ui.set_max_width(tool_card_width - 24.0);
                                     
@@ -2097,58 +2097,58 @@ fn is_code_change_result(tool_name: &str, result: &serde_json::Value) -> bool {
 
 /// Render terminal output with monospace font and ANSI colors
 fn render_terminal_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme: AppTheme) {
-    ui.group(|ui| {
-        ui.style_mut().visuals.override_text_color = Some(app_theme.success_color());
-        
-        // Exit code display
-        ui.horizontal(|ui| {
-            if let Some(exit_code) = result.get("exit_code").and_then(|v| v.as_i64()) {
-                let exit_color = if exit_code == 0 { app_theme.success_color() } else { app_theme.error_color() };
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new(format!("Exit: {exit_code}")).color(exit_color).small());
-                });
-            }
-        });
-        
-        // Use monospace font for terminal output
-        let mut output = String::new();
-        
-        if let Some(stdout) = result.get("stdout").and_then(|v| v.as_str()) {
-            if !stdout.is_empty() {
-                output.push_str(stdout);
-            }
-        }
-        
-        if let Some(stderr) = result.get("stderr").and_then(|v| v.as_str()) {
-            if !stderr.is_empty() {
-                if !output.is_empty() {
-                    output.push('\n');
-                }
-                output.push_str(&format!("STDERR:\n{stderr}"));
-            }
-        }
-        
-        if output.is_empty() {
-            output = "(No output)".to_string();
-        }
-        
-        // Count lines to determine if we need scrolling
-        let line_count = output.lines().count();
-        
-        if line_count > SHELL_OUTPUT_COLLAPSING_THRESHOLD_LINES {
-            // Use scroll area for long output
-            egui::ScrollArea::vertical()
-                .max_height(SHELL_OUTPUT_SCROLL_AREA_MAX_HEIGHT)
-                .min_scrolled_height(SHELL_OUTPUT_MIN_HEIGHT)  // Ensure minimum height
-                .auto_shrink([false, false])  // Don't auto-shrink to prevent size jumping
-                .show(ui, |ui| {
-                    ui.label(egui::RichText::new(output).monospace().color(app_theme.text_color()));
-                });
-        } else {
-            // Render directly for short output
-            ui.label(egui::RichText::new(output).monospace().color(app_theme.text_color()));
+    // Exit code display
+    ui.horizontal(|ui| {
+        if let Some(exit_code) = result.get("exit_code").and_then(|v| v.as_i64()) {
+            let exit_color = if exit_code == 0 { app_theme.success_color() } else { app_theme.error_color() };
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(egui::RichText::new(format!("Exit: {exit_code}")).color(exit_color).small());
+            });
         }
     });
+    
+    // Use monospace font for terminal output
+    let mut output = String::new();
+    
+    if let Some(stdout) = result.get("stdout").and_then(|v| v.as_str()) {
+        if !stdout.is_empty() {
+            output.push_str(stdout);
+        }
+    }
+    
+    if let Some(stderr) = result.get("stderr").and_then(|v| v.as_str()) {
+        if !stderr.is_empty() {
+            if !output.is_empty() {
+                output.push('\n');
+            }
+            output.push_str(&format!("STDERR:\n{stderr}"));
+        }
+    }
+    
+    if output.is_empty() {
+        output = "(No output)".to_string();
+    }
+    
+    // Always render in a frame with minimum height to ensure consistent display
+    Frame::NONE
+        .fill(app_theme.code_background())
+        .inner_margin(Vec2::new(8.0, 6.0))
+        .corner_radius(CornerRadius::same(4))
+        .stroke(Stroke::new(0.5, app_theme.border_color()))
+        .show(ui, |ui| {
+            // Set a minimum height for the frame content
+            let min_height = SHELL_OUTPUT_MIN_HEIGHT;
+            let available_width = ui.available_width();
+            
+            // Allocate space with minimum height
+            ui.allocate_ui_with_layout(
+                egui::vec2(available_width, min_height.max(ui.available_height())),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    ui.label(egui::RichText::new(output).monospace().color(app_theme.text_color()));
+                }
+            );
+        });
 }
 
 /// Render diff output with syntax highlighting
@@ -2418,8 +2418,9 @@ fn render_search_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme
                 .show(ui, |ui| {
                     for (i, result_item) in results.iter().enumerate() {
                         if let Some(action_data) = render_search_result_item(ui, i, result_item, app_theme) {
-                            // Propagate the action up
+                            // Return the action immediately when a result is clicked
                             action = Some(action_data);
+                            break; // Exit the loop once we have an action
                         }
                     }
                 });
