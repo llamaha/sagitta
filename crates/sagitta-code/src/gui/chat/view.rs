@@ -2419,6 +2419,7 @@ fn render_search_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme
                     for (i, result_item) in results.iter().enumerate() {
                         if let Some(action_data) = render_search_result_item(ui, i, result_item, app_theme) {
                             // Return the action immediately when a result is clicked
+                            log::debug!("Search result clicked: action_data = {:?}", action_data);
                             action = Some(action_data);
                             break; // Exit the loop once we have an action
                         }
@@ -2497,7 +2498,6 @@ fn render_search_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme
         
         // Add small View JSON link
         ui.add_space(8.0);
-        let mut action = None;
         ui.horizontal(|ui| {
             if ui.link(egui::RichText::new("View JSON").color(app_theme.hint_text_color()).small()).clicked() {
                 let json_str = serde_json::to_string_pretty(result).unwrap_or_else(|_| "Failed to serialize JSON".to_string());
@@ -2505,6 +2505,10 @@ fn render_search_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme
                 action = Some(("__VIEW_JSON__".to_string(), json_str));
             }
         });
+        
+        if action.is_some() {
+            log::debug!("render_search_output returning action: {:?}", action);
+        }
         action
     })
     .inner
@@ -2540,6 +2544,7 @@ fn render_search_result_item(ui: &mut egui::Ui, index: usize, result_item: &serd
                     action_data["end_line"] = serde_json::json!(end_line);
                 }
                 
+                log::debug!("Search result item clicked: file_path = {}, action_data = {}", file_path, action_data);
                 action = Some(("__OPEN_FILE__".to_string(), action_data.to_string()));
             }
             

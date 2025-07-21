@@ -61,6 +61,7 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
     
     // Handle clicked tool info - process once then clear to prevent repeated execution
     if let Some((tool_name, tool_args)) = app.state.clicked_tool_info.take() {
+        log::debug!("Processing clicked tool: tool_name = {}, tool_args = {}", tool_name, tool_args);
         if tool_name == "__CANCEL_TOOL__" {
             // Handle tool cancellation
             if let Ok(run_id) = uuid::Uuid::parse_str(&tool_args) {
@@ -1880,6 +1881,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 
                 // Check for tool clicks
                 if let Some((tool_name, tool_args)) = modern_chat_view_ui(ui, &items, app.state.current_theme, &mut app.state.copy_button_state, &app.state.running_tools, &mut app.state.collapsed_thinking, &app.state.tool_results, app.state.tool_cards_collapsed, &mut app.state.tool_card_individual_states) {
+                    log::debug!("Got clicked tool from chat view: tool_name = {}, tool_args = {}", tool_name, tool_args);
                     app.state.clicked_tool_info = Some((tool_name, tool_args));
                 }
             });

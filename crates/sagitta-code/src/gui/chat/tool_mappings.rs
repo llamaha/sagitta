@@ -20,48 +20,48 @@ pub fn get_human_friendly_tool_name(tool_name: &str) -> String {
     
     match clean_name {
         // File operations
-        "read_file" | "Read" => "📖 Read File".to_string(),
-        "write_file" | "Write" => "💾 Write File".to_string(),
-        "edit_file" | "Edit" => "✏️ Edit File".to_string(),
-        "multi_edit_file" | "MultiEdit" => "✏️ Multi-Edit File".to_string(),
+        "read_file" | "Read" => "Read File".to_string(),
+        "write_file" | "Write" => "Write File".to_string(),
+        "edit_file" | "Edit" => "Edit File".to_string(),
+        "multi_edit_file" | "MultiEdit" => "Multi-Edit File".to_string(),
         
         // Search operations
-        "search_file" | "Glob" => "🔍 Search Files".to_string(),
-        "semantic_code_search" | "Search" | "query" => "🔎 Semantic Code Search".to_string(),
-        "repository_search" => "🔍 Search Repository".to_string(),
-        "grep" | "Grep" => "🔍 Grep".to_string(),
+        "search_file" | "Glob" => "Search Files".to_string(),
+        "semantic_code_search" | "Search" | "query" => "Semantic Code Search".to_string(),
+        "repository_search" => "Search Repository".to_string(),
+        "grep" | "Grep" => "Grep".to_string(),
         
         // Repository operations
-        "repository_add" => "➕ Add Repository".to_string(),
-        "repository_list" => "📋 List Repositories".to_string(),
-        "repository_sync" => "🔄 Sync Repository".to_string(),
-        "repository_switch_branch" => "🔀 Switch Branch".to_string(),
-        "repository_list_branches" => "📑 List Branches".to_string(),
-        "repository_view_file" => "📄 View Repository File".to_string(),
+        "repository_add" => "Add Repository".to_string(),
+        "repository_list" => "List Repositories".to_string(),
+        "repository_sync" => "Sync Repository".to_string(),
+        "repository_switch_branch" => "Switch Branch".to_string(),
+        "repository_list_branches" => "List Branches".to_string(),
+        "repository_view_file" => "View Repository File".to_string(),
         
         // Shell and system
-        "shell_execute" | "Bash" => "💻 Shell Command".to_string(),
-        "streaming_shell_execution" => "💻 Streaming Shell".to_string(),
+        "shell_execute" | "Bash" => "Shell Command".to_string(),
+        "streaming_shell_execution" => "Streaming Shell".to_string(),
         
         // Task management
-        "todo_read" | "TodoRead" => "📋 Read TODOs".to_string(),
-        "todo_write" | "TodoWrite" => "✏️ Write TODOs".to_string(),
-        "Task" => "🤖 Run Task".to_string(),
+        "todo_read" | "TodoRead" => "Read TODOs".to_string(),
+        "todo_write" | "TodoWrite" => "Write TODOs".to_string(),
+        "Task" => "Run Task".to_string(),
         
         // Web operations
-        "web_search" | "WebSearch" => "🌐 Web Search".to_string(),
-        "web_fetch" | "WebFetch" => "🌐 Fetch Web Content".to_string(),
+        "web_search" | "WebSearch" => "Web Search".to_string(),
+        "web_fetch" | "WebFetch" => "Fetch Web Content".to_string(),
         
         // Other tools
-        "ping" => "🏓 Ping".to_string(),
-        "exit_plan_mode" => "🚪 Exit Plan Mode".to_string(),
-        "NotebookRead" => "📓 Read Notebook".to_string(),
-        "NotebookEdit" => "📝 Edit Notebook".to_string(),
-        "LS" => "📁 List Directory".to_string(),
+        "ping" => "Ping".to_string(),
+        "exit_plan_mode" => "Exit Plan Mode".to_string(),
+        "NotebookRead" => "Read Notebook".to_string(),
+        "NotebookEdit" => "Edit Notebook".to_string(),
+        "LS" => "List Directory".to_string(),
         
         // OpenAI format
-        "run_python" => "🐍 Run Python".to_string(),
-        "analyze_data" => "📊 Analyze Data".to_string(),
+        "run_python" => "Run Python".to_string(),
+        "analyze_data" => "Analyze Data".to_string(),
         
         _ => {
             // Convert snake_case or kebab-case to Title Case
