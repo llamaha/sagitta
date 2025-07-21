@@ -2615,8 +2615,9 @@ fn render_search_result_item(ui: &mut egui::Ui, index: usize, result_item: &serd
     if response.response.hovered() {
         ui.painter().rect_stroke(
             response.response.rect,
-            egui::Rounding::same(4),
-            egui::Stroke::new(1.0, app_theme.accent_color().linear_multiply(0.3))
+            CornerRadius::same(4),
+            Stroke::new(1.0, app_theme.accent_color().linear_multiply(0.3)),
+            egui::StrokeKind::Outside
         );
     }
     

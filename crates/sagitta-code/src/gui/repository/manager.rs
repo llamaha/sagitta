@@ -695,7 +695,17 @@ impl RepositoryManager {
                     {
                         let mut config_guard = self.config.lock().await;
                         if let Some(repo) = config_guard.repositories.iter_mut().find(|r| r.name == name) {
-                            let current_branch = repo.active_branch.clone().unwrap_or_else(|| repo.default_branch.clone());
+                            // Get current branch from git repository
+                            let current_branch = {
+                                let git_manager = GitManager::new();
+                                match git_manager.get_repository_info(&repo.local_path) {
+                                    Ok(repo_info) => repo_info.current_branch,
+                                    Err(e) => {
+                                        log::warn!("Failed to get current branch for {}: {}", name, e);
+                                        "main".to_string()
+                                    }
+                                }
+                            };
                             if let Some(commit) = sync_outcome.last_synced_commit {
                                 repo.last_synced_commits.insert(current_branch, commit);
                             }
@@ -761,8 +771,18 @@ impl RepositoryManager {
         // Determine the effective branch name
         let branch_name = branch
             .map(String::from)
-            .or_else(|| repo_config.active_branch.clone())
-            .unwrap_or_else(|| repo_config.default_branch.clone());
+            .or_else(|| {
+                // Get current branch from git repository
+                let git_manager = GitManager::new();
+                match git_manager.get_repository_info(&repo_config.local_path) {
+                    Ok(repo_info) => Some(repo_info.current_branch),
+                    Err(e) => {
+                        log::warn!("Failed to get current branch for {}: {}", repo_name, e);
+                        None
+                    }
+                }
+            })
+            .unwrap_or_else(|| "main".to_string());
         
         // Get collection name based on repo and branch using branch-aware naming
         let collection_name = repo_helpers::get_branch_aware_collection_name(repo_name, &branch_name, &config_guard);
@@ -1012,8 +1032,17 @@ impl RepositoryManager {
             .find(|r| r.name == repo_name)
             .ok_or_else(|| anyhow!("Repository '{}' not found", repo_name))?;
         
-        let _previous_branch = repo_config.active_branch.clone()
-            .unwrap_or_else(|| repo_config.default_branch.clone());
+        let _previous_branch = {
+            // Get current branch from git repository
+            let git_manager = GitManager::new();
+            match git_manager.get_repository_info(&repo_config.local_path) {
+                Ok(repo_info) => repo_info.current_branch,
+                Err(e) => {
+                    log::warn!("Failed to get current branch for {}: {}", repo_name, e);
+                    "main".to_string()
+                }
+            }
+        };
         
         // Create GitManager for this repository
         let mut git_manager = GitManager::new();
@@ -1040,14 +1069,14 @@ impl RepositoryManager {
         if self.is_likely_branch_name(target_ref) {
             // If it looks like a branch name, clear target_ref and set active_branch
             repo_config.target_ref = None;
-            repo_config.active_branch = Some(target_ref.to_string());
-            if !repo_config.tracked_branches.contains(&target_ref.to_string()) {
-                repo_config.tracked_branches.push(target_ref.to_string());
-            }
+            // repo_config.active_branch = Some(target_ref.to_string()); // Deprecated field
+            // if !repo_config.tracked_branches.contains(&target_ref.to_string()) {
+            //     repo_config.tracked_branches.push(target_ref.to_string());
+            // } // Deprecated field
         } else {
             // If it's likely a tag or commit, set target_ref and update active_branch
             repo_config.target_ref = Some(target_ref.to_string());
-            repo_config.active_branch = Some(target_ref.to_string());
+            // repo_config.active_branch = Some(target_ref.to_string()); // Deprecated field
         }
         
         // Save configuration
