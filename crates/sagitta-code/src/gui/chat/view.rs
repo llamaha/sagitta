@@ -2516,10 +2516,10 @@ fn render_search_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme
 
 /// Render a single search result item as a clickable entry
 fn render_search_result_item(ui: &mut egui::Ui, index: usize, result_item: &serde_json::Value, app_theme: AppTheme) -> Option<(String, String)> {
-    let mut action = None;
-    
     // Make the entire group clickable
     let response = ui.group(|ui| {
+        let mut action = None;
+        
         if let Some(file_path) = result_item.get("filePath").and_then(|v| v.as_str()) {
             // Create a clickable header with file path
             let file_response = ui.add(
@@ -2615,6 +2615,8 @@ fn render_search_result_item(ui: &mut egui::Ui, index: usize, result_item: &serd
                 }
             }
         }
+        
+        action
     });
     
     // Make the whole group have hover effect
@@ -2628,7 +2630,7 @@ fn render_search_result_item(ui: &mut egui::Ui, index: usize, result_item: &serd
     }
     
     ui.add_space(2.0);
-    action
+    response.inner
 }
 
 /// Render repository operation results with nice formatting

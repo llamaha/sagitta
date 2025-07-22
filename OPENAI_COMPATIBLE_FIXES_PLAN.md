@@ -79,26 +79,84 @@
 ## Progress So Far
 
 ### Completed
-- ✅ Created optimized system prompt for Devstral
+- ✅ Created optimized system prompt for Devstral (in `examples/devstral-system-prompt-optimized.txt`)
 - ✅ Fixed duplicate tool icons by removing icons from friendly names
+  - Modified `get_human_friendly_tool_name` in `tool_mappings.rs` to return names without icons
+  - Icons are now only added once via `get_tool_icon` in the header
 - ✅ Added debug logging to trace click events
+  - Added logging in `render_search_result_item` when clicked
+  - Added logging in `render_search_output` when action is returned
+  - Added logging in `rendering.rs` when clicked tool is processed
 - ✅ Fixed action variable shadowing in render_search_output
+  - Removed duplicate `let mut action = None` that was shadowing the outer variable
+- ✅ Created test structure for search click functionality
+  - Added `tests/search_click_test.rs` with unit tests
+  - Tests verify action format and search result detection
+- ✅ Fixed semantic search click functionality
+  - Fixed closure scope issue in `render_search_result_item`
+  - Action is now properly returned from ui.group() closure using response.inner
+  - Click events now propagate correctly through the rendering chain
 
 ### In Progress
-- 🔄 Debugging semantic search click functionality
-- 🔄 Creating tests for search click behavior
+- 🔄 Shell command output is rendered correctly if recognized as shell command
+- 🔄 File read content display - formatter expects "content" field but may be missing
 
 ### Issues Found
-- The action from render_search_result_item is being returned correctly
-- The action propagates through render_search_output → render_tool_card → modern_chat_view_ui
-- The __OPEN_FILE__ handler exists in rendering.rs
-- Need to verify if the action is actually being triggered in the UI
+- The action from render_search_result_item was not being returned due to closure scope
+- Fixed by returning action from inside the ui.group() closure and using response.inner
+- Shell output rendering works correctly when tool name matches shell patterns
+- File result formatter shows "FILE: File Content" header but no content when "content" field is missing
 
-## Next Steps
-1. Test the application with debug logging to see if clicks are registered
-2. Check if there's a UI interaction issue preventing clicks
-3. Investigate shell output JSON encoding issue
-4. Fix file read content display
+### Code Changes Made
+1. **crates/sagitta-code/src/gui/chat/view.rs**:
+   - Added debug logging in multiple locations
+   - Fixed action variable shadowing issue
+   - Fixed shell output height with proper Frame allocation
+
+2. **crates/sagitta-code/src/gui/app/rendering.rs**:
+   - Added __OPEN_FILE__ handler to read file snippets
+   - Added debug logging for clicked tool processing
+
+3. **crates/sagitta-code/src/gui/chat/tool_mappings.rs**:
+   - Removed icons from friendly names to fix duplication
+
+4. **examples/devstral-system-prompt-optimized.txt**:
+   - Created simplified prompt for better Devstral compatibility
+
+## Next Steps for Tomorrow
+1. **Test with debug logging**:
+   ```bash
+   RUST_LOG=debug cargo run --release --features cuda --bin sagitta-code 2>&1 | grep -E "(clicked|action|OPEN_FILE)"
+   ```
+   - Perform a semantic search and click on results
+   - Check if debug logs show click events firing
+
+2. **Investigate UI interaction issue**:
+   - Check if the clickable area is properly defined
+   - Verify egui Sense::click() is working
+   - Test with a simple button in the same location to isolate the issue
+
+3. **Fix shell output JSON encoding**:
+   - Check why shell output is wrapped in JSON
+   - Investigate `render_terminal_output` function
+   - Ensure OpenAI-compatible format isn't interfering
+
+4. **Fix file read content display**:
+   - Check why file content shows as empty
+   - Investigate the tool result formatting pipeline
+   - Test with direct file reads
+
+## Testing Commands
+```bash
+# Build the project
+cargo build --release --features cuda --bin sagitta-code
+
+# Run with debug logging
+RUST_LOG=debug ./target/release/sagitta-code
+
+# Run tests
+cargo test --release --features cuda -p sagitta-code chat::tests::search_click_tests
+```
 
 ## Success Criteria
 
