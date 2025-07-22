@@ -41,8 +41,18 @@ pub fn find_files_matching_pattern(
 
     log::debug!("Searching in: {} for pattern: '{}' (case_sensitive: {})", search_path.display(), pattern_str, case_sensitive);
 
-    let glob_pattern = Pattern::new(pattern_str)
-        .with_context(|| format!("Invalid glob pattern: {pattern_str}"))?;
+    // Make patterns recursive by default if they don't contain path separators
+    let effective_pattern = if !pattern_str.contains('/') && !pattern_str.starts_with("**/") {
+        // Prepend **/ to make the pattern recursive
+        format!("**/{}", pattern_str)
+    } else {
+        pattern_str.to_string()
+    };
+    
+    log::debug!("Using effective pattern: '{}'", effective_pattern);
+
+    let glob_pattern = Pattern::new(&effective_pattern)
+        .with_context(|| format!("Invalid glob pattern: {effective_pattern}"))?;
 
     let match_options = MatchOptions {
         case_sensitive,
@@ -257,6 +267,38 @@ mod tests {
     }
 
     #[test]
+    fn test_find_files_with_explicit_paths() {
+        // Test that patterns with paths work as expected
+        let temp_dir = tempdir().unwrap();
+        let temp_path = temp_dir.path();
+
+        // Create test structure
+        fs::write(temp_path.join("root.rs"), "// root file").unwrap();
+        let src_dir = temp_path.join("src");
+        fs::create_dir(&src_dir).unwrap();
+        fs::write(src_dir.join("main.rs"), "fn main() {}").unwrap();
+        fs::write(src_dir.join("lib.rs"), "// lib").unwrap();
+        
+        let tests_dir = temp_path.join("tests");
+        fs::create_dir(&tests_dir).unwrap();
+        fs::write(tests_dir.join("test.rs"), "// test").unwrap();
+
+        // Test pattern with explicit directory - should NOT be made recursive
+        let src_only = find_files_matching_pattern(temp_path, "src/*.rs", false).unwrap();
+        assert_eq!(src_only.len(), 2, "Should find only files in src/ directory");
+        
+        let mut src_names: Vec<String> = src_only.iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+        src_names.sort();
+        assert_eq!(src_names, vec!["src/lib.rs", "src/main.rs"]);
+
+        // Test pattern without path separator - should be recursive
+        let all_rs = find_files_matching_pattern(temp_path, "*.rs", false).unwrap();
+        assert_eq!(all_rs.len(), 4, "Should find all .rs files recursively");
+    }
+
+    #[test]
     fn test_invalid_search_path() {
         let dir = tempdir().unwrap();
         let invalid_path = dir.path().join("nonexistent_dir");
@@ -389,18 +431,18 @@ mod tests {
         fs::create_dir(&sub_dir).unwrap();
         fs::write(sub_dir.join("mod.rs"), "mod tests;").unwrap();
 
-        // Test with *.rs pattern
+        // Test with *.rs pattern - now recursive by default
         let matches = find_files_matching_pattern(temp_path, "*.rs", false).unwrap();
         
-        // Should find main.rs and lib.rs in root
-        assert_eq!(matches.len(), 2, "Should find 2 .rs files in root");
+        // Should find all .rs files recursively (main.rs, lib.rs in root, and mod.rs in src/)
+        assert_eq!(matches.len(), 3, "Should find 3 .rs files recursively with *.rs");
         
         let mut match_names: Vec<String> = matches.iter()
             .map(|p| p.to_string_lossy().to_string())
             .collect();
         match_names.sort();
         
-        assert_eq!(match_names, vec!["lib.rs", "main.rs"]);
+        assert_eq!(match_names, vec!["lib.rs", "main.rs", "src/mod.rs"]);
         
         // Test with **/*.rs pattern to include subdirectories
         let all_matches = find_files_matching_pattern(temp_path, "**/*.rs", false).unwrap();
@@ -416,9 +458,9 @@ mod tests {
         fs::write(temp_path.join("Main.rs"), "fn main() {}").unwrap();
         fs::write(temp_path.join("main.RS"), "fn main() {}").unwrap();
         
-        // Case sensitive search
+        // Case sensitive search - now recursive by default
         let case_sensitive = find_files_matching_pattern(temp_path, "*.rs", true).unwrap();
-        assert_eq!(case_sensitive.len(), 0, "Case sensitive should find 0 files with *.rs");
+        assert_eq!(case_sensitive.len(), 1, "Case sensitive should find 1 file with *.rs (Main.rs)");
         
         // Case insensitive search
         let case_insensitive = find_files_matching_pattern(temp_path, "*.rs", false).unwrap();
