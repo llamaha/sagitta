@@ -675,7 +675,7 @@ pub trait ToolResultRenderer {
 
 /// Example usage demonstrating proper streaming
 #[cfg(test)]
-mod tests {
+mod streaming_tests {
     use super::*;
     
     #[test]

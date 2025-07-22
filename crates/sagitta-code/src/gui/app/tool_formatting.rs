@@ -61,7 +61,7 @@ impl ToolResultFormatter {
     }
     
     /// Format successful tool results based on tool type
-    fn format_successful_tool_result(&self, tool_name: &str, value: &serde_json::Value) -> String {
+    pub fn format_successful_tool_result(&self, tool_name: &str, value: &serde_json::Value) -> String {
         log::debug!("Formatting tool result for: {tool_name}");
         
         // Handle both native tools and MCP tools

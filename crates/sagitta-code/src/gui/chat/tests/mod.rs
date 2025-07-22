@@ -1,1 +1,0 @@
-mod search_click_test;

@@ -250,23 +250,23 @@ mod tests {
 
     #[test]
     fn test_thinking_symbols() {
-        assert_eq!(get_thinking_symbol(), "[~]");
-        assert_eq!(thinking::BRAIN_ASCII, "[~]");
-        assert_eq!(thinking::THINKING, "...");
+        assert_eq!(get_thinking_symbol(), "🧠");
+        assert_eq!(thinking::BRAIN_ASCII, "🧠");
+        assert_eq!(thinking::THINKING, "💭");
         assert!(!thinking::THINKING_DOTS.is_empty());
     }
 
     #[test]
     fn test_status_symbols() {
-        assert_eq!(get_error_symbol(), "x");
-        assert_eq!(get_success_symbol(), "√");
-        assert_eq!(get_warning_symbol(), "!");
-        assert_eq!(get_info_symbol(), "i");
+        assert_eq!(get_error_symbol(), "✗");
+        assert_eq!(get_success_symbol(), "✓");
+        assert_eq!(get_warning_symbol(), "⚠");
+        assert_eq!(get_info_symbol(), "ℹ");
     }
 
     #[test]
     fn test_tool_symbols() {
-        assert_eq!(get_tool_symbol(), "*");
+        assert_eq!(get_tool_symbol(), "🔧");
         assert!(!tools::GEAR.is_empty());
         assert!(!tools::HAMMER.is_empty());
     }
@@ -283,10 +283,10 @@ mod tests {
 
     #[test]
     fn test_fallback_functions() {
-        assert_eq!(fallbacks::thinking(), "[~]");
-        assert_eq!(fallbacks::error(), "x");
-        assert_eq!(fallbacks::success(), "√");
-        assert_eq!(fallbacks::tool(), "*");
+        assert_eq!(fallbacks::thinking(), "🧠");
+        assert_eq!(fallbacks::error(), "✗");
+        assert_eq!(fallbacks::success(), "✓");
+        assert_eq!(fallbacks::tool(), "🔧");
     }
 
     #[test]

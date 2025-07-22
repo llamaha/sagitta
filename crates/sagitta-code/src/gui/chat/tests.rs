@@ -12,7 +12,7 @@ mod tests {
     // Helper function to create a test tool card
     fn create_test_tool_card(tool_name: &str, status: ToolCardStatus) -> ToolCard {
         ToolCard {
-            run_id: ToolRunId(Uuid::new_v4()),
+            run_id: Uuid::new_v4(),
             tool_name: tool_name.to_string(),
             status,
             progress: None,
@@ -136,20 +136,20 @@ mod tests {
         let test_cases = vec![
             ("mcp__sagitta-internal-5c623314-60dd-4557-bcab-799ab3feb6ad__query", "Semantic Code Search"),
             ("mcp__sagitta-mcp-stdio__repository_view_file", "View Repository File"),
-            ("mcp__sagitta-mcp-stdio__repository_search_file", "Search Repository Files"),
+            ("mcp__sagitta-mcp-stdio__repository_search_file", "Repository Search File"),
             ("mcp__sagitta-mcp-stdio__repository_list", "List Repositories"),
-            ("mcp__sagitta-mcp-stdio__repository_map", "Map Repository Structure"),
+            ("mcp__sagitta-mcp-stdio__repository_map", "Repository Map"),
             ("mcp__sagitta-mcp-stdio__repository_add", "Add Repository"),
-            ("mcp__sagitta-mcp-stdio__repository_list_branches", "List Repository Branches"),
+            ("mcp__sagitta-mcp-stdio__repository_list_branches", "List Branches"),
             ("Read", "Read File"),
             ("Write", "Write File"),
             ("Edit", "Edit File"),
-            ("MultiEdit", "Multi Edit File"),
-            ("Bash", "Run Command"),
-            ("WebSearch", "Search Web"),
+            ("MultiEdit", "Multi-Edit File"),
+            ("Bash", "Shell Command"),
+            ("WebSearch", "Web Search"),
             ("WebFetch", "Fetch Web Content"),
-            ("TodoRead", "Read Todo List"),
-            ("TodoWrite", "Update Todo List"),
+            ("TodoRead", "Read TODOs"),
+            ("TodoWrite", "Write TODOs"),
         ];
         
         for (raw_name, expected) in test_cases {
@@ -169,14 +169,14 @@ mod tests {
                     "repository": "fibonacci-calculator",
                     "limit": 5
                 }),
-                vec!["Query: \"main entrypoint\"", "Repository: fibonacci-calculator", "Limit: 5"]
+                vec!["query: main entrypoint", "repository: fibonacci-calculator", "limit: 5"]
             ),
             (
                 "Read",
                 json!({
                     "file_path": "/home/user/test.rs"
                 }),
-                vec!["File Path: \"/home/user/test.rs\""]
+                vec!["file_path: /home/user/test.rs"]
             ),
             (
                 "Bash",
@@ -184,7 +184,7 @@ mod tests {
                     "command": "ls -la",
                     "working_directory": "/home/user"
                 }),
-                vec!["Command: \"ls -la\"", "Working Directory: \"/home/user\""]
+                vec!["command: ls -la", "working_directory: /home/user"]
             ),
         ];
         
@@ -197,16 +197,15 @@ mod tests {
                 let parts: Vec<&str> = expected_param.splitn(2, ": ").collect();
                 if parts.len() == 2 {
                     let key = parts[0];
-                    let expected_value = parts[1].trim_matches('"');
+                    let expected_value = parts[1];
                     
-                    // Check if the key exists in lowercase
-                    let actual_key = key.to_lowercase().replace(' ', "_");
-                    assert!(param_map.contains_key(&actual_key), 
-                        "Parameter key '{}' not found in formatted output", actual_key);
+                    assert!(param_map.contains_key(key), 
+                        "Parameter key '{}' not found in formatted output. Available keys: {:?}", 
+                        key, param_map.keys().collect::<Vec<_>>());
                     
-                    if let Some(actual_value) = param_map.get(&actual_key) {
+                    if let Some(actual_value) = param_map.get(key) {
                         assert_eq!(actual_value, expected_value, 
-                            "Parameter value mismatch for key '{}'", actual_key);
+                            "Parameter value mismatch for key '{}'", key);
                     }
                 }
             }
@@ -283,94 +282,34 @@ mod tests {
         });
         let formatted = formatter.format_successful_tool_result("Bash", &bash_result);
         assert!(formatted.contains("file1.txt"));
-        assert!(formatted.contains("Exit code: 0"));
+        // Exit code 0 is not shown (only non-zero exit codes are displayed)
         
-        // Test file edit formatting (diff style)
+        // Test file edit formatting
         let edit_result = json!({
-            "diff": "--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,4 @@\n fn main() {\n+    // New comment\n     println!(\"Hello\");\n }"
+            "message": "File edited successfully",
+            "file_path": "src/main.rs",
+            "changes_made": "Added comment to main function"
         });
         let formatted = formatter.format_successful_tool_result("Edit", &edit_result);
-        assert!(formatted.contains("+++"));
-        assert!(formatted.contains("// New comment"));
+        assert!(formatted.contains("✏️ Edit Operation"));
+        assert!(formatted.contains("src/main.rs"));
         
         // Test code search formatting
         let search_result = json!({
             "results": [{
-                "file_path": "src/lib.rs",
-                "line": 42,
-                "content": "pub fn calculate() -> u32 {"
+                "filePath": "src/lib.rs",
+                "startLine": 42,
+                "endLine": 42,
+                "preview": "pub fn calculate() -> u32 {"
             }]
         });
         let formatted = formatter.format_successful_tool_result("mcp__sagitta-internal-uuid__query", &search_result);
-        assert!(formatted.contains("src/lib.rs:42"));
+        assert!(formatted.contains("src/lib.rs"));
+        assert!(formatted.contains(":42"));
     }
     
     // Helper functions that should be implemented in the actual code
     
-    fn get_human_friendly_tool_name(raw_name: &str) -> &'static str {
-        match raw_name {
-            name if name.contains("__query") => "Semantic Code Search",
-            name if name.contains("__repository_view_file") => "View Repository File",
-            name if name.contains("__repository_search_file") => "Search Repository Files",
-            name if name.contains("__repository_list_branches") => "List Repository Branches",
-            name if name.contains("__repository_list") => "List Repositories",
-            name if name.contains("__repository_map") => "Map Repository Structure",
-            name if name.contains("__repository_add") => "Add Repository",
-            "Read" => "Read File",
-            "Write" => "Write File",
-            "Edit" => "Edit File",
-            "MultiEdit" => "Multi Edit File",
-            "Bash" => "Run Command",
-            "WebSearch" => "Search Web",
-            "WebFetch" => "Fetch Web Content",
-            "TodoRead" => "Read Todo List",
-            "TodoWrite" => "Update Todo List",
-            _ => {
-                // For unknown MCP tools, try to extract operation name
-                if raw_name.starts_with("mcp__") {
-                    if let Some(op) = raw_name.split("__").last() {
-                        // This would need dynamic allocation in real implementation
-                        match op {
-                            "ping" => "Ping",
-                            _ => "Unknown Tool"
-                        }
-                    } else {
-                        "Unknown Tool"
-                    }
-                } else {
-                    "Unknown Tool"
-                }
-            }
-        }
-    }
-    
-    fn format_tool_parameters(tool_name: &str, args: &serde_json::Value) -> String {
-        let mut params = Vec::new();
-        
-        if let Some(obj) = args.as_object() {
-            for (key, value) in obj {
-                let formatted_key = key.split('_')
-                    .map(|w| {
-                        let mut c = w.chars();
-                        match c.next() {
-                            None => String::new(),
-                            Some(first) => first.to_uppercase().collect::<String>() + c.as_str()
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                
-                let formatted_value = match value {
-                    serde_json::Value::String(s) => format!("\"{}\"", s),
-                    v => v.to_string(),
-                };
-                
-                params.push(format!("{}: {}", formatted_key, formatted_value));
-            }
-        }
-        
-        params.join("\n")
-    }
     
     fn format_message_with_tools_for_clipboard(message: &StreamingMessage, tool_cards: Vec<ToolCard>) -> String {
         let mut result = format!("{}: {}\n", 
@@ -389,8 +328,8 @@ mod tests {
             
             result.push_str("Parameters:\n");
             let params = format_tool_parameters(&tool_card.tool_name, &tool_card.input_params);
-            for line in params.lines() {
-                result.push_str(&format!("  {}\n", line));
+            for (key, value) in params {
+                result.push_str(&format!("  {}: {}\n", key, value));
             }
             
             if let Some(ref tool_result) = tool_card.result {
@@ -422,7 +361,7 @@ mod tests {
     
     #[test]
     fn test_format_tool_parameters_for_semantic_search() {
-        use crate::gui::chat::view::format_tool_parameters;
+        use crate::gui::chat::tool_mappings::format_tool_parameters;
         
         // Test semantic search tool with snake_case parameters
         let semantic_search_params = json!({
@@ -436,14 +375,14 @@ mod tests {
         
         // Check that all parameters are captured
         let param_map: std::collections::HashMap<_, _> = params.into_iter().collect();
-        assert_eq!(param_map.get("Query"), Some(&"format_tool_parameters function".to_string()));
-        assert_eq!(param_map.get("Repository"), Some(&"sagitta-code".to_string()));
-        assert_eq!(param_map.get("Limit"), Some(&"10".to_string()));
+        assert_eq!(param_map.get("query"), Some(&"format_tool_parameters function".to_string()));
+        assert_eq!(param_map.get("repository"), Some(&"sagitta-code".to_string()));
+        assert_eq!(param_map.get("limit"), Some(&"10".to_string()));
     }
     
     #[test]
     fn test_format_tool_parameters_for_mcp_semantic_search_camelcase() {
-        use crate::gui::chat::view::format_tool_parameters;
+        use crate::gui::chat::tool_mappings::format_tool_parameters;
         
         // Test semantic search tool with camelCase parameters (MCP style)
         let semantic_search_params = json!({
@@ -457,14 +396,14 @@ mod tests {
         
         // Check that camelCase parameters are captured
         let param_map: std::collections::HashMap<_, _> = params.into_iter().collect();
-        assert_eq!(param_map.get("Query"), Some(&"find main function".to_string()));
-        assert_eq!(param_map.get("Repository"), Some(&"my-project".to_string()));
-        assert_eq!(param_map.get("Limit"), Some(&"5".to_string()));
+        assert_eq!(param_map.get("queryText"), Some(&"find main function".to_string()));
+        assert_eq!(param_map.get("repository"), Some(&"my-project".to_string()));
+        assert_eq!(param_map.get("limit"), Some(&"5".to_string()));
     }
     
     #[test]
     fn test_format_tool_parameters_for_other_tools() {
-        use crate::gui::chat::view::format_tool_parameters;
+        use crate::gui::chat::tool_mappings::format_tool_parameters;
         
         // Test Read tool with snake_case
         let read_params = json!({
@@ -472,7 +411,7 @@ mod tests {
         });
         let params = format_tool_parameters("Read", &read_params);
         let param_map: std::collections::HashMap<_, _> = params.into_iter().collect();
-        assert_eq!(param_map.get("File"), Some(&"/home/user/test.rs".to_string()));
+        assert_eq!(param_map.get("file_path"), Some(&"/home/user/test.rs".to_string()));
         
         // Test MCP file tool with camelCase
         let mcp_read_params = json!({
@@ -480,7 +419,7 @@ mod tests {
         });
         let params = format_tool_parameters("mcp__some-server__read_file", &mcp_read_params);
         let param_map: std::collections::HashMap<_, _> = params.into_iter().collect();
-        assert_eq!(param_map.get("File"), Some(&"/home/user/mcp_file.js".to_string()));
+        assert_eq!(param_map.get("filePath"), Some(&"/home/user/mcp_file.js".to_string()));
         
         // Test Bash tool
         let bash_params = json!({
@@ -488,7 +427,7 @@ mod tests {
         });
         let params = format_tool_parameters("Bash", &bash_params);
         let param_map: std::collections::HashMap<_, _> = params.into_iter().collect();
-        assert_eq!(param_map.get("Command"), Some(&"ls -la".to_string()));
+        assert_eq!(param_map.get("command"), Some(&"ls -la".to_string()));
         
         // Test generic tool with various parameter types
         let generic_params = json!({

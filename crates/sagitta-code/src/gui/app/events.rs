@@ -2506,6 +2506,7 @@ mod tests {
             AppEvent::ExecuteTask { .. } => assert!(true),
             AppEvent::CheckAndExecuteTask => assert!(true),
             AppEvent::ToolExecutionComplete { .. } => assert!(true),
+            AppEvent::UpdateUiPreference { .. } => assert!(true),
         }
         
         // Test the other variant too
@@ -2534,6 +2535,7 @@ mod tests {
             AppEvent::ExecuteTask { .. } => assert!(true),
             AppEvent::CheckAndExecuteTask => assert!(true),
             AppEvent::ToolExecutionComplete { .. } => assert!(true),
+            AppEvent::UpdateUiPreference { .. } => assert!(true),
         }
     }
 
