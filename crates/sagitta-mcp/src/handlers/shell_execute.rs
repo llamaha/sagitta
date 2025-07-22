@@ -121,7 +121,44 @@ pub async fn handle_shell_execute<C: QdrantClientTrait + Send + Sync + 'static>(
     
     // Set working directory if specified, or use current repository path
     if let Some(ref dir) = params.working_directory {
-        cmd.current_dir(dir);
+        let path = PathBuf::from(dir);
+        
+        // If it's already absolute, use as-is
+        if path.is_absolute() {
+            cmd.current_dir(&path);
+        } else {
+            // Try to resolve relative to repositories base path
+            let config_guard = _config.read().await;
+            let mut resolved = false;
+            
+            // First, try to resolve as a repository name
+            if let Some(base_path) = &config_guard.repositories_base_path {
+                let repo_path = PathBuf::from(base_path).join(&path);
+                if repo_path.exists() && repo_path.is_dir() {
+                    cmd.current_dir(&repo_path);
+                    log::info!("Resolved working directory to repository: {}", repo_path.display());
+                    resolved = true;
+                }
+            }
+            
+            // If not resolved and we have a current repository, try relative to it
+            if !resolved {
+                if let Some(current_repo) = get_current_repository_path().await {
+                    let relative_path = current_repo.join(&path);
+                    if relative_path.exists() && relative_path.is_dir() {
+                        cmd.current_dir(&relative_path);
+                        log::info!("Resolved working directory relative to current repo: {}", relative_path.display());
+                        resolved = true;
+                    }
+                }
+            }
+            
+            // If still not resolved, use as-is (will likely fail but provides clear error)
+            if !resolved {
+                cmd.current_dir(&path);
+                log::warn!("Could not resolve working directory '{}' - using as-is", dir);
+            }
+        }
     } else if let Some(repo_path) = get_current_repository_path().await {
         // Use the current repository path if no specific directory provided
         cmd.current_dir(&repo_path);
