@@ -190,7 +190,7 @@ async fn run_direct_llm_with_tool_execution(
                 "type": "object",
                 "properties": {
                     "command": { "type": "string", "description": "The command to execute" },
-                    "working_directory": { "type": "string", "description": "Optional working directory" },
+                    "working_directory": { "type": "string", "description": "Optional: Leave empty to use current repository. Can be: repository name (e.g. 'sagitta'), relative path (e.g. 'src/'), or absolute path. Usually not needed - just use paths in your command like 'ls src/'" },
                     "timeout_ms": { "type": "integer", "description": "Optional timeout in milliseconds" }
                 },
                 "required": ["command"]

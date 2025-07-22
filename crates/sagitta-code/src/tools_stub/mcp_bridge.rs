@@ -195,12 +195,12 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "shell_execute".to_string(),
-            description: "Executes shell commands. You MUST specify at least ONE output filter to prevent excessive output: use grep_pattern to filter by content, head_lines to limit to first N lines, or tail_lines for last N lines. Example: for 'ls -la' use head_lines=20. For logs use grep_pattern='ERROR' or tail_lines=50.".to_string(),
+            description: "Executes shell commands. ALWAYS specify at least ONE filter: head_lines (e.g. 20), tail_lines (e.g. 50), or grep_pattern (e.g. 'error'). Simple example: command='ls -la', head_lines=20. Leave working_directory empty to use current repo.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "command": { "type": "string", "description": "The command to execute" },
-                    "working_directory": { "type": "string", "description": "Optional working directory (defaults to current directory)" },
+                    "working_directory": { "type": "string", "description": "Optional: Leave empty to use current repository. Can be: repository name (e.g. 'sagitta'), relative path (e.g. 'src/'), or absolute path. Usually not needed - just use paths in your command like 'ls src/'" },
                     "env": { "type": "object", "description": "Optional environment variables", "additionalProperties": { "type": "string" } },
                     "timeout_ms": { "type": "integer", "description": "Optional timeout in milliseconds (default: 30000ms)" },
                     "grep_pattern": { "type": "string", "description": "Filter output to lines containing this pattern. Example: 'ERROR' to find error lines" },
