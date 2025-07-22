@@ -598,24 +598,27 @@ impl<'a> ToolResultRenderer<'a> {
 
 /// Render a single tool call using the simplified renderer
 fn render_single_tool_call_simplified(ui: &mut Ui, tool_call: &ToolCall, _max_width: f32, app_theme: AppTheme) -> Option<(String, String)> {
-    // Create a vertical layout with limited width
-    ui.vertical(|ui| {
-        ui.set_max_width(900.0);
-        
-        // Parse the result if available
-        if let Some(result_str) = &tool_call.result {
-        if let Ok(result_json) = serde_json::from_str::<serde_json::Value>(result_str) {
-            SimplifiedToolRenderer::new(&tool_call.name, &result_json, app_theme).render(ui)
-        } else {
-            // Fallback for non-JSON results
-            let result = serde_json::json!({ "result": result_str });
-            SimplifiedToolRenderer::new(&tool_call.name, &result, app_theme).render(ui)
-        }
-    } else {
-        // Show pending state
-        let result = serde_json::json!({ "status": "running" });
-        SimplifiedToolRenderer::new(&tool_call.name, &result, app_theme).render(ui)
-    }
+    // Use tool call ID to ensure unique rendering context
+    ui.push_id(&tool_call.id, |ui| {
+        // Create a vertical layout with limited width
+        ui.vertical(|ui| {
+            ui.set_max_width(900.0);
+            
+            // Parse the result if available
+            if let Some(result_str) = &tool_call.result {
+                if let Ok(result_json) = serde_json::from_str::<serde_json::Value>(result_str) {
+                    SimplifiedToolRenderer::new(&tool_call.name, &result_json, app_theme).render(ui)
+                } else {
+                    // Fallback for non-JSON results
+                    let result = serde_json::json!({ "result": result_str });
+                    SimplifiedToolRenderer::new(&tool_call.name, &result, app_theme).render(ui)
+                }
+            } else {
+                // Show pending state
+                let result = serde_json::json!({ "status": "running" });
+                SimplifiedToolRenderer::new(&tool_call.name, &result, app_theme).render(ui)
+            }
+        }).inner
     }).inner
 }
 

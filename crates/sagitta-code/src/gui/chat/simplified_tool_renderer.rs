@@ -42,7 +42,12 @@ impl<'a> SimplifiedToolRenderer<'a> {
         app_theme: AppTheme,
     ) -> Self {
         // Generate unique ID for this tool renderer instance
-        let unique_id = format!("tool_renderer_{}_{}", tool_name, uuid::Uuid::new_v4());
+        // Include timestamp to ensure uniqueness even in rapid succession
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let unique_id = format!("tool_renderer_{}_{}_{}", tool_name, timestamp, uuid::Uuid::new_v4());
         Self { tool_name, result, app_theme, unique_id }
     }
     
@@ -115,11 +120,14 @@ impl<'a> SimplifiedToolRenderer<'a> {
         let max_scroll_height = Self::MAX_HEIGHT;
         
         // Use a simpler ScrollArea configuration
+        // Create a unique scroll ID that's different from the push_id
+        let scroll_id = format!("{}_scroll", &self.unique_id);
         ScrollArea::vertical()
-            .id_salt(&self.unique_id)  // Use unique ID to prevent scroll conflicts
+            .id_salt(scroll_id)  // Use different ID to prevent conflicts with push_id
             .max_height(max_scroll_height)
             .min_scrolled_height(min_height)  // Ensure minimum height is respected
             .auto_shrink([false, false])  // Don't auto-shrink
+            .drag_to_scroll(true)  // Explicitly enable drag to scroll
             .show(ui, |ui| {
                 // Set consistent width for content
                 ui.set_max_width(Self::MAX_WIDTH - 20.0);
