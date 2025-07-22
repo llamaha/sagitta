@@ -195,17 +195,17 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "shell_execute".to_string(),
-            description: "Executes shell commands. ALWAYS specify at least ONE filter: head_lines (e.g. 20), tail_lines (e.g. 50), or grep_pattern (e.g. 'error'). Simple example: command='ls -la', head_lines=20. Leave working_directory empty to use current repo.".to_string(),
+            description: "Executes shell commands. Must include ONE of: tail_lines (see end of output), head_lines (see start of output), or grep_pattern (filter output). Examples: 'cargo build' with tail_lines=50, 'cargo test' with grep_pattern='error'. Working directory defaults to current repository.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "command": { "type": "string", "description": "The command to execute" },
-                    "working_directory": { "type": "string", "description": "Optional: Working directory for the command. Can be: 1) Empty/omitted to use current directory, 2) Repository name that exists locally (e.g. 'sagitta'), 3) Relative path from current directory (e.g. 'src/'), 4) Absolute path. NOTE: Repository must exist on disk. If unsure, omit this parameter and use paths in your command instead (e.g. 'ls src/')." },
+                    "command": { "type": "string", "description": "The command to execute. Must include one of: tail_lines, head_lines, or grep_pattern" },
+                    "working_directory": { "type": "string", "description": "Working directory path. Only set if you need a different directory and have confirmed the path exists" },
                     "env": { "type": "object", "description": "Optional environment variables", "additionalProperties": { "type": "string" } },
-                    "timeout_ms": { "type": "integer", "description": "Optional timeout in milliseconds (default: 30000ms)" },
-                    "grep_pattern": { "type": "string", "description": "Filter output to lines containing this pattern. Example: 'ERROR' to find error lines" },
-                    "head_lines": { "type": "integer", "description": "Show only the first N lines of output. Example: 20 for first 20 lines" },
-                    "tail_lines": { "type": "integer", "description": "Show only the last N lines of output. Example: 50 for last 50 lines" }
+                    "timeout_ms": { "type": "integer", "description": "Command timeout in milliseconds (default: 30000)" },
+                    "grep_pattern": { "type": "string", "description": "Filter output to lines containing this pattern (use when searching for specific text)" },
+                    "head_lines": { "type": "integer", "description": "Show first N lines of output (use when start of output is important)" },
+                    "tail_lines": { "type": "integer", "description": "Show last N lines of output (recommended: 50 for most commands, 100 for verbose output)" }
                 },
                 "required": ["command"]
             }),
