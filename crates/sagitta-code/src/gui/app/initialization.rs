@@ -83,6 +83,10 @@ pub async fn configure_theme_from_config(app: &mut SagittaCodeApp) {
         }
         "dark" | _ => app.state.current_theme = AppTheme::Dark, // Default to Dark
     }
+    
+    // Configure UI settings
+    app.state.use_simplified_tool_rendering = config_guard.ui.use_simplified_tool_rendering;
+    
     drop(config_guard);
 }
 

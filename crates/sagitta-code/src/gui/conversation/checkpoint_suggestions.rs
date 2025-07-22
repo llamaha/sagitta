@@ -297,7 +297,11 @@ impl CheckpointSuggestionsUI {
                         
                         // Details toggle
                         let details_expanded = self.expanded_details.contains(&suggestion.message_id);
-                        let details_icon = if details_expanded { "▼" } else { "▶" };
+                        let details_icon = if details_expanded { 
+                            crate::gui::symbols::navigation::TRIANGLE_DOWN
+                        } else { 
+                            crate::gui::symbols::navigation::TRIANGLE_RIGHT
+                        };
                         if ui.small_button(details_icon).on_hover_text("Toggle details").clicked() {
                             if details_expanded {
                                 self.expanded_details.remove(&suggestion.message_id);

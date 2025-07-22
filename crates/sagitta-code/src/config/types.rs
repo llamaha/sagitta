@@ -332,6 +332,10 @@ pub struct UiConfig {
     /// Whether the user has completed the first-run provider setup
     #[serde(default = "default_first_run_completed")]
     pub first_run_completed: bool,
+    
+    /// Whether to use simplified tool rendering (no collapsible cards)
+    #[serde(default = "default_use_simplified_tool_rendering")]
+    pub use_simplified_tool_rendering: bool,
 }
 
 impl Default for UiConfig {
@@ -347,6 +351,7 @@ impl Default for UiConfig {
             claude_md_template: default_claude_md_template(),
             dialog_preferences: DialogPreferences::default(),
             first_run_completed: default_first_run_completed(),
+            use_simplified_tool_rendering: default_use_simplified_tool_rendering(),
         }
     }
 }
@@ -815,6 +820,10 @@ fn default_claude_md_template() -> String {
 }
 
 fn default_first_run_completed() -> bool {
+    false
+}
+
+fn default_use_simplified_tool_rendering() -> bool {
     false
 }
 

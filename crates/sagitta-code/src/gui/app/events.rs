@@ -78,7 +78,17 @@ pub enum AppEvent {
         tool_name: String,
         result: crate::agent::events::ToolResult,
     },
+    // UI preference changes
+    UpdateUiPreference {
+        preference: UiPreference,
+    },
     // Add other app-level UI events here if needed
+}
+
+/// UI preference types that can be updated
+#[derive(Debug, Clone)]
+pub enum UiPreference {
+    SimplifiedToolRendering(bool),
 }
 
 impl std::fmt::Debug for AppEvent {
@@ -115,6 +125,8 @@ impl std::fmt::Debug for AppEvent {
             AppEvent::CheckAndExecuteTask => write!(f, "CheckAndExecuteTask"),
             AppEvent::ToolExecutionComplete { tool_call_id, tool_name, result: _ } => 
                 write!(f, "ToolExecutionComplete {{ tool_call_id: {}, tool_name: {} }}", tool_call_id, tool_name),
+            AppEvent::UpdateUiPreference { preference } => 
+                write!(f, "UpdateUiPreference {{ preference: {:?} }}", preference),
         }
     }
 }
@@ -904,6 +916,15 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                     }
                 } else {
                     log::warn!("Received tool result for unknown tool call: {}", tool_call_id);
+                }
+            },
+            AppEvent::UpdateUiPreference { preference } => {
+                log::info!("Received UpdateUiPreference event: {:?}", preference);
+                match preference {
+                    UiPreference::SimplifiedToolRendering(enabled) => {
+                        app.state.use_simplified_tool_rendering = enabled;
+                        log::info!("Updated use_simplified_tool_rendering to: {}", enabled);
+                    }
                 }
             },
         }

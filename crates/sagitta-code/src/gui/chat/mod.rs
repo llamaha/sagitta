@@ -5,6 +5,7 @@ pub mod types;
 pub mod tool_mappings;
 pub mod syntax_highlighting;
 pub mod rendering;
+pub mod simplified_tool_renderer;
 
 #[cfg(test)]
 mod collapsing_tests;

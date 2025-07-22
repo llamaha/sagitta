@@ -86,6 +86,9 @@ pub struct SettingsPanel {
     
     // App event sender for provider changes
     pub app_event_sender: Option<tokio::sync::mpsc::UnboundedSender<crate::gui::app::events::AppEvent>>,
+    
+    // UI preferences
+    pub use_simplified_tool_rendering: bool,
 }
 
 impl SettingsPanel {
@@ -188,6 +191,9 @@ impl SettingsPanel {
             
             // App event sender (will be set later by the main app)
             app_event_sender: None,
+            
+            // UI preferences
+            use_simplified_tool_rendering: initial_sagitta_code_config.ui.use_simplified_tool_rendering,
         }
     }
     
@@ -772,6 +778,34 @@ impl SettingsPanel {
                             });
                             ui.add_space(16.0);
                             
+                            // UI Settings
+                            ui.heading("UI Settings");
+                            ui.collapsing("Interface Preferences", |ui| {
+                                ui.label("Configure user interface behavior and appearance");
+                                
+                                Grid::new("ui_settings_grid")
+                                    .num_columns(2)
+                                    .spacing([8.0, 8.0])
+                                    .show(ui, |ui| {
+                                        ui.label("Simplified Tool Rendering:");
+                                        if ui.checkbox(&mut self.use_simplified_tool_rendering, "")
+                                            .on_hover_text("Show tool results without collapsible cards for cleaner output")
+                                            .changed() {
+                                            // Send event to update app state immediately
+                                            if let Some(ref sender) = self.app_event_sender {
+                                                let _ = sender.send(crate::gui::app::events::AppEvent::UpdateUiPreference {
+                                                    preference: crate::gui::app::events::UiPreference::SimplifiedToolRendering(self.use_simplified_tool_rendering),
+                                                });
+                                            }
+                                        }
+                                        ui.end_row();
+                                    });
+                                
+                                ui.add_space(4.0);
+                                ui.label("When enabled, tool outputs will be displayed directly without the collapsible card UI.");
+                            });
+                            ui.add_space(16.0);
+                            
                             // Status message
                             if let Some((message, color)) = &self.status_message {
                                 ui.label(RichText::new(message).color(*color));
@@ -991,6 +1025,9 @@ impl SettingsPanel {
             
             updated_config.provider_configs.insert(ProviderType::ClaudeCodeRouter, router_config);
         }
+        
+        // Update UI settings
+        updated_config.ui.use_simplified_tool_rendering = self.use_simplified_tool_rendering;
         
         // Preserve all other fields
         // and all other config sections (sagitta, ui, logging) from the original

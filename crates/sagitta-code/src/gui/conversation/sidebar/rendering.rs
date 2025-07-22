@@ -236,7 +236,11 @@ impl ConversationSidebar {
             group.name, is_expanded, group.id);
         
         ui.horizontal(|ui| {
-            let arrow = if is_expanded { "▼" } else { "▶" };
+            let arrow = if is_expanded { 
+                crate::gui::symbols::navigation::TRIANGLE_DOWN
+            } else { 
+                crate::gui::symbols::navigation::TRIANGLE_RIGHT
+            };
             if ui.button(arrow).clicked() {
                 self.toggle_group(&group.id);
             }

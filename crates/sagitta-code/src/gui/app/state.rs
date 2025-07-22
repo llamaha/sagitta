@@ -117,6 +117,9 @@ pub struct AppState {
     pub tool_cards_collapsed: bool,
     pub tool_card_individual_states: HashMap<String, bool>, // tool_call_id -> collapsed state
     
+    // Tool rendering mode
+    pub use_simplified_tool_rendering: bool,
+    
     // Undo/redo for chat input
     pub input_undo_stack: Vec<String>,
     pub input_redo_stack: Vec<String>,
@@ -220,6 +223,9 @@ impl AppState {
             // Tool card collapse state
             tool_cards_collapsed: false, // Start with tool cards expanded
             tool_card_individual_states: HashMap::new(),
+            
+            // Tool rendering mode
+            use_simplified_tool_rendering: false, // Default to full rendering
             
             // Undo/redo for chat input
             input_undo_stack: Vec::new(),

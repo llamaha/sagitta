@@ -53,6 +53,7 @@ pub fn render_message_group(
     collapsed_thinking: &mut HashMap<String, bool>,
     tool_cards_collapsed: bool,
     tool_card_individual_states: &mut HashMap<String, bool>,
+    use_simplified_tool_rendering: bool,
 ) -> Option<(String, String)> {
     if message_group.is_empty() {
         return None;
@@ -165,14 +166,14 @@ pub fn render_message_group(
                 ui.vertical(|ui| {
                     ui.set_max_width(total_width - 80.0); // Leave space for timestamp
                     
-                    if let Some(tool_info) = render_single_message_content(ui, message, bg_color, total_width - 80.0, app_theme, running_tools, copy_state, collapsed_thinking, tool_cards_collapsed, tool_card_individual_states) {
+                    if let Some(tool_info) = render_single_message_content(ui, message, bg_color, total_width - 80.0, app_theme, running_tools, copy_state, collapsed_thinking, tool_cards_collapsed, tool_card_individual_states, use_simplified_tool_rendering) {
                         clicked_tool = Some(tool_info);
                     }
                 });
             });
         } else {
             // Single message in group - use full width
-            if let Some(tool_info) = render_single_message_content(ui, message, bg_color, total_width, app_theme, running_tools, copy_state, collapsed_thinking, tool_cards_collapsed, tool_card_individual_states) {
+            if let Some(tool_info) = render_single_message_content(ui, message, bg_color, total_width, app_theme, running_tools, copy_state, collapsed_thinking, tool_cards_collapsed, tool_card_individual_states, use_simplified_tool_rendering) {
                 clicked_tool = Some(tool_info);
             }
         }
@@ -214,6 +215,7 @@ pub fn render_single_message_content(
     collapsed_thinking: &mut HashMap<String, bool>,
     tool_cards_collapsed: bool,
     tool_card_individual_states: &mut HashMap<String, bool>,
+    use_simplified_tool_rendering: bool,
 ) -> Option<(String, String)> {
     let mut clicked_tool = None;
     
@@ -246,7 +248,7 @@ pub fn render_single_message_content(
         
         // Render the tool call
         ui.add_space(1.0);
-        if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state, tool_cards_collapsed, tool_card_individual_states) {
+        if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state, tool_cards_collapsed, tool_card_individual_states, use_simplified_tool_rendering) {
             clicked_tool = Some(tool_info);
         }
         ui.add_space(1.0);
@@ -272,7 +274,7 @@ pub fn render_single_message_content(
     if !unpositioned_tools.is_empty() {
         ui.add_space(1.0);
         for tool_call in unpositioned_tools {
-            if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state, tool_cards_collapsed, tool_card_individual_states) {
+            if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state, tool_cards_collapsed, tool_card_individual_states, use_simplified_tool_rendering) {
                 clicked_tool = Some(tool_info);
             }
             ui.add_space(4.0);
@@ -304,7 +306,11 @@ pub fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, _bg_colo
         // Collapsible header
         ui.horizontal(|ui| {
             // Collapse/expand button
-            let arrow = if *is_collapsed { "▶" } else { "▼" };
+            let arrow = if *is_collapsed { 
+                crate::gui::symbols::navigation::TRIANGLE_RIGHT
+            } else { 
+                crate::gui::symbols::navigation::TRIANGLE_DOWN
+            };
             if ui.small_button(arrow).clicked() {
                 *is_collapsed = !*is_collapsed;
             }

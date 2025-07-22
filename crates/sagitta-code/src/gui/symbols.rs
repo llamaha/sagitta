@@ -66,18 +66,26 @@ pub mod navigation {
     pub const ARROW_UP: &str = "↑";
     /// Down arrow
     pub const ARROW_DOWN: &str = "↓";
-    /// Triangle right (play)
-    pub const TRIANGLE_RIGHT: &str = "▶";
-    /// Triangle down (expand)
-    pub const TRIANGLE_DOWN: &str = "▼";
-    /// Triangle up (collapse)
-    pub const TRIANGLE_UP: &str = "▲";
+    /// Triangle right (play) - Using ASCII greater-than as fallback
+    pub const TRIANGLE_RIGHT: &str = ">";
+    /// Triangle down (expand) - Using ASCII v as fallback
+    pub const TRIANGLE_DOWN: &str = "v";
+    /// Triangle up (collapse) - Using ASCII caret as fallback
+    pub const TRIANGLE_UP: &str = "^";
     /// Plus
     pub const PLUS: &str = "+";
     /// Minus
     pub const MINUS: &str = "-";
-    /// Menu (hamburger)
-    pub const MENU: &str = "☰";
+    /// Menu (hamburger) - Using three horizontal lines
+    pub const MENU: &str = "≡";
+    
+    // Alternative triangle symbols that might work better
+    /// Alternative right triangle using guillemet
+    pub const TRIANGLE_RIGHT_ALT: &str = "»";
+    /// Alternative down triangle using lowercase v
+    pub const TRIANGLE_DOWN_ALT: &str = "⌄";
+    /// Alternative up triangle using caret
+    pub const TRIANGLE_UP_ALT: &str = "⌃";
 }
 
 /// File and document symbols
@@ -113,17 +121,61 @@ pub mod communication {
 /// System and technical symbols
 pub mod system {
     /// Computer
-    pub const COMPUTER: &str = "💻";
+    pub const COMPUTER: &str = "[C]";
     /// Server
-    pub const SERVER: &str = "🖥️";
+    pub const SERVER: &str = "[S]";
     /// Database
-    pub const DATABASE: &str = "🗄️";
+    pub const DATABASE: &str = "[DB]";
     /// Network
-    pub const NETWORK: &str = "🌐";
+    pub const NETWORK: &str = "[N]";
     /// CPU
-    pub const CPU: &str = "🖥️";
+    pub const CPU: &str = "[CPU]";
     /// Memory
-    pub const MEMORY: &str = "💾";
+    pub const MEMORY: &str = "[M]";
+}
+
+/// Status emoji replacements
+pub mod emoji {
+    /// Success/complete checkmark
+    pub const SUCCESS: &str = "[OK]";
+    /// Error/failure X
+    pub const ERROR: &str = "[X]";
+    /// In progress/loading
+    pub const LOADING: &str = "[~]";
+    /// Pending/empty circle
+    pub const PENDING: &str = "[ ]";
+    /// Warning triangle
+    pub const WARNING: &str = "[!]";
+    /// Info circle
+    pub const INFO: &str = "[i]";
+    /// Plus/add
+    pub const PLUS: &str = "[+]";
+    /// Sync/refresh
+    pub const SYNC: &str = "[@]";
+}
+
+/// Get safe ASCII alternative for common emojis
+pub fn safe_emoji(emoji: &str) -> &'static str {
+    match emoji {
+        "✅" => emoji::SUCCESS,
+        "❌" | "✗" | "✖" | "✕" => emoji::ERROR,
+        "🔄" | "↻" | "⟲" | "⟳" => emoji::LOADING,
+        "⭕" | "○" | "◯" => emoji::PENDING,
+        "⚠️" | "⚠" => emoji::WARNING,
+        "ℹ️" | "ℹ" => emoji::INFO,
+        "➕" | "+" => emoji::PLUS,
+        "🔀" | "🔁" => emoji::SYNC,
+        "📁" => files::FOLDER,
+        "📂" => files::FOLDER_OPEN,
+        "📄" | "📃" => files::FILE,
+        "📝" | "✏️" | "✏" => "[E]",
+        "🔧" => tools::TOOL,
+        "💭" | "🧠" => thinking::THINKING,
+        "💻" => system::COMPUTER,
+        "📋" => "[L]",
+        "🏷️" => "[T]",
+        _ => "[?]", // Unknown emoji
+    }
 }
 
 /// Get the best available symbol for thinking/brain operations
@@ -198,23 +250,23 @@ mod tests {
 
     #[test]
     fn test_thinking_symbols() {
-        assert_eq!(get_thinking_symbol(), "🧠");
-        assert_eq!(thinking::BRAIN_ASCII, "🧠");
-        assert_eq!(thinking::THINKING, "💭");
+        assert_eq!(get_thinking_symbol(), "[~]");
+        assert_eq!(thinking::BRAIN_ASCII, "[~]");
+        assert_eq!(thinking::THINKING, "...");
         assert!(!thinking::THINKING_DOTS.is_empty());
     }
 
     #[test]
     fn test_status_symbols() {
-        assert_eq!(get_error_symbol(), "✗");
-        assert_eq!(get_success_symbol(), "✓");
-        assert_eq!(get_warning_symbol(), "⚠");
-        assert_eq!(get_info_symbol(), "ℹ");
+        assert_eq!(get_error_symbol(), "x");
+        assert_eq!(get_success_symbol(), "√");
+        assert_eq!(get_warning_symbol(), "!");
+        assert_eq!(get_info_symbol(), "i");
     }
 
     #[test]
     fn test_tool_symbols() {
-        assert_eq!(get_tool_symbol(), "🔧");
+        assert_eq!(get_tool_symbol(), "*");
         assert!(!tools::GEAR.is_empty());
         assert!(!tools::HAMMER.is_empty());
     }
@@ -223,16 +275,18 @@ mod tests {
     fn test_navigation_symbols() {
         assert_eq!(navigation::ARROW_RIGHT, "→");
         assert_eq!(navigation::ARROW_LEFT, "←");
-        assert_eq!(navigation::TRIANGLE_RIGHT, "▶");
+        assert_eq!(navigation::TRIANGLE_RIGHT, ">");
+        assert_eq!(navigation::TRIANGLE_DOWN, "v");
+        assert_eq!(navigation::TRIANGLE_UP, "^");
         assert_eq!(navigation::PLUS, "+");
     }
 
     #[test]
     fn test_fallback_functions() {
-        assert_eq!(fallbacks::thinking(), "🧠");
-        assert_eq!(fallbacks::error(), "✗");
-        assert_eq!(fallbacks::success(), "✓");
-        assert_eq!(fallbacks::tool(), "🔧");
+        assert_eq!(fallbacks::thinking(), "[~]");
+        assert_eq!(fallbacks::error(), "x");
+        assert_eq!(fallbacks::success(), "√");
+        assert_eq!(fallbacks::tool(), "*");
     }
 
     #[test]

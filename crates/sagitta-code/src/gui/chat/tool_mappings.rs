@@ -101,50 +101,50 @@ pub fn get_tool_icon(tool_name: &str) -> &'static str {
     
     match clean_name {
         // File operations
-        "read_file" | "Read" => "📖",
-        "write_file" | "Write" => "💾",
-        "edit_file" | "Edit" => "✏️",
-        "multi_edit_file" | "MultiEdit" => "✏️",
+        "read_file" | "Read" => "[R]",
+        "write_file" | "Write" => "[W]",
+        "edit_file" | "Edit" => "[E]",
+        "multi_edit_file" | "MultiEdit" => "[M]",
         
         // Search operations
-        "search_file" | "Glob" => "🔍",
-        "semantic_code_search" | "Search" | "query" => "🔎",
-        "repository_search" => "🔍",
-        "grep" | "Grep" => "🔍",
+        "search_file" | "Glob" => "[?]",
+        "semantic_code_search" | "Search" | "query" => "[S]",
+        "repository_search" => "[?]",
+        "grep" | "Grep" => "[G]",
         
         // Repository operations
-        "repository_add" => "➕",
-        "repository_list" => "📋",
-        "repository_sync" => "🔄",
-        "repository_switch_branch" => "🔀",
-        "repository_list_branches" => "📑",
-        "repository_view_file" => "📄",
+        "repository_add" => "+",
+        "repository_list" => "#",
+        "repository_sync" => "@",
+        "repository_switch_branch" => "~",
+        "repository_list_branches" => "#",
+        "repository_view_file" => "[F]",
         
         // Shell and system
-        "shell_execute" | "Bash" => "💻",
-        "streaming_shell_execution" => "💻",
+        "shell_execute" | "Bash" => "$",
+        "streaming_shell_execution" => "$",
         
         // Task management
-        "todo_read" | "TodoRead" => "📋",
-        "todo_write" | "TodoWrite" => "✏️",
-        "Task" => "🤖",
+        "todo_read" | "TodoRead" => "[]",
+        "todo_write" | "TodoWrite" => "[+]",
+        "Task" => "[T]",
         
         // Web operations
-        "web_search" | "WebSearch" => "🌐",
-        "web_fetch" | "WebFetch" => "🌐",
+        "web_search" | "WebSearch" => "[W]",
+        "web_fetch" | "WebFetch" => "[W]",
         
         // Other tools
-        "ping" => "🏓",
-        "exit_plan_mode" => "🚪",
-        "NotebookRead" => "📓",
-        "NotebookEdit" => "📝",
-        "LS" => "📁",
+        "ping" => ".",
+        "exit_plan_mode" => "[X]",
+        "NotebookRead" => "[N]",
+        "NotebookEdit" => "[N]",
+        "LS" => "[D]",
         
         // OpenAI format
-        "run_python" => "🐍",
-        "analyze_data" => "📊",
+        "run_python" => "[P]",
+        "analyze_data" => "[A]",
         
-        _ => "🔧", // Default tool icon
+        _ => "[*]", // Default tool icon
     }
 }
 
