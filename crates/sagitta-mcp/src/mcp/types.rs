@@ -812,12 +812,10 @@ pub struct ShellExecuteResult {
 pub struct ReadFileParams {
     /// The absolute path to the file to read
     pub file_path: String,
-    /// Optional start line (1-based, inclusive)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub start_line: Option<usize>,
-    /// Optional end line (1-based, inclusive)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub end_line: Option<usize>,
+    /// Start line (1-based, inclusive)
+    pub start_line: usize,
+    /// End line (1-based, inclusive)
+    pub end_line: usize,
 }
 
 /// Result of read_file

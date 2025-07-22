@@ -17,8 +17,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 /// Timeout for file operations to prevent hanging
 const FILE_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Maximum file size to read entirely into memory (100MB)
-const MAX_FILE_SIZE: u64 = 100 * 1024 * 1024;
+// No longer needed since we always require line ranges
+// const MAX_FILE_SIZE: u64 = 100 * 1024 * 1024;
 
 /// Maximum number of concurrent read operations per file
 const MAX_CONCURRENT_READS: usize = 10;
@@ -53,22 +53,8 @@ async fn read_metadata_with_timeout(file_path: &str) -> Result<std::fs::Metadata
     }
 }
 
-/// Helper function to read entire file content with timeout
-async fn read_file_content_with_timeout(file_path: &str) -> Result<String, ErrorObject> {
-    match timeout(FILE_OPERATION_TIMEOUT, fs::read_to_string(file_path)).await {
-        Ok(Ok(content)) => Ok(content),
-        Ok(Err(e)) => Err(ErrorObject {
-            code: -32603,
-            message: format!("Failed to read file '{}': {}", file_path, e),
-            data: None,
-        }),
-        Err(_) => Err(ErrorObject {
-            code: -32603,
-            message: format!("File read operation timed out after 30 seconds for '{}'", file_path),
-            data: None,
-        }),
-    }
-}
+// No longer needed since we always use line-by-line reading
+// async fn read_file_content_with_timeout(file_path: &str) -> Result<String, ErrorObject> { ... }
 
 /// Helper function to read file lines with timeout (for large files)
 async fn read_file_lines_with_timeout(
@@ -223,6 +209,20 @@ pub async fn handle_read_file<C: QdrantClientTrait + Send + Sync + 'static>(
 
 /// Inner handler for reading file contents (without locking)
 async fn handle_read_file_inner(params: ReadFileParams) -> Result<ReadFileResult, ErrorObject> {
+    // Validate line range - maximum 400 lines
+    let line_range = params.end_line - params.start_line + 1;
+    if line_range > 400 {
+        return Err(ErrorObject {
+            code: -32603,
+            message: format!(
+                "Line range too large: {} lines requested. Maximum allowed is 400 lines. \n\
+                 Please adjust start_line ({}) and end_line ({}) to request fewer lines.",
+                line_range, params.start_line, params.end_line
+            ),
+            data: None,
+        });
+    }
+    
     // Check if file exists with timeout
     let path = Path::new(&params.file_path);
     let exists = match timeout(Duration::from_secs(5), async { path.exists() }).await {
@@ -267,52 +267,22 @@ async fn handle_read_file_inner(params: ReadFileParams) -> Result<ReadFileResult
     let metadata = read_metadata_with_timeout(&params.file_path).await?;
     let file_size = metadata.len();
     
-    // Check file size limit
-    if file_size > MAX_FILE_SIZE && params.start_line.is_none() && params.end_line.is_none() {
-        warn!("File '{}' is too large ({} bytes) to read entirely. Maximum size is {} bytes.", 
-              params.file_path, file_size, MAX_FILE_SIZE);
-        return Err(ErrorObject {
-            code: -32603,
-            message: format!(
-                "File is too large to read entirely ({} MB). Maximum size is {} MB. \
-                 Please specify start_line and end_line parameters to read a portion of the file.",
-                file_size / (1024 * 1024),
-                MAX_FILE_SIZE / (1024 * 1024)
-            ),
-            data: None,
-        });
-    }
+    // File size check no longer needed since we always require line ranges
     
-    // Determine read strategy based on file size and parameters
-    let (content, total_lines, start_line, end_line) = if file_size > MAX_FILE_SIZE || 
-        params.start_line.is_some() || params.end_line.is_some() {
-        // Use line-by-line reading for large files or when specific lines are requested
-        info!("Using line-by-line reading for file: {} (size: {} bytes)", params.file_path, file_size);
-        
-        let (content, line_count, _lines_returned, actual_end) = read_file_lines_with_timeout(
-            &params.file_path,
-            params.start_line,
-            params.end_line,
-        ).await?;
-        
-        let start = params.start_line;
-        let end = if let Some(requested_end) = params.end_line {
-            Some(requested_end.min(line_count))
-        } else {
-            actual_end
-        };
-        
-        (content, line_count, start, end)
-    } else {
-        // Read entire file for small files
-        info!("Reading entire file: {} (size: {} bytes)", params.file_path, file_size);
-        let full_content = read_file_content_with_timeout(&params.file_path).await?;
-        
-        // Count lines for consistency
-        let line_count = full_content.lines().count();
-        
-        (full_content, line_count, None, None)
-    };
+    // Always use line-by-line reading since we require specific line ranges
+    info!("Reading lines {} to {} from file: {} (size: {} bytes)", 
+          params.start_line, params.end_line, params.file_path, file_size);
+    
+    let (content, line_count, _lines_returned, actual_end) = read_file_lines_with_timeout(
+        &params.file_path,
+        Some(params.start_line),
+        Some(params.end_line),
+    ).await?;
+    
+    let start = Some(params.start_line);
+    let end = Some(params.end_line.min(line_count));
+    
+    let (content, total_lines, start_line, end_line) = (content, line_count, start, end);
     
     Ok(ReadFileResult {
         file_path: params.file_path,
@@ -345,8 +315,8 @@ mod tests {
         
         let params = ReadFileParams {
             file_path: file_path.to_str().unwrap().to_string(),
-            start_line: None,
-            end_line: None,
+            start_line: 1,
+            end_line: 10,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -357,8 +327,8 @@ mod tests {
         assert_eq!(result.content, test_content);
         assert_eq!(result.line_count, 5);
         assert_eq!(result.file_size, test_content.len() as u64);
-        assert!(result.start_line.is_none());
-        assert!(result.end_line.is_none());
+        assert_eq!(result.start_line, Some(1));
+        assert_eq!(result.end_line, Some(5));
     }
     
     #[tokio::test]
@@ -371,8 +341,8 @@ mod tests {
         
         let params = ReadFileParams {
             file_path: file_path.to_str().unwrap().to_string(),
-            start_line: Some(2),
-            end_line: Some(4),
+            start_line: 2,
+            end_line: 4,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -396,8 +366,8 @@ mod tests {
         
         let params = ReadFileParams {
             file_path: file_path.to_str().unwrap().to_string(),
-            start_line: Some(2),
-            end_line: Some(2),
+            start_line: 2,
+            end_line: 2,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -454,8 +424,8 @@ mod tests {
         // Test reading with line range (should succeed)
         let params = ReadFileParams {
             file_path: file_path.to_str().unwrap().to_string(),
-            start_line: Some(1),
-            end_line: Some(1),
+            start_line: 1,
+            end_line: 1,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -483,8 +453,8 @@ mod tests {
         for i in 0..10 {
             let params = ReadFileParams {
                 file_path: file_path_str.clone(),
-                start_line: Some(i * 10 + 1),
-                end_line: Some((i + 1) * 10),
+                start_line: i * 10 + 1,
+                end_line: (i + 1) * 10,
             };
             
             let config_clone = config.clone();
@@ -529,8 +499,8 @@ mod tests {
         
         let params = ReadFileParams {
             file_path: file_path.to_str().unwrap().to_string(),
-            start_line: None,
-            end_line: None,
+            start_line: 1,
+            end_line: 10,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -556,8 +526,8 @@ mod tests {
         
         let params = ReadFileParams {
             file_path: file_path.to_str().unwrap().to_string(),
-            start_line: None,
-            end_line: None,
+            start_line: 1,
+            end_line: 5,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -594,8 +564,8 @@ mod tests {
         for _ in 0..20 {
             let params = ReadFileParams {
                 file_path: file_path_str.clone(),
-                start_line: Some(1),
-                end_line: Some(100),
+                start_line: 1,
+                end_line: 100,
             };
             
             let config_clone = config.clone();
@@ -628,8 +598,8 @@ mod tests {
         // Read specific line range
         let params = ReadFileParams {
             file_path: file_path.to_str().unwrap().to_string(),
-            start_line: Some(500),
-            end_line: Some(510),
+            start_line: 500,
+            end_line: 510,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -649,8 +619,8 @@ mod tests {
     async fn test_detailed_error_messages() {
         let params = ReadFileParams {
             file_path: "/nonexistent/path/to/file.txt".to_string(),
-            start_line: None,
-            end_line: None,
+            start_line: 1,
+            end_line: 10,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -671,8 +641,8 @@ mod tests {
     async fn test_read_file_not_found() {
         let params = ReadFileParams {
             file_path: "/nonexistent/file.txt".to_string(),
-            start_line: None,
-            end_line: None,
+            start_line: 1,
+            end_line: 10,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -695,8 +665,8 @@ mod tests {
         
         let params = ReadFileParams {
             file_path: file_path.to_str().unwrap().to_string(),
-            start_line: Some(5),
-            end_line: None,
+            start_line: 5,
+            end_line: 10,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -707,6 +677,53 @@ mod tests {
         assert!(result.is_err());
         let error = result.unwrap_err();
         assert!(error.message.contains("Invalid start_line"));
+    }
+    
+    #[tokio::test]
+    async fn test_read_file_400_line_limit() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("large.txt");
+        
+        // Create a file with 500 lines
+        let lines: Vec<String> = (1..=500).map(|i| format!("Line {}", i)).collect();
+        let content = lines.join("\n");
+        fs::write(&file_path, &content).await.unwrap();
+        
+        // Test that requesting more than 400 lines fails
+        let params = ReadFileParams {
+            file_path: file_path.to_str().unwrap().to_string(),
+            start_line: 1,
+            end_line: 401, // 401 lines (1 to 401 inclusive)
+        };
+        
+        let config = Arc::new(RwLock::new(AppConfig::default()));
+        let qdrant_client = create_mock_qdrant();
+        
+        let result = handle_read_file(params, config.clone(), qdrant_client.clone(), None).await;
+        
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(error.message.contains("Line range too large"));
+        assert!(error.message.contains("401 lines requested"));
+        assert!(error.message.contains("Maximum allowed is 400 lines"));
+        
+        // Test that requesting exactly 400 lines succeeds
+        let params = ReadFileParams {
+            file_path: file_path.to_str().unwrap().to_string(),
+            start_line: 1,
+            end_line: 400, // Exactly 400 lines
+        };
+        
+        let result = handle_read_file(params, config, qdrant_client, None).await;
+        assert!(result.is_ok());
+        
+        let file_result = result.unwrap();
+        assert_eq!(file_result.start_line, Some(1));
+        assert_eq!(file_result.end_line, Some(400));
+        
+        // Verify we got exactly 400 lines
+        let lines_returned: Vec<&str> = file_result.content.lines().collect();
+        assert_eq!(lines_returned.len(), 400);
     }
     
     #[tokio::test]
@@ -724,18 +741,16 @@ mod tests {
         
         let params: ReadFileParams = serde_json::from_value(json_params).unwrap();
         assert_eq!(params.file_path, "/test/file.txt");
-        assert_eq!(params.start_line, Some(10));
-        assert_eq!(params.end_line, Some(20));
+        assert_eq!(params.start_line, 10);
+        assert_eq!(params.end_line, 20);
         
-        // Test with only file_path
+        // Test that missing required parameters fails
         let json_params = json!({
             "file_path": "/test/file2.txt"
         });
         
-        let params: ReadFileParams = serde_json::from_value(json_params).unwrap();
-        assert_eq!(params.file_path, "/test/file2.txt");
-        assert_eq!(params.start_line, None);
-        assert_eq!(params.end_line, None);
+        let result: Result<ReadFileParams, _> = serde_json::from_value(json_params);
+        assert!(result.is_err(), "Should fail without start_line and end_line");
         
         // Test that old parameter names (limit/offset) would fail
         let json_params = json!({
@@ -744,10 +759,7 @@ mod tests {
             "offset": 5
         });
         
-        let params: ReadFileParams = serde_json::from_value(json_params).unwrap();
-        // These should be ignored/None since they're not valid field names
-        assert_eq!(params.file_path, "/test/file3.txt");
-        assert_eq!(params.start_line, None);
-        assert_eq!(params.end_line, None);
+        let result: Result<ReadFileParams, _> = serde_json::from_value(json_params);
+        assert!(result.is_err(), "Should fail without start_line and end_line");
     }
 }

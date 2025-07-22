@@ -515,7 +515,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         // --- Shell Execute ---
         ToolDefinition {
             name: "shell_execute".to_string(),
-            description: Some("Executes shell commands with cross-platform support (Windows/Linux/macOS).".to_string()),
+            description: Some("Executes shell commands with mandatory output filtering. At least one filter (grep_pattern, head_lines, or tail_lines) must be specified to prevent excessive output.".to_string()),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -527,11 +527,16 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                         "description": "Optional environment variables",
                         "additionalProperties": { "type": "string" }
                     },
-                    "grep_pattern": { "type": "string", "description": "Optional grep pattern to filter output (applied to both stdout and stderr)" },
-                    "head_lines": { "type": "integer", "description": "Optional number of lines to show from the beginning of output" },
-                    "tail_lines": { "type": "integer", "description": "Optional number of lines to show from the end of output" }
+                    "grep_pattern": { "type": "string", "description": "Filter output to lines containing this pattern (applied to both stdout and stderr)" },
+                    "head_lines": { "type": "integer", "description": "Show only the first N lines of output" },
+                    "tail_lines": { "type": "integer", "description": "Show only the last N lines of output" }
                 },
-                "required": ["command"]
+                "required": ["command"],
+                "oneOf": [
+                    { "required": ["grep_pattern"] },
+                    { "required": ["head_lines"] },
+                    { "required": ["tail_lines"] }
+                ]
             }),
             annotations: Some(ToolAnnotations {
                 title: Some("Execute Shell Command".to_string()),
@@ -546,15 +551,15 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         // --- Read File ---
         ToolDefinition {
             name: "read_file".to_string(),
-            description: Some("Reads content from a file with optional line range support.".to_string()),
+            description: Some("Reads content from a file with mandatory line range support. Maximum 400 lines can be read in one request.".to_string()),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "file_path": { "type": "string", "description": "The absolute path to the file to read" },
-                    "start_line": { "type": "integer", "description": "Optional line number to start reading from (1-based)" },
-                    "end_line": { "type": "integer", "description": "Optional line number to stop reading at (inclusive)" }
+                    "start_line": { "type": "integer", "description": "Line number to start reading from (1-based, inclusive)" },
+                    "end_line": { "type": "integer", "description": "Line number to stop reading at (1-based, inclusive). Maximum range is 400 lines." }
                 },
-                "required": ["file_path"]
+                "required": ["file_path", "start_line", "end_line"]
             }),
             annotations: Some(ToolAnnotations {
                 title: Some("Read File".to_string()),

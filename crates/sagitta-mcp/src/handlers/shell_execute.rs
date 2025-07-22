@@ -109,6 +109,16 @@ pub async fn handle_shell_execute<C: QdrantClientTrait + Send + Sync + 'static>(
 ) -> Result<ShellExecuteResult, ErrorObject> {
     let start_time = Instant::now();
     
+    // Validate that at least one output filter is provided
+    if params.grep_pattern.is_none() && params.head_lines.is_none() && params.tail_lines.is_none() {
+        return Err(ErrorObject {
+            code: -32603,
+            message: "At least one output filter must be specified (grep_pattern, head_lines, or tail_lines) to prevent excessive output. \
+                     Use head_lines to limit output to first N lines, tail_lines for last N lines, or grep_pattern to filter specific content.".to_string(),
+            data: None,
+        });
+    }
+    
     // Get the appropriate shell command for the OS
     let (shell, args) = get_shell_command(&params.command);
     
@@ -230,6 +240,30 @@ mod tests {
     }
     
     #[tokio::test]
+    async fn test_shell_execute_requires_filter() {
+        // Test that shell_execute requires at least one output filter
+        let params = ShellExecuteParams {
+            command: "echo test".to_string(),
+            working_directory: None,
+            timeout_ms: 5000,
+            env: None,
+            grep_pattern: None,
+            head_lines: None,
+            tail_lines: None,
+        };
+        
+        let config = Arc::new(RwLock::new(AppConfig::default()));
+        let qdrant_client = create_mock_qdrant();
+        
+        let result = handle_shell_execute(params, config, qdrant_client, None).await;
+        
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(error.message.contains("At least one output filter must be specified"));
+        assert!(error.message.contains("grep_pattern, head_lines, or tail_lines"));
+    }
+    
+    #[tokio::test]
     async fn test_shell_execute_simple_command() {
         let params = ShellExecuteParams {
             command: if cfg!(target_os = "windows") {
@@ -241,7 +275,7 @@ mod tests {
             timeout_ms: 5000,
             env: None,
             grep_pattern: None,
-            head_lines: None,
+            head_lines: Some(10), // Need at least one filter
             tail_lines: None,
         };
         
@@ -270,7 +304,7 @@ mod tests {
             timeout_ms: 5000,
             env: None,
             grep_pattern: None,
-            head_lines: None,
+            head_lines: Some(1), // Need at least one filter
             tail_lines: None,
         };
         
@@ -314,6 +348,9 @@ mod tests {
             working_directory: None, // Not specified
             timeout_ms: 5000,
             env: None,
+            grep_pattern: None,
+            head_lines: Some(1), // Need at least one filter
+            tail_lines: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -356,7 +393,7 @@ mod tests {
             timeout_ms: 5000,
             env: None,
             grep_pattern: None,
-            head_lines: None,
+            head_lines: Some(20), // Need at least one filter
             tail_lines: None,
         };
         
@@ -383,7 +420,7 @@ mod tests {
             timeout_ms: 5000,
             env: None,
             grep_pattern: None,
-            head_lines: None,
+            head_lines: Some(10), // Need at least one filter
             tail_lines: None,
         };
         
@@ -407,6 +444,9 @@ mod tests {
             working_directory: None,
             timeout_ms: 100, // Very short timeout
             env: None,
+            grep_pattern: None,
+            head_lines: Some(10), // Need at least one filter
+            tail_lines: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -434,7 +474,7 @@ mod tests {
             timeout_ms: 5000,
             env: Some(env),
             grep_pattern: None,
-            head_lines: None,
+            head_lines: Some(1), // Need at least one filter
             tail_lines: None,
         };
         
@@ -459,7 +499,7 @@ mod tests {
             timeout_ms: 5000,
             env: None,
             grep_pattern: None,
-            head_lines: None,
+            head_lines: Some(10), // Need at least one filter
             tail_lines: None,
         };
         
