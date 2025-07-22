@@ -152,7 +152,7 @@ async fn run_direct_llm_with_tool_execution(
         },
         ToolDefinition {
             name: "read_file".to_string(),
-            description: "Reads content from a file with optional line range support.".to_string(),
+            description: "Reads a specific range of lines from a file. You MUST specify both start_line and end_line (1-based line numbers). Maximum 400 lines per request. Example: to read first 100 lines use start_line=1, end_line=100.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -162,14 +162,14 @@ async fn run_direct_llm_with_tool_execution(
                     },
                     "start_line": { 
                         "type": "integer", 
-                        "description": "Optional line number to start reading from (1-based)" 
+                        "description": "REQUIRED: Line number to start reading from (1-based, inclusive). Example: 1 for first line" 
                     },
                     "end_line": { 
                         "type": "integer", 
-                        "description": "Optional line number to stop reading at (inclusive)" 
+                        "description": "REQUIRED: Line number to stop reading at (1-based, inclusive). Maximum range is 400 lines. Example: 100 to read up to line 100" 
                     }
                 },
-                "required": ["file_path"]
+                "required": ["file_path", "start_line", "end_line"]
             }),
             is_required: false,
         },
@@ -481,7 +481,7 @@ async fn run_direct_llm(
         },
         ToolDefinition {
             name: "read_file".to_string(),
-            description: "Reads content from a file with optional line range support.".to_string(),
+            description: "Reads a specific range of lines from a file. You MUST specify both start_line and end_line (1-based line numbers). Maximum 400 lines per request. Example: to read first 100 lines use start_line=1, end_line=100.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -491,14 +491,14 @@ async fn run_direct_llm(
                     },
                     "start_line": { 
                         "type": "integer", 
-                        "description": "Optional line number to start reading from (1-based)" 
+                        "description": "REQUIRED: Line number to start reading from (1-based, inclusive). Example: 1 for first line" 
                     },
                     "end_line": { 
                         "type": "integer", 
-                        "description": "Optional line number to stop reading at (inclusive)" 
+                        "description": "REQUIRED: Line number to stop reading at (1-based, inclusive). Maximum range is 400 lines. Example: 100 to read up to line 100" 
                     }
                 },
-                "required": ["file_path"]
+                "required": ["file_path", "start_line", "end_line"]
             }),
             is_required: false,
         },

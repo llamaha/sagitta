@@ -50,7 +50,7 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "semantic_code_search".to_string(),
-            description: "Performs semantic search on an indexed repository using hybrid (dense + sparse vector) technology.".to_string(),
+            description: "Performs semantic search on an indexed repository. Use elementType (function, class, struct, method, interface) and lang (rust, python, javascript, go) parameters for better results. Examples: query='authentication', elementType='function', lang='rust' finds Rust auth functions.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -73,12 +73,12 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "search_file".to_string(),
-            description: "Searches for files within a repository using a glob pattern.".to_string(),
+            description: "Searches for files within a repository using glob patterns. Patterns like '*.rs' search recursively by default. Use 'src/*.rs' to limit to a specific directory. Use '**/*.rs' for explicit recursive search.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "repositoryName": { "type": "string", "description": "Name of the repository to search within." },
-                    "pattern": { "type": "string", "description": "Glob pattern to search for (e.g., \"*.rs\")." },
+                    "pattern": { "type": "string", "description": "Glob pattern to search for. Examples: '*.rs' (all Rust files recursively), 'src/*.rs' (only in src/), '**/*.md' (all markdown files recursively), '*README*' (files with README in name)" },
                     "caseSensitive": { "type": "boolean", "description": "Perform case-sensitive matching (default: false)." }
                 },
                 "required": ["repositoryName", "pattern"]
@@ -195,30 +195,38 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "shell_execute".to_string(),
-            description: "Executes shell commands with cross-platform support (Windows/Linux/macOS).".to_string(),
+            description: "Executes shell commands. You MUST specify at least ONE output filter to prevent excessive output: use grep_pattern to filter by content, head_lines to limit to first N lines, or tail_lines for last N lines. Example: for 'ls -la' use head_lines=20. For logs use grep_pattern='ERROR' or tail_lines=50.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "command": { "type": "string", "description": "The command to execute" },
                     "working_directory": { "type": "string", "description": "Optional working directory (defaults to current directory)" },
                     "env": { "type": "object", "description": "Optional environment variables", "additionalProperties": { "type": "string" } },
-                    "timeout_ms": { "type": "integer", "description": "Optional timeout in milliseconds (default: 30000ms)" }
+                    "timeout_ms": { "type": "integer", "description": "Optional timeout in milliseconds (default: 30000ms)" },
+                    "grep_pattern": { "type": "string", "description": "Filter output to lines containing this pattern. Example: 'ERROR' to find error lines" },
+                    "head_lines": { "type": "integer", "description": "Show only the first N lines of output. Example: 20 for first 20 lines" },
+                    "tail_lines": { "type": "integer", "description": "Show only the last N lines of output. Example: 50 for last 50 lines" }
                 },
-                "required": ["command"]
+                "required": ["command"],
+                "oneOf": [
+                    { "required": ["grep_pattern"] },
+                    { "required": ["head_lines"] },
+                    { "required": ["tail_lines"] }
+                ]
             }),
             is_required: false,
         },
         ToolDefinition {
             name: "read_file".to_string(),
-            description: "Reads content from a file with optional line range support.".to_string(),
+            description: "Reads a specific range of lines from a file. You MUST specify both start_line and end_line (1-based line numbers). Maximum 400 lines per request. Example: to read first 100 lines use start_line=1, end_line=100. DO NOT use 'limit' or 'offset' parameters - they don't exist.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "file_path": { "type": "string", "description": "The absolute path to the file to read" },
-                    "offset": { "type": "integer", "description": "Optional line number to start reading from" },
-                    "limit": { "type": "integer", "description": "Optional number of lines to read" }
+                    "start_line": { "type": "integer", "description": "REQUIRED: Line number to start reading from (1-based, inclusive). Example: 1 for first line" },
+                    "end_line": { "type": "integer", "description": "REQUIRED: Line number to stop reading at (1-based, inclusive). Maximum range is 400 lines. Example: 100 to read up to line 100" }
                 },
-                "required": ["file_path"]
+                "required": ["file_path", "start_line", "end_line"]
             }),
             is_required: false,
         },
