@@ -3,11 +3,12 @@
 use egui::{Frame, ScrollArea, Ui, RichText, Vec2, Color32, Stroke, CornerRadius, Layout, Align};
 use serde_json::Value;
 use crate::gui::theme::AppTheme;
-use crate::gui::chat::tool_mappings::{get_human_friendly_tool_name, get_tool_icon};
+use crate::gui::chat::tool_mappings::get_human_friendly_tool_name;
 use crate::gui::chat::syntax_highlighting::{render_syntax_highlighted_code, render_syntax_highlighted_code_with_font_size};
 use crate::gui::chat::view::COMMONMARK_CACHE;
 use std::collections::HashMap;
 use std::cell::RefCell;
+use uuid;
 
 thread_local! {
     static FILE_READ_FONT_SIZES: RefCell<HashMap<String, f32>> = RefCell::new(HashMap::new());
@@ -17,21 +18,32 @@ pub struct SimplifiedToolRenderer<'a> {
     tool_name: &'a str,
     result: &'a serde_json::Value,
     app_theme: AppTheme,
+    unique_id: String,
 }
 
 impl<'a> SimplifiedToolRenderer<'a> {
-    const MAX_HEIGHT: f32 = 400.0;
-    const MAX_LINES: usize = 15;
+    const MAX_HEIGHT: f32 = 800.0;
+    const MAX_WIDTH: f32 = 900.0;  // Limit tool card width
     const CONTENT_PADDING: f32 = 8.0;
     const HEADER_HEIGHT: f32 = 32.0;
     const ACTION_BAR_HEIGHT: f32 = 24.0;
+    
+    // Minimum heights for different tool types to ensure proper visibility
+    const MIN_HEIGHT_SEARCH: f32 = 300.0;
+    const MIN_HEIGHT_FILE: f32 = 500.0;  // Increased for better scrolling
+    const MIN_HEIGHT_SHELL: f32 = 250.0;
+    const MIN_HEIGHT_REPO: f32 = 250.0;
+    const MIN_HEIGHT_TODO: f32 = 200.0;
+    const MIN_HEIGHT_DEFAULT: f32 = 150.0;
     
     pub fn new(
         tool_name: &'a str,
         result: &'a serde_json::Value,
         app_theme: AppTheme,
     ) -> Self {
-        Self { tool_name, result, app_theme }
+        // Generate unique ID for this tool renderer instance
+        let unique_id = format!("tool_renderer_{}_{}", tool_name, uuid::Uuid::new_v4());
+        Self { tool_name, result, app_theme, unique_id }
     }
     
     /// Main entry point - renders the complete tool result
@@ -68,10 +80,9 @@ impl<'a> SimplifiedToolRenderer<'a> {
     /// Renders the tool header with name, status, and basic info
     fn render_header(&self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            // Tool icon and name
-            let icon = get_tool_icon(self.tool_name);
+            // Tool name without icon
             let name = get_human_friendly_tool_name(self.tool_name);
-            ui.label(RichText::new(format!("{} {}", icon, name)).strong());
+            ui.label(RichText::new(name).strong());
             
             // Add key parameters inline (e.g., filename for file operations)
             if let Some(params) = self.get_inline_params() {
@@ -90,11 +101,14 @@ impl<'a> SimplifiedToolRenderer<'a> {
     
     /// Renders the main content area with scrolling
     fn render_content_area(&self, ui: &mut Ui, action: &mut Option<(String, String)>) {
-        let content_height = Self::MAX_HEIGHT - Self::HEADER_HEIGHT - Self::ACTION_BAR_HEIGHT;
+        // Calculate minimum height based on tool type
+        let min_height = self.get_min_height_for_tool();
         
         ScrollArea::vertical()
-            .max_height(content_height)
-            .auto_shrink([false, true])
+            .id_source(&self.unique_id)  // Unique ID to prevent scroll interference
+            .max_height(Self::MAX_HEIGHT)
+            .min_scrolled_height(min_height)
+            .auto_shrink([false, false])  // Don't auto-shrink to maintain consistent size
             .show(ui, |ui| {
                 ui.add_space(Self::CONTENT_PADDING);
                 
@@ -119,18 +133,50 @@ impl<'a> SimplifiedToolRenderer<'a> {
     fn get_inline_params(&self) -> Option<String> {
         match self.tool_name {
             name if name.contains("file") || name == "Read" || name == "Write" || name == "Edit" || name == "MultiEdit" => {
-                self.result.get("file_path")
+                let file_path = self.result.get("file_path")
                     .or_else(|| self.result.get("filePath"))
                     .or_else(|| self.result.get("path"))
-                    .and_then(|v| v.as_str())
-                    .map(|path| {
-                        // Show just filename for long paths
-                        if path.len() > 40 {
-                            path.split('/').last().unwrap_or(path).to_string()
+                    .and_then(|v| v.as_str());
+                    
+                let mut params = Vec::new();
+                
+                // Add repository name if available
+                if let Some(repo) = self.result.get("repository")
+                    .or_else(|| self.result.get("repositoryName"))
+                    .and_then(|v| v.as_str()) {
+                    params.push(format!("[{}]", repo));
+                }
+                
+                // Add full file path
+                if let Some(path) = file_path {
+                    params.push(path.to_string());
+                }
+                
+                // Add line numbers if available
+                let start_line = self.result.get("start_line")
+                    .or_else(|| self.result.get("startLine"))
+                    .and_then(|v| v.as_i64());
+                let end_line = self.result.get("end_line")
+                    .or_else(|| self.result.get("endLine"))
+                    .and_then(|v| v.as_i64());
+                    
+                if let Some(start) = start_line {
+                    if let Some(end) = end_line {
+                        if start == end {
+                            params.push(format!("line {}", start));
                         } else {
-                            path.to_string()
+                            params.push(format!("lines {}-{}", start, end));
                         }
-                    })
+                    } else {
+                        params.push(format!("line {}", start));
+                    }
+                }
+                
+                if !params.is_empty() {
+                    Some(params.join(" "))
+                } else {
+                    None
+                }
             }
             name if name.contains("search") => {
                 self.result.get("query")
@@ -153,17 +199,35 @@ impl<'a> SimplifiedToolRenderer<'a> {
         }
     }
     
+    /// Get minimum height for different tool types
+    fn get_min_height_for_tool(&self) -> f32 {
+        match self.tool_name {
+            // Search results need more space
+            name if name.contains("search") || name.contains("query") => Self::MIN_HEIGHT_SEARCH,
+            // File operations need space for content
+            name if name.contains("read_file") || name.contains("view_file") || name == "Read" => Self::MIN_HEIGHT_FILE,
+            // Shell output needs space
+            name if name.contains("shell") || name.contains("bash") || name == "Bash" => Self::MIN_HEIGHT_SHELL,
+            // Repository lists need space
+            name if name.contains("repository") && self.result.get("repositories").is_some() => Self::MIN_HEIGHT_REPO,
+            // Todo lists need space
+            name if name.contains("todo") => Self::MIN_HEIGHT_TODO,
+            // Default minimum
+            _ => Self::MIN_HEIGHT_DEFAULT,
+        }
+    }
+    
     /// Get status indicator for the header
     fn get_status_indicator(&self) -> Option<RichText> {
         // Check for error fields
-        if let Some(error) = self.result.get("error").and_then(|v| v.as_str()) {
-            return Some(RichText::new("❌").color(self.app_theme.error_color()));
+        if let Some(_error) = self.result.get("error").and_then(|v| v.as_str()) {
+            return Some(RichText::new("Error").color(self.app_theme.error_color()));
         }
         
         // Check for exit code (shell commands)
         if let Some(exit_code) = self.result.get("exit_code").and_then(|v| v.as_i64()) {
             if exit_code == 0 {
-                return Some(RichText::new("✓").color(self.app_theme.success_color()));
+                return Some(RichText::new("Success").color(self.app_theme.success_color()));
             } else {
                 return Some(RichText::new(format!("Exit: {}", exit_code)).color(self.app_theme.error_color()));
             }
@@ -171,14 +235,14 @@ impl<'a> SimplifiedToolRenderer<'a> {
         
         // Check for success fields
         if self.result.get("success").and_then(|v| v.as_bool()) == Some(true) {
-            return Some(RichText::new("✓").color(self.app_theme.success_color()));
+            return Some(RichText::new("Success").color(self.app_theme.success_color()));
         }
         
         // Default success for results with content
         if self.result.get("content").is_some() || 
            self.result.get("results").is_some() ||
            self.result.get("todos").is_some() {
-            return Some(RichText::new("✓").color(self.app_theme.success_color()));
+            return Some(RichText::new("Success").color(self.app_theme.success_color()));
         }
         
         None
@@ -219,7 +283,7 @@ impl<'a> SimplifiedToolRenderer<'a> {
             // Copy button for content
             if self.result.get("content").is_some() {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button("📋 Copy").clicked() {
+                    if ui.button("Copy").clicked() {
                         if let Some(content) = self.result.get("content").and_then(|v| v.as_str()) {
                             ui.ctx().copy_text(content.to_string());
                         }
@@ -239,10 +303,7 @@ impl<'a> SimplifiedToolRenderer<'a> {
                 .and_then(|path| path.split('.').last())
                 .unwrap_or("txt");
                 
-            // Apply line limit
-            let lines: Vec<&str> = content.lines().take(Self::MAX_LINES).collect();
-            let truncated_content = lines.join("\n");
-            let was_truncated = content.lines().count() > Self::MAX_LINES;
+            // Don't truncate - show full content with scrollbar
             
             // Get font size for this file
             let file_path_key = self.result.get("file_path")
@@ -257,14 +318,14 @@ impl<'a> SimplifiedToolRenderer<'a> {
             // Font size controls
             ui.horizontal(|ui| {
                 ui.label("Font size:");
-                if ui.button("🔍-").clicked() {
+                if ui.button("-").clicked() {
                     let new_size = (font_size - 2.0).max(8.0);
                     FILE_READ_FONT_SIZES.with(|sizes| {
                         sizes.borrow_mut().insert(file_path_key.clone(), new_size);
                     });
                 }
                 ui.label(format!("{}pt", font_size as i32));
-                if ui.button("🔍+").clicked() {
+                if ui.button("+").clicked() {
                     let new_size = (font_size + 2.0).min(24.0);
                     FILE_READ_FONT_SIZES.with(|sizes| {
                         sizes.borrow_mut().insert(file_path_key.clone(), new_size);
@@ -274,23 +335,15 @@ impl<'a> SimplifiedToolRenderer<'a> {
             
             ui.add_space(4.0);
             
-            // Render with syntax highlighting
+            // Render with syntax highlighting - full content
             render_syntax_highlighted_code_with_font_size(
                 ui,
-                &truncated_content,
+                content,
                 file_ext,
                 &self.app_theme.code_background(),
                 ui.available_width(),
                 font_size,
             );
-            
-            if was_truncated {
-                ui.add_space(4.0);
-                ui.label(RichText::new(format!("... {} more lines", 
-                    content.lines().count() - Self::MAX_LINES))
-                    .small()
-                    .color(self.app_theme.hint_text_color()));
-            }
         } else {
             ui.label("No content available");
         }
@@ -323,14 +376,14 @@ impl<'a> SimplifiedToolRenderer<'a> {
     fn render_edit_result(&self, ui: &mut Ui) {
         if let Some(success) = self.result.get("success").and_then(|v| v.as_bool()) {
             if success {
-                ui.label(RichText::new("✓ Edit applied successfully").color(self.app_theme.success_color()));
+                ui.label(RichText::new("Edit applied successfully").color(self.app_theme.success_color()));
                 
                 // Show number of replacements if available
                 if let Some(replacements) = self.result.get("replacements").and_then(|v| v.as_i64()) {
                     ui.label(RichText::new(format!("{} replacement(s) made", replacements)).small().color(self.app_theme.hint_text_color()));
                 }
             } else {
-                ui.label(RichText::new("❌ Edit failed").color(self.app_theme.error_color()));
+                ui.label(RichText::new("Edit failed").color(self.app_theme.error_color()));
                 if let Some(error) = self.result.get("error").and_then(|v| v.as_str()) {
                     ui.label(RichText::new(error).small().color(self.app_theme.error_color()));
                 }
@@ -382,7 +435,7 @@ impl<'a> SimplifiedToolRenderer<'a> {
             ui.label(format!("Found {} results", results.len()));
             ui.separator();
             
-            for (i, result) in results.iter().take(10).enumerate() {
+            for (i, result) in results.iter().enumerate() {
                 // Render each result as a clickable item
                 let file_path = result.get("filePath")
                     .and_then(|v| v.as_str())
@@ -439,16 +492,10 @@ impl<'a> SimplifiedToolRenderer<'a> {
             ui.label(format!("Found {} files", matches.len()));
             ui.separator();
             
-            for (i, file) in matches.iter().take(20).enumerate() {
+            for (i, file) in matches.iter().enumerate() {
                 if let Some(file_path) = file.as_str() {
                     ui.label(format!("{}. {}", i + 1, file_path));
                 }
-            }
-            
-            if matches.len() > 20 {
-                ui.label(RichText::new(format!("... and {} more files", matches.len() - 20))
-                    .small()
-                    .color(self.app_theme.hint_text_color()));
             }
         } else {
             ui.label("No results found");
@@ -483,11 +530,11 @@ impl<'a> SimplifiedToolRenderer<'a> {
                     let status = todo.get("status").and_then(|v| v.as_str()).unwrap_or("unknown");
                     let priority = todo.get("priority").and_then(|v| v.as_str()).unwrap_or("medium");
                     
-                    let status_icon = match status {
-                        "completed" => "✓",
-                        "pending" => "◯",
-                        "in_progress" => "⏳",
-                        _ => "?",
+                    let status_text = match status {
+                        "completed" => "[Done]",
+                        "pending" => "[Todo]",
+                        "in_progress" => "[In Progress]",
+                        _ => "[Unknown]",
                     };
                     
                     let priority_color = match priority {
@@ -497,7 +544,7 @@ impl<'a> SimplifiedToolRenderer<'a> {
                     };
                     
                     ui.horizontal(|ui| {
-                        ui.label(status_icon);
+                        ui.label(RichText::new(status_text).small().color(self.app_theme.hint_text_color()));
                         ui.label(RichText::new(content).color(priority_color));
                     });
                 }
@@ -516,7 +563,6 @@ impl<'a> SimplifiedToolRenderer<'a> {
             for repo in repositories {
                 if let Some(name) = repo.get("name").and_then(|v| v.as_str()) {
                     ui.horizontal(|ui| {
-                        ui.label("•");
                         ui.label(RichText::new(name).strong());
                         
                         if let Some(branch) = repo.get("branch").and_then(|v| v.as_str()) {
