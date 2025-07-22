@@ -308,12 +308,16 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         // --- Search File ---
         ToolDefinition {
             name: "search_file".to_string(),
-            description: Some("Searches for files within a repository using glob patterns. Patterns like '*.rs' search recursively by default. Use 'src/*.rs' to limit to a specific directory. Use '**/*.rs' for explicit recursive search.".to_string()),
+            description: Some("Searches for files within a repository using glob patterns. \n\n**IMPORTANT REQUIREMENTS:**\n• Patterns must contain at least 2 non-wildcard characters\n• Overly broad patterns like '*', '**', '**/*' are NOT allowed\n• Maximum 1000 files will be returned (truncated if more match)\n\n**VALID EXAMPLES:**\n• '*.rs' - All Rust files (recursively)\n• 'src/*.ts' - TypeScript files in src/ directory\n• '*config*' - Files with 'config' in the name\n• 'test_*.py' - Python test files\n• '**/*.md' - All markdown files (explicit recursive)\n\n**INVALID EXAMPLES:**\n• '*' - Too broad (blocked)\n• '**' - Too broad (blocked)\n• '?' - Too few non-wildcard chars\n• '*.?' - Too few non-wildcard chars\n\nPatterns search recursively by default unless you specify a directory path.".to_string()),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "repositoryName": { "type": "string", "description": "Name of the repository to search within." },
-                    "pattern": { "type": "string", "description": "Glob pattern to search for. Examples: '*.rs' (all Rust files recursively), 'src/*.rs' (only in src/), '**/*.md' (all markdown files recursively), '*README*' (files with README in name)" },
+                    "pattern": { 
+                        "type": "string", 
+                        "description": "Glob pattern to search for (must contain at least 2 non-wildcard characters).",
+                        "examples": ["*.rs", "src/*.ts", "*config*", "test_*.py", "**/*.md"]
+                    },
                     "caseSensitive": { "type": "boolean", "description": "Perform case-sensitive matching (default: false)." }
                 },
                 "required": ["repositoryName", "pattern"]

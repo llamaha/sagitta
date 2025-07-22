@@ -125,11 +125,51 @@ let params = ShellExecuteParams {
 };
 ```
 
+### 3. Search File Tool
+
+**Problem**: Search patterns like `*` or `**` could return tens of thousands of files, overwhelming the AI context.
+
+**Solution**: Added pattern validation and result limits:
+- Patterns must contain at least 2 non-wildcard characters
+- Overly broad patterns like `*`, `**`, `**/*` are rejected
+- Maximum 1000 files returned (truncated if more match)
+
+#### Changes:
+- Added `validate_search_pattern` function to check patterns before execution
+- Added hard limit of 1000 results with truncation
+- Updated tool definition with clear requirements and examples
+- Added comprehensive tests for validation and limits
+
+#### Example Usage:
+```json
+{
+  "repositoryName": "my_repo",
+  "pattern": "*.rs"
+}
+```
+
+#### Error Examples:
+```json
+{
+  "code": -32603,
+  "message": "Pattern '*' is too broad and could return excessive results. Please use more specific patterns like '*.rs', 'src/*.ts', or '*config*'. Patterns must contain at least 2 non-wildcard characters."
+}
+```
+
+```json
+{
+  "code": -32603,
+  "message": "Pattern '?' must contain at least 2 non-wildcard characters. Examples: '*.rs', 'test*', '*config*', 'src/*.js'"
+}
+```
+
 ## Testing
 
 All existing tests have been updated to comply with the new requirements. Additional tests added:
 - `test_read_file_400_line_limit`: Validates the 400 line maximum
 - `test_shell_execute_requires_filter`: Validates filter requirement
+- `test_search_file_pattern_validation`: Validates pattern restrictions
+- `test_search_file_result_limit`: Validates 1000 file result limit
 
 Run tests with:
 ```bash

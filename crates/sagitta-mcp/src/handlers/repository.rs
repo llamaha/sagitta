@@ -661,12 +661,50 @@ fn get_repo_config_mcp<'a>(
         })
 }
 
+/// Validates search patterns to prevent overly broad searches that could return excessive results
+fn validate_search_pattern(pattern: &str) -> Result<(), ErrorObject> {
+    // Disallow standalone wildcards that would match everything
+    let dangerous_patterns = ["*", "**", "**/*", "*/*", "**/**"];
+    
+    if dangerous_patterns.contains(&pattern) {
+        return Err(ErrorObject {
+            code: error_codes::INVALID_PARAMS,
+            message: format!(
+                "Pattern '{}' is too broad and could return excessive results. Please use more specific patterns like '*.rs', 'src/*.ts', or '*config*'. Patterns must contain at least 2 non-wildcard characters.",
+                pattern
+            ),
+            data: None,
+        });
+    }
+    
+    // Require at least some non-wildcard characters
+    let non_wildcard_chars = pattern.chars()
+        .filter(|c| *c != '*' && *c != '?' && *c != '/')
+        .count();
+    
+    if non_wildcard_chars < 2 {
+        return Err(ErrorObject {
+            code: error_codes::INVALID_PARAMS,
+            message: format!(
+                "Pattern '{}' must contain at least 2 non-wildcard characters. Examples: '*.rs', 'test*', '*config*', 'src/*.js'",
+                pattern
+            ),
+            data: None,
+        });
+    }
+    
+    Ok(())
+}
+
 #[instrument(skip(config), fields(repo_name = ?params.repository_name, pattern = %params.pattern))]
 pub async fn handle_repository_search_file(
     params: RepositorySearchFileParams,
     config: Arc<RwLock<AppConfig>>,
     auth_user_ext: Option<Extension<AuthenticatedUser>>,
 ) -> Result<RepositorySearchFileResult, ErrorObject> {
+    // Validate the search pattern to prevent overly broad searches
+    validate_search_pattern(&params.pattern)?;
+    
     let config_guard = config.read().await;
     let repo_config = get_repo_config_mcp(&config_guard, params.repository_name.as_deref())?;
 
@@ -675,7 +713,7 @@ pub async fn handle_repository_search_file(
     let search_path = &repo_config.local_path;
     let case_sensitive = params.case_sensitive.unwrap_or(false);
 
-    let matching_paths = find_files_matching_pattern(search_path, &params.pattern, case_sensitive)
+    let mut matching_paths = find_files_matching_pattern(search_path, &params.pattern, case_sensitive)
         .map_err(|e| {
             let error_data = create_error_data(&anyhow!(e));
             ErrorObject {
@@ -684,6 +722,17 @@ pub async fn handle_repository_search_file(
                 data: Some(error_data), // Add detailed data
             }
         })?;
+    
+    // Apply hard limit to prevent excessive results
+    const MAX_SEARCH_RESULTS: usize = 1000;
+    let truncated = matching_paths.len() > MAX_SEARCH_RESULTS;
+    if truncated {
+        log::warn!("Search returned {} files, truncating to {}", 
+            matching_paths.len(), 
+            MAX_SEARCH_RESULTS
+        );
+        matching_paths.truncate(MAX_SEARCH_RESULTS);
+    }
 
     // Convert PathBufs to Strings for JSON response
     let matching_files_str = matching_paths
@@ -1604,4 +1653,108 @@ mod tests {
         assert_eq!(error.code, error_codes::REPO_NOT_FOUND, "Expected REPO_NOT_FOUND error");
     }
     */
+    
+    #[tokio::test]
+    async fn test_search_file_pattern_validation() {
+        let temp_dir = tempdir().unwrap();
+        let mut repo_config = create_test_repo_config("test_repo");
+        repo_config.local_path = temp_dir.path().join("test_repo");
+        
+        // Create the repository directory
+        std::fs::create_dir_all(&repo_config.local_path).unwrap();
+        
+        let config = create_test_app_config(vec![repo_config], temp_dir.path().to_str().unwrap().to_string());
+        
+        // Test overly broad patterns that should be rejected
+        let dangerous_patterns = vec!["*", "**", "**/*", "*/*", "**/**"];
+        
+        for pattern in dangerous_patterns {
+            let params = RepositorySearchFileParams {
+                repository_name: Some("test_repo".to_string()),
+                pattern: pattern.to_string(),
+                case_sensitive: Some(false),
+            };
+            
+            let result = handle_repository_search_file(params, config.clone(), None).await;
+            assert!(result.is_err(), "Pattern '{}' should be rejected", pattern);
+            
+            let error = result.unwrap_err();
+            assert_eq!(error.code, error_codes::INVALID_PARAMS);
+            assert!(error.message.contains("too broad"), 
+                "Error message for pattern '{}' should mention it's too broad", pattern);
+        }
+        
+        // Test patterns with too few non-wildcard characters
+        let insufficient_patterns = vec!["?", "*?", "?*", "*.?", "?.?"];
+        
+        for pattern in insufficient_patterns {
+            let params = RepositorySearchFileParams {
+                repository_name: Some("test_repo".to_string()),
+                pattern: pattern.to_string(),
+                case_sensitive: Some(false),
+            };
+            
+            let result = handle_repository_search_file(params, config.clone(), None).await;
+            assert!(result.is_err(), "Pattern '{}' should be rejected", pattern);
+            
+            let error = result.unwrap_err();
+            assert_eq!(error.code, error_codes::INVALID_PARAMS);
+            assert!(error.message.contains("at least 2 non-wildcard characters"), 
+                "Error message for pattern '{}' should mention character requirement", pattern);
+        }
+        
+        // Test valid patterns that should be accepted
+        let valid_patterns = vec!["*.rs", "test*", "*config*", "src/*.js", "**/*.md"];
+        
+        for pattern in valid_patterns {
+            let params = RepositorySearchFileParams {
+                repository_name: Some("test_repo".to_string()),
+                pattern: pattern.to_string(),
+                case_sensitive: Some(false),
+            };
+            
+            // We expect these to succeed (though they may return empty results)
+            let result = handle_repository_search_file(params, config.clone(), None).await;
+            assert!(result.is_ok(), "Pattern '{}' should be accepted", pattern);
+        }
+    }
+    
+    #[tokio::test]
+    async fn test_search_file_result_limit() {
+        use std::fs;
+        
+        let temp_dir = tempdir().unwrap();
+        let repo_path = temp_dir.path().join("test_repo");
+        fs::create_dir_all(&repo_path).unwrap();
+        
+        // Create more than 1000 test files
+        for i in 0..1100 {
+            let file_path = repo_path.join(format!("test_file_{}.txt", i));
+            fs::write(&file_path, format!("Test content {}", i)).unwrap();
+        }
+        
+        let mut repo_config = create_test_repo_config("test_repo");
+        repo_config.local_path = repo_path;
+        
+        let config = create_test_app_config(vec![repo_config], temp_dir.path().to_str().unwrap().to_string());
+        
+        let params = RepositorySearchFileParams {
+            repository_name: Some("test_repo".to_string()),
+            pattern: "test_file_*.txt".to_string(),
+            case_sensitive: Some(false),
+        };
+        
+        let result = handle_repository_search_file(params, config, None).await;
+        assert!(result.is_ok(), "Search should succeed");
+        
+        let search_result = result.unwrap();
+        assert_eq!(search_result.matching_files.len(), 1000, 
+            "Result should be limited to 1000 files");
+        
+        // Verify we got the expected files (they should be sorted somehow)
+        for file in &search_result.matching_files {
+            assert!(file.contains("test_file_"), "File should match pattern");
+            assert!(file.ends_with(".txt"), "File should have .txt extension");
+        }
+    }
 } 
