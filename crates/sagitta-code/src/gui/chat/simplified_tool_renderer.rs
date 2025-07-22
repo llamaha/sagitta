@@ -107,18 +107,18 @@ impl<'a> SimplifiedToolRenderer<'a> {
         // Calculate minimum height based on tool type
         let min_height = self.get_min_height_for_tool();
         
-        let available_rect = ui.available_rect_before_wrap();
-        let content_height = (available_rect.height() - Self::HEADER_HEIGHT - Self::ACTION_BAR_HEIGHT).min(Self::MAX_HEIGHT);
+        // Use a fixed max height instead of calculating from available space
+        let content_height = Self::MAX_HEIGHT;
         
         ScrollArea::vertical()
             .id_source(&self.unique_id)  // Unique ID to prevent scroll interference
             .max_height(content_height)
-            .min_scrolled_height(min_height)
             .auto_shrink([false, false])  // Don't auto-shrink to maintain consistent size
-            .enable_scrolling(true)  // Explicitly enable scrolling
-            .drag_to_scroll(true)    // Enable drag to scroll
-            .stick_to_bottom(false)  // Don't stick to bottom
+            .always_show_scroll(true)   // Always show scroll bar
             .show(ui, |ui| {
+                // Ensure the UI knows we might need more space than visible
+                ui.set_min_height(min_height);
+                ui.set_min_width(ui.available_width());
                 ui.add_space(Self::CONTENT_PADDING);
                 
                 // Delegate to specific renderer based on tool type
@@ -345,14 +345,22 @@ impl<'a> SimplifiedToolRenderer<'a> {
             ui.add_space(4.0);
             
             // Render with syntax highlighting - full content
-            render_syntax_highlighted_code_with_font_size(
-                ui,
-                content,
-                file_ext,
-                &self.app_theme.code_background(),
-                ui.available_width(),
-                font_size,
-            );
+            // Wrap in a frame to ensure proper sizing
+            Frame::NONE
+                .fill(self.app_theme.code_background())
+                .inner_margin(Vec2::new(8.0, 6.0))
+                .corner_radius(CornerRadius::same(4))
+                .stroke(Stroke::new(0.5, self.app_theme.border_color()))
+                .show(ui, |ui| {
+                    render_syntax_highlighted_code_with_font_size(
+                        ui,
+                        content,
+                        file_ext,
+                        &self.app_theme.code_background(),
+                        ui.available_width(),
+                        font_size,
+                    );
+                });
         } else {
             ui.label("No content available");
         }
