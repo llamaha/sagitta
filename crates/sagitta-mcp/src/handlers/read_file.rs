@@ -6,13 +6,14 @@ use axum::Extension;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::time::{timeout, Duration};
 use tracing::{info, error, warn};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tokio::sync::Semaphore;
 use tokio::io::{AsyncBufReadExt, BufReader};
+use super::utils::get_current_repository_path;
 
 /// Timeout for file operations to prevent hanging
 const FILE_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
@@ -223,8 +224,27 @@ async fn handle_read_file_inner(params: ReadFileParams) -> Result<ReadFileResult
         });
     }
     
+    // Handle relative paths using repository context
+    let file_path = if Path::new(&params.file_path).is_absolute() {
+        PathBuf::from(&params.file_path)
+    } else {
+        // Try to get repository context
+        if let Some(repo_path) = get_current_repository_path().await {
+            repo_path.join(&params.file_path)
+        } else {
+            // Fallback to current directory if no repository context
+            std::env::current_dir()
+                .map_err(|e| ErrorObject {
+                    code: -32603,
+                    message: format!("Failed to get current directory: {e}"),
+                    data: None,
+                })?
+                .join(&params.file_path)
+        }
+    };
+    
     // Check if file exists with timeout
-    let path = Path::new(&params.file_path);
+    let path = file_path.as_path();
     let exists = match timeout(Duration::from_secs(5), async { path.exists() }).await {
         Ok(exists) => exists,
         Err(_) => {
@@ -274,7 +294,7 @@ async fn handle_read_file_inner(params: ReadFileParams) -> Result<ReadFileResult
           params.start_line, params.end_line, params.file_path, file_size);
     
     let (content, line_count, _lines_returned, actual_end) = read_file_lines_with_timeout(
-        &params.file_path,
+        file_path.to_str().unwrap_or(&params.file_path),
         Some(params.start_line),
         Some(params.end_line),
     ).await?;
@@ -285,7 +305,7 @@ async fn handle_read_file_inner(params: ReadFileParams) -> Result<ReadFileResult
     let (content, total_lines, start_line, end_line) = (content, line_count, start, end);
     
     Ok(ReadFileResult {
-        file_path: params.file_path,
+        file_path: file_path.display().to_string(),
         content,
         line_count: total_lines,
         file_size,
@@ -761,5 +781,80 @@ mod tests {
         
         let result: Result<ReadFileParams, _> = serde_json::from_value(json_params);
         assert!(result.is_err(), "Should fail without start_line and end_line");
+    }
+    
+    #[tokio::test]
+    async fn test_read_file_with_repository_context() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_dir = temp_dir.path().join("repo");
+        fs::create_dir(&repo_dir).await.unwrap();
+        
+        // Create a file in the repo directory
+        let file_path = repo_dir.join("test.txt");
+        let test_content = "Repository context test file";
+        fs::write(&file_path, test_content).await.unwrap();
+        
+        // Set up the repository context file
+        let config_dir = dirs::config_dir().unwrap();
+        let sagitta_config_dir = config_dir.join("sagitta-code");
+        fs::create_dir_all(&sagitta_config_dir).await.unwrap();
+        
+        let context_file = sagitta_config_dir.join("current_repository.txt");
+        fs::write(&context_file, repo_dir.to_str().unwrap()).await.unwrap();
+        
+        // Test with relative path - should use repository context
+        let params = ReadFileParams {
+            file_path: "test.txt".to_string(),
+            start_line: 1,
+            end_line: 10,
+        };
+        
+        let config = Arc::new(RwLock::new(AppConfig::default()));
+        let client = create_mock_qdrant();
+        
+        let result = handle_read_file(params, config, client, None).await;
+        assert!(result.is_ok());
+        
+        let file_result = result.unwrap();
+        assert_eq!(file_result.content, test_content);
+        
+        // Clean up the context file
+        fs::remove_file(&context_file).await.ok();
+    }
+    
+    #[tokio::test]
+    async fn test_read_file_without_repository_context() {
+        let temp_dir = TempDir::new().unwrap();
+        
+        // Create a file in the current directory
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp_dir.path()).unwrap();
+        
+        let test_content = "No repository context test file";
+        fs::write("test.txt", test_content).await.unwrap();
+        
+        // Make sure no repository context exists
+        let config_dir = dirs::config_dir().unwrap();
+        let context_file = config_dir.join("sagitta-code").join("current_repository.txt");
+        fs::remove_file(&context_file).await.ok();
+        
+        // Test with relative path - should use current directory
+        let params = ReadFileParams {
+            file_path: "test.txt".to_string(),
+            start_line: 1,
+            end_line: 10,
+        };
+        
+        let config = Arc::new(RwLock::new(AppConfig::default()));
+        let client = create_mock_qdrant();
+        
+        let result = handle_read_file(params, config, client, None).await;
+        assert!(result.is_ok());
+        
+        let file_result = result.unwrap();
+        assert_eq!(file_result.content, test_content);
+        
+        // Restore original directory
+        std::env::set_current_dir(original_dir).unwrap();
     }
 }

@@ -6,7 +6,8 @@ use axum::Extension;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use super::utils::get_current_repository_path;
 
 /// Handler for writing file contents
 pub async fn handle_write_file<C: QdrantClientTrait + Send + Sync + 'static>(
@@ -15,7 +16,26 @@ pub async fn handle_write_file<C: QdrantClientTrait + Send + Sync + 'static>(
     _qdrant_client: Arc<C>,
     _auth_user_ext: Option<Extension<AuthenticatedUser>>,
 ) -> Result<WriteFileResult, ErrorObject> {
-    let path = Path::new(&params.file_path);
+    // Handle relative paths using repository context
+    let file_path = if Path::new(&params.file_path).is_absolute() {
+        PathBuf::from(&params.file_path)
+    } else {
+        // Try to get repository context
+        if let Some(repo_path) = get_current_repository_path().await {
+            repo_path.join(&params.file_path)
+        } else {
+            // Fallback to current directory if no repository context
+            std::env::current_dir()
+                .map_err(|e| ErrorObject {
+                    code: -32603,
+                    message: format!("Failed to get current directory: {e}"),
+                    data: None,
+                })?
+                .join(&params.file_path)
+        }
+    };
+    
+    let path = file_path.as_path();
     
     // Check if file already exists
     let file_exists = path.exists();
@@ -39,7 +59,7 @@ pub async fn handle_write_file<C: QdrantClientTrait + Send + Sync + 'static>(
     let content_bytes = params.content.as_bytes();
     let bytes_written = content_bytes.len() as u64;
     
-    if let Err(e) = fs::write(&params.file_path, content_bytes).await {
+    if let Err(e) = fs::write(&file_path, content_bytes).await {
         return Err(ErrorObject {
             code: -32603,
             message: format!("Failed to write file: {e}"),
@@ -57,7 +77,7 @@ pub async fn handle_write_file<C: QdrantClientTrait + Send + Sync + 'static>(
     };
     
     Ok(WriteFileResult {
-        file_path: params.file_path,
+        file_path: file_path.display().to_string(),
         content: display_content,
         bytes_written,
         created: !file_exists,

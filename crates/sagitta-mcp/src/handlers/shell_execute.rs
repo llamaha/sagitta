@@ -10,6 +10,7 @@ use tokio::time::{timeout, Duration};
 use std::time::Instant;
 use std::process::Stdio;
 use std::path::PathBuf;
+use super::utils::get_current_repository_path;
 
 /// Get the appropriate shell command based on the OS
 fn get_shell_command(command: &str) -> (String, Vec<String>) {
@@ -65,40 +66,7 @@ fn apply_output_filters(mut output: String, params: &ShellExecuteParams) -> Stri
     output
 }
 
-/// Get the current repository working directory from state file
-async fn get_current_repository_path() -> Option<PathBuf> {
-    // Try to read from a state file in the config directory
-    let mut state_path = dirs::config_dir()?;
-    state_path.push("sagitta-code");
-    state_path.push("current_repository.txt");
-    
-    match tokio::fs::read_to_string(&state_path).await {
-        Ok(content) => {
-            let path_str = content.trim();
-            if !path_str.is_empty() {
-                let path = PathBuf::from(path_str);
-                if path.exists() && path.is_dir() {
-                    log::debug!("Read current repository path from state file: {}", path.display());
-                    return Some(path);
-                }
-            }
-        }
-        Err(e) => {
-            log::trace!("Could not read repository state file: {e}");
-        }
-    }
-    
-    // Fallback to environment variable
-    if let Ok(repo_path) = std::env::var("SAGITTA_CURRENT_REPO_PATH") {
-        let path = PathBuf::from(repo_path);
-        if path.exists() && path.is_dir() {
-            log::debug!("Using repository path from environment: {}", path.display());
-            return Some(path);
-        }
-    }
-    
-    None
-}
+
 
 /// Handler for shell command execution
 pub async fn handle_shell_execute<C: QdrantClientTrait + Send + Sync + 'static>(
@@ -163,10 +131,24 @@ pub async fn handle_shell_execute<C: QdrantClientTrait + Send + Sync + 'static>(
                 }
             }
             
-            // If still not resolved, use as-is (will likely fail but provides clear error)
+            // If still not resolved, check if it exists before using
             if !resolved {
-                cmd.current_dir(&path);
-                log::warn!("Could not resolve working directory '{}' - using as-is", dir);
+                if path.exists() && path.is_dir() {
+                    cmd.current_dir(&path);
+                    log::info!("Using working directory as-is: {}", path.display());
+                } else {
+                    return Err(ErrorObject {
+                        code: -32603,
+                        message: format!(
+                            "Working directory '{}' does not exist. Please check that:\n\
+                            1. If it's a repository name, the repository exists locally\n\
+                            2. If it's a path, the directory exists\n\
+                            3. Consider omitting working_directory and using full paths in your command instead",
+                            dir
+                        ),
+                        data: None,
+                    });
+                }
             }
         }
     } else if let Some(repo_path) = get_current_repository_path().await {

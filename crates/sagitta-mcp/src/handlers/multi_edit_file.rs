@@ -7,6 +7,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::fs;
 use similar::TextDiff;
+use std::path::{Path, PathBuf};
+use super::utils::get_current_repository_path;
 
 /// Create a unified diff between two strings
 fn create_diff(old_content: &str, new_content: &str, file_path: &str) -> String {
@@ -115,8 +117,27 @@ pub async fn handle_multi_edit_file<C: QdrantClientTrait + Send + Sync + 'static
     _qdrant_client: Arc<C>,
     _auth_user_ext: Option<Extension<AuthenticatedUser>>,
 ) -> Result<MultiEditFileResult, ErrorObject> {
+    // Handle relative paths using repository context
+    let file_path = if Path::new(&params.file_path).is_absolute() {
+        PathBuf::from(&params.file_path)
+    } else {
+        // Try to get repository context
+        if let Some(repo_path) = get_current_repository_path().await {
+            repo_path.join(&params.file_path)
+        } else {
+            // Fallback to current directory if no repository context
+            std::env::current_dir()
+                .map_err(|e| ErrorObject {
+                    code: -32603,
+                    message: format!("Failed to get current directory: {e}"),
+                    data: None,
+                })?
+                .join(&params.file_path)
+        }
+    };
+    
     // Read the file
-    let original_content = match fs::read_to_string(&params.file_path).await {
+    let original_content = match fs::read_to_string(&file_path).await {
         Ok(content) => content,
         Err(e) => {
             return Err(ErrorObject {
@@ -156,7 +177,7 @@ pub async fn handle_multi_edit_file<C: QdrantClientTrait + Send + Sync + 'static
     }
     
     // Write the new content
-    if let Err(e) = fs::write(&params.file_path, &current_content).await {
+    if let Err(e) = fs::write(&file_path, &current_content).await {
         return Err(ErrorObject {
             code: -32603,
             message: format!("Failed to write file: {e}"),
@@ -165,7 +186,7 @@ pub async fn handle_multi_edit_file<C: QdrantClientTrait + Send + Sync + 'static
     }
     
     // Create diff
-    let diff = create_diff(&original_content, &current_content, &params.file_path);
+    let diff = create_diff(&original_content, &current_content, file_path.to_str().unwrap_or(&params.file_path));
     
     // Count total changes
     let total_replacements: usize = params.edits.iter().map(|edit| {
@@ -179,7 +200,7 @@ pub async fn handle_multi_edit_file<C: QdrantClientTrait + Send + Sync + 'static
     let changes_summary = format!("Applied {edits_applied} edits with {total_replacements} total replacements");
     
     Ok(MultiEditFileResult {
-        file_path: params.file_path,
+        file_path: file_path.display().to_string(),
         original_content: if original_content.len() > 1000 {
             format!("{}... (truncated)", &original_content[..1000])
         } else {

@@ -9,6 +9,8 @@ use tokio::fs;
 use tokio::time::{timeout, Duration};
 use similar::{TextDiff, ChangeTag};
 use tracing::{info, error};
+use std::path::{Path, PathBuf};
+use super::utils::get_current_repository_path;
 use uuid;
 
 /// Timeout for file operations to prevent hanging
@@ -269,8 +271,27 @@ pub async fn handle_edit_file<C: QdrantClientTrait + Send + Sync + 'static>(
 
 /// Inner handler for editing a file (without locking)
 async fn handle_edit_file_inner(params: EditFileParams) -> Result<EditFileResult, ErrorObject> {
+    // Handle relative paths using repository context
+    let file_path = if Path::new(&params.file_path).is_absolute() {
+        PathBuf::from(&params.file_path)
+    } else {
+        // Try to get repository context
+        if let Some(repo_path) = get_current_repository_path().await {
+            repo_path.join(&params.file_path)
+        } else {
+            // Fallback to current directory if no repository context
+            std::env::current_dir()
+                .map_err(|e| ErrorObject {
+                    code: -32603,
+                    message: format!("Failed to get current directory: {e}"),
+                    data: None,
+                })?
+                .join(&params.file_path)
+        }
+    };
+    
     // Read the file with timeout protection
-    let content = read_file_with_timeout(&params.file_path).await?;
+    let content = read_file_with_timeout(file_path.to_str().unwrap_or(&params.file_path)).await?;
     
     // Find the old_string in the content
     let matches: Vec<_> = content.match_indices(&params.old_string).collect();
@@ -302,7 +323,7 @@ async fn handle_edit_file_inner(params: EditFileParams) -> Result<EditFileResult
     };
     
     // Write the new content atomically with timeout protection
-    write_file_atomic_with_timeout(&params.file_path, &new_content).await?;
+    write_file_atomic_with_timeout(file_path.to_str().unwrap_or(&params.file_path), &new_content).await?;
     
     // Get context for display (show limited context around changes)
     let (old_context, new_context) = if matches.len() == 1 && !params.replace_all {
@@ -337,7 +358,7 @@ async fn handle_edit_file_inner(params: EditFileParams) -> Result<EditFileResult
     };
     
     // Create diff
-    let diff = create_diff(&content, &new_content, &params.file_path);
+    let diff = create_diff(&content, &new_content, file_path.to_str().unwrap_or(&params.file_path));
     
     // Create summary
     let changes_summary = if params.replace_all {
@@ -347,7 +368,7 @@ async fn handle_edit_file_inner(params: EditFileParams) -> Result<EditFileResult
     };
     
     Ok(EditFileResult {
-        file_path: params.file_path,
+        file_path: file_path.display().to_string(),
         old_content: old_context,
         new_content: new_context,
         diff,

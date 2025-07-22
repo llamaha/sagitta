@@ -14,6 +14,8 @@ pub mod read_file;
 pub mod write_file;
 pub mod git_history;
 pub mod dependency;
+pub mod current_working_directory;
+pub mod utils;
 
 #[cfg(test)]
 pub mod test_utils;

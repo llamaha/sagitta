@@ -9,6 +9,7 @@ use crate::mcp::{
         EditFileParams, MultiEditFileParams,
         ShellExecuteParams,
         WriteFileParams,
+        CurrentWorkingDirectoryParams, CurrentWorkingDirectoryResult,
     },
 };
 use crate::server::{deserialize_value, ok_some, result_to_call_result}; // Import necessary helpers
@@ -18,7 +19,8 @@ use crate::handlers::{ping::handle_ping, query::handle_query, repository::*,
                       edit_file::handle_edit_file, multi_edit_file::handle_multi_edit_file,
                       shell_execute::handle_shell_execute,
                       write_file::handle_write_file,
-                      read_file::handle_read_file}; // Import actual handlers
+                      read_file::handle_read_file,
+                      current_working_directory::handle_current_working_directory}; // Import actual handlers
 
 use anyhow::Result;
 use serde_json::json;
@@ -151,6 +153,13 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
         "read_file" => {
             let read_params: crate::mcp::types::ReadFileParams = deserialize_value(arguments, tool_name)?;
             match handle_read_file(read_params, config, qdrant_client, None).await {
+                Ok(res) => result_to_call_result(res),
+                Err(e) => Err(e),
+            }
+        }
+        "current_working_directory" => {
+            let cwd_params: CurrentWorkingDirectoryParams = deserialize_value(arguments, tool_name)?;
+            match handle_current_working_directory(cwd_params, config, qdrant_client, None).await {
                 Ok(res) => result_to_call_result(res),
                 Err(e) => Err(e),
             }
@@ -417,6 +426,24 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         
+        // --- Current Working Directory ---
+        ToolDefinition {
+            name: "current_working_directory".to_string(),
+            description: Some("Returns the current working directory context. Shows the repository path if one is active, or the current system directory otherwise.".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+            annotations: Some(ToolAnnotations {
+                title: Some("Current Working Directory".to_string()),
+                read_only_hint: Some(true),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(true),
+                open_world_hint: Some(false),
+            }),
+        },
+
         // --- Todo Write ---
         ToolDefinition {
             name: "todo_write".to_string(),
@@ -467,7 +494,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "file_path": { "type": "string", "description": "The absolute path to the file to edit" },
+                    "file_path": { "type": "string", "description": "Path to the file to edit. Can be absolute or relative to the current repository" },
                     "old_string": { "type": "string", "description": "The text to search for and replace" },
                     "new_string": { "type": "string", "description": "The text to replace it with" },
                     "replace_all": { "type": "boolean", "description": "Replace all occurrences (default: false)" }
@@ -490,7 +517,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "file_path": { "type": "string", "description": "The absolute path to the file to edit" },
+                    "file_path": { "type": "string", "description": "Path to the file to edit. Can be absolute or relative to the current repository" },
                     "edits": {
                         "type": "array",
                         "description": "Array of edit operations to perform sequentially",
@@ -524,7 +551,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 "type": "object",
                 "properties": {
                     "command": { "type": "string", "description": "The command to execute" },
-                    "working_directory": { "type": "string", "description": "Optional: Leave empty to use current repository. Can be: repository name (e.g. 'sagitta'), relative path (e.g. 'src/'), or absolute path. Usually not needed - just use paths in your command like 'ls src/'" },
+                    "working_directory": { "type": "string", "description": "Optional: Working directory for the command. Can be: 1) Empty/omitted to use current directory, 2) Repository name that exists locally (e.g. 'sagitta'), 3) Relative path from current directory (e.g. 'src/'), 4) Absolute path. NOTE: Repository must exist on disk. If unsure, omit this parameter and use paths in your command instead (e.g. 'ls src/')." },
                     "timeout_ms": { "type": "integer", "description": "Optional timeout in milliseconds (default: 30000ms)" },
                     "env": { 
                         "type": "object",
@@ -554,7 +581,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "file_path": { "type": "string", "description": "The absolute path to the file to read" },
+                    "file_path": { "type": "string", "description": "Path to the file to read. Can be absolute or relative to the current repository" },
                     "start_line": { "type": "integer", "description": "REQUIRED: Line number to start reading from (1-based, inclusive). Example: 1 for first line" },
                     "end_line": { "type": "integer", "description": "REQUIRED: Line number to stop reading at (1-based, inclusive). Maximum range is 400 lines. Example: 100 to read up to line 100" }
                 },
@@ -576,7 +603,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "file_path": { "type": "string", "description": "The absolute path to the file to write" },
+                    "file_path": { "type": "string", "description": "Path to the file to write. Can be absolute or relative to the current repository" },
                     "content": { "type": "string", "description": "The content to write to the file" },
                     "create_parents": { "type": "boolean", "description": "Create parent directories if they don't exist (default: true)" }
                 },

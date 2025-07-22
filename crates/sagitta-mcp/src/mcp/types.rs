@@ -688,6 +688,21 @@ pub struct TodoWriteResult {
     pub summary: String,
 }
 
+/// Parameters for current_working_directory - empty since it takes no parameters
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct CurrentWorkingDirectoryParams {}
+
+/// Result of current_working_directory
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CurrentWorkingDirectoryResult {
+    /// The current working directory path
+    pub current_directory: String,
+    /// Whether this is a repository directory
+    pub is_repository: bool,
+    /// Name of the repository if applicable
+    pub repository_name: Option<String>,
+}
+
 // File editing types
 
 /// Parameters for edit_file

@@ -200,7 +200,7 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
                 "type": "object",
                 "properties": {
                     "command": { "type": "string", "description": "The command to execute" },
-                    "working_directory": { "type": "string", "description": "Optional: Leave empty to use current repository. Can be: repository name (e.g. 'sagitta'), relative path (e.g. 'src/'), or absolute path. Usually not needed - just use paths in your command like 'ls src/'" },
+                    "working_directory": { "type": "string", "description": "Optional: Working directory for the command. Can be: 1) Empty/omitted to use current directory, 2) Repository name that exists locally (e.g. 'sagitta'), 3) Relative path from current directory (e.g. 'src/'), 4) Absolute path. NOTE: Repository must exist on disk. If unsure, omit this parameter and use paths in your command instead (e.g. 'ls src/')." },
                     "env": { "type": "object", "description": "Optional environment variables", "additionalProperties": { "type": "string" } },
                     "timeout_ms": { "type": "integer", "description": "Optional timeout in milliseconds (default: 30000ms)" },
                     "grep_pattern": { "type": "string", "description": "Filter output to lines containing this pattern. Example: 'ERROR' to find error lines" },
@@ -217,7 +217,7 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "file_path": { "type": "string", "description": "The absolute path to the file to read" },
+                    "file_path": { "type": "string", "description": "Path to the file to read. Can be absolute or relative to the current repository" },
                     "start_line": { "type": "integer", "description": "REQUIRED: Line number to start reading from (1-based, inclusive). Example: 1 for first line" },
                     "end_line": { "type": "integer", "description": "REQUIRED: Line number to stop reading at (1-based, inclusive). Maximum range is 400 lines. Example: 100 to read up to line 100" }
                 },
@@ -231,11 +231,21 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "file_path": { "type": "string", "description": "The absolute path to the file to write" },
+                    "file_path": { "type": "string", "description": "Path to the file to write. Can be absolute or relative to the current repository" },
                     "content": { "type": "string", "description": "The content to write to the file" },
                     "create_parents": { "type": "boolean", "description": "Create parent directories if they don't exist (default: true)" }
                 },
                 "required": ["file_path", "content"]
+            }),
+            is_required: false,
+        },
+        ToolDefinition {
+            name: "current_working_directory".to_string(),
+            description: "Returns the current working directory context. Shows the repository path if one is active, or the current system directory otherwise.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {},
+                "required": []
             }),
             is_required: false,
         },
