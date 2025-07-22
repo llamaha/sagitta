@@ -308,12 +308,12 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         // --- Search File ---
         ToolDefinition {
             name: "search_file".to_string(),
-            description: Some("Searches for files within a repository using a glob pattern.".to_string()),
+            description: Some("Searches for files within a repository using glob patterns. Patterns like '*.rs' search recursively by default. Use 'src/*.rs' to limit to a specific directory. Use '**/*.rs' for explicit recursive search.".to_string()),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "repositoryName": { "type": "string", "description": "Name of the repository to search within." },
-                    "pattern": { "type": "string", "description": "Glob pattern to search for (e.g., \"*.rs\")." },
+                    "pattern": { "type": "string", "description": "Glob pattern to search for. Examples: '*.rs' (all Rust files recursively), 'src/*.rs' (only in src/), '**/*.md' (all markdown files recursively), '*README*' (files with README in name)" },
                     "caseSensitive": { "type": "boolean", "description": "Perform case-sensitive matching (default: false)." }
                 },
                 "required": ["repositoryName", "pattern"]
@@ -515,7 +515,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         // --- Shell Execute ---
         ToolDefinition {
             name: "shell_execute".to_string(),
-            description: Some("Executes shell commands with mandatory output filtering. At least one filter (grep_pattern, head_lines, or tail_lines) must be specified to prevent excessive output.".to_string()),
+            description: Some("Executes shell commands. You MUST specify at least ONE output filter to prevent excessive output: use grep_pattern to filter by content, head_lines to limit to first N lines, or tail_lines for last N lines. Example: for 'ls -la' use head_lines=20. For logs use grep_pattern='ERROR' or tail_lines=50.".to_string()),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -527,9 +527,9 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                         "description": "Optional environment variables",
                         "additionalProperties": { "type": "string" }
                     },
-                    "grep_pattern": { "type": "string", "description": "Filter output to lines containing this pattern (applied to both stdout and stderr)" },
-                    "head_lines": { "type": "integer", "description": "Show only the first N lines of output" },
-                    "tail_lines": { "type": "integer", "description": "Show only the last N lines of output" }
+                    "grep_pattern": { "type": "string", "description": "Filter output to lines containing this pattern. Example: 'ERROR' to find error lines" },
+                    "head_lines": { "type": "integer", "description": "Show only the first N lines of output. Example: 20 for first 20 lines" },
+                    "tail_lines": { "type": "integer", "description": "Show only the last N lines of output. Example: 50 for last 50 lines" }
                 },
                 "required": ["command"],
                 "oneOf": [
@@ -551,13 +551,13 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         // --- Read File ---
         ToolDefinition {
             name: "read_file".to_string(),
-            description: Some("Reads content from a file with mandatory line range support. Maximum 400 lines can be read in one request.".to_string()),
+            description: Some("Reads a specific range of lines from a file. You MUST specify both start_line and end_line (1-based line numbers). Maximum 400 lines per request. Example: to read first 100 lines use start_line=1, end_line=100. DO NOT use 'limit' or 'offset' parameters - they don't exist.".to_string()),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "file_path": { "type": "string", "description": "The absolute path to the file to read" },
-                    "start_line": { "type": "integer", "description": "Line number to start reading from (1-based, inclusive)" },
-                    "end_line": { "type": "integer", "description": "Line number to stop reading at (1-based, inclusive). Maximum range is 400 lines." }
+                    "start_line": { "type": "integer", "description": "REQUIRED: Line number to start reading from (1-based, inclusive). Example: 1 for first line" },
+                    "end_line": { "type": "integer", "description": "REQUIRED: Line number to stop reading at (1-based, inclusive). Maximum range is 400 lines. Example: 100 to read up to line 100" }
                 },
                 "required": ["file_path", "start_line", "end_line"]
             }),

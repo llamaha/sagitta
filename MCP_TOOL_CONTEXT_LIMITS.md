@@ -135,3 +135,13 @@ Run tests with:
 ```bash
 cargo test --release --features cuda -p sagitta-mcp
 ```
+
+## Tool Description Updates
+
+To ensure AI assistants understand the new requirements, tool descriptions have been updated with:
+
+1. **read_file**: Clear examples showing start_line and end_line usage, explicit warning against using old parameters
+2. **shell_execute**: Examples for each filter type with common use cases
+3. **search_file**: Clarification about recursive search behavior by default
+
+These descriptions help prevent confusion when AI models try to use outdated parameter names or don't understand the requirements.
