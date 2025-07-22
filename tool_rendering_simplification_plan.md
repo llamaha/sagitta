@@ -44,6 +44,101 @@ Remove collapsing headers from tool results and replace with a simpler fixed-hei
    - `render_todo_output()`
    - `render_ping_output()`
 
+## Implementation Status
+
+### ✅ Phase 1: Create New Simplified Renderer - COMPLETED
+- Created `SimplifiedToolRenderer` struct in `simplified_tool_renderer.rs`
+- Fixed height of 400px with scroll areas
+- Line limit of 15 lines for text content
+- No collapsing header logic
+- Consistent padding/margins for all tools
+
+### ✅ Phase 2: Implement Core Rendering Logic - COMPLETED
+- Implemented main `render()` method
+- Created `render_header()` with tool name and inline params
+- Created `render_content_area()` with scroll area
+- Created `render_actions()` for action buttons
+- Helper methods: `get_inline_params()`, `get_status_indicator()`, `should_show_actions()`
+
+### ✅ Phase 3: Tool-Specific Renderers - COMPLETED
+- `render_file_content()` - File read with syntax highlighting and font size controls
+- `render_write_result()` - File write confirmations
+- `render_edit_result()` - Edit operation results
+- `render_shell_output()` - Terminal output in monospace
+- `render_search_results()` - Clickable search results
+- `render_todo_list()` - Todo items with status icons
+- `render_repository_info()` - Repository lists
+- `render_ping_result()` - Ping responses
+- `render_generic_content()` - Fallback for unknown tools
+
+### ✅ Phase 4: Update Rendering Pipeline - COMPLETED
+- Added `use_simplified_tool_rendering` to `AppState`
+- Updated function signatures to pass the flag
+- Created conditional wrapper functions
+- Added settings toggle in UI preferences
+
+### ✅ Phase 5: Side-by-Side Testing - COMPLETED
+- Feature flag works correctly
+- Toggle in settings enables/disables simplified rendering
+- Both rendering modes work without errors
+
+### ✅ Phase 5.5: UI Improvements - COMPLETED
+
+Based on user feedback, implemented the following improvements:
+
+1. **Fixed tool card width** - Limited to 900px max width instead of stretching full screen
+2. **Removed all icons/symbols** - Removed emoji and special characters that don't render correctly
+3. **Fixed adaptive height** - Cards now only use the height needed up to 800px max
+4. **Improved text alignment** - Added explicit left alignment for tool cards
+5. **Cleaned up status indicators** - Using text instead of symbols (e.g., "Success" instead of "✓")
+
+### 🚧 Phase 6: Cleanup Legacy Code - READY TO START
+
+#### Code to Remove (when fully migrated):
+1. **Collapsing Header Helper**
+   - [ ] Remove `crates/sagitta-code/src/gui/chat/view/collapsing_header_helper.rs`
+   - [ ] Remove imports and usage of `create_controlled_collapsing_header`
+   - [ ] Remove imports and usage of `get_tool_card_state`
+
+2. **Tool Card State Management**
+   - [ ] Remove `tool_cards_collapsed` from `AppState`
+   - [ ] Remove `tool_card_individual_states` from `AppState`
+   - [ ] Remove these parameters from all function signatures
+
+3. **Legacy Rendering Functions** (in view.rs)
+   - [ ] Remove the old `render_single_tool_call` implementation (keep wrapper)
+   - [ ] Remove the old `render_tool_card` implementation (keep wrapper)
+   - [ ] Remove `render_file_read_output`
+   - [ ] Remove `render_file_write_output` 
+   - [ ] Remove `render_search_output`
+   - [ ] Remove `render_search_output_legacy`
+   - [ ] Remove `render_repository_output`
+   - [ ] Remove `render_todo_output`
+   - [ ] Remove `render_ping_output`
+   - [ ] Remove `render_terminal_output`
+   - [ ] Remove `render_diff_output`
+
+4. **ToolResultRenderer Struct**
+   - [ ] Remove the old `ToolResultRenderer` struct and implementation
+   - [ ] Remove its usage in tool rendering
+
+5. **Helper Functions**
+   - [ ] Remove tool type checking functions if not used elsewhere
+   - [ ] Remove `FILE_READ_FONT_SIZES` thread local (moved to simplified renderer)
+
+#### Code to Keep:
+- The wrapper functions that switch between old/new rendering
+- The feature flag in `AppState`
+- The settings toggle
+- Tool mappings and syntax highlighting (used by both)
+
+#### Migration Strategy:
+1. Keep both implementations side-by-side temporarily
+2. Default to old rendering for stability
+3. Allow users to opt-in to simplified rendering
+4. After testing period, switch default to simplified
+5. Eventually remove old implementation entirely
+
 ## Implementation Plan
 
 ### Phase 1: Create New Simplified Renderer

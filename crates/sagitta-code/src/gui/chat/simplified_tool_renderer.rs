@@ -56,26 +56,29 @@ impl<'a> SimplifiedToolRenderer<'a> {
         // Limit the width of the tool card
         ui.set_max_width(Self::MAX_WIDTH);
         
-        Frame::NONE
-            .fill(app_theme.panel_background())
-            .stroke(Stroke::new(1.0, app_theme.border_color()))
-            .corner_radius(CornerRadius::same(4))
-            .inner_margin(Vec2::new(8.0, 8.0))
-            .show(ui, |ui| {
-                // 1. Render header
-                self.render_header(ui);
-                
-                ui.separator();
-                
-                // 2. Render content with scroll area
-                self.render_content_area(ui, &mut action);
-                
-                // 3. Render action buttons if applicable
-                if self.should_show_actions() {
+        // Use push_id to ensure unique IDs for nested components
+        ui.push_id(&self.unique_id, |ui| {
+            Frame::NONE
+                .fill(app_theme.panel_background())
+                .stroke(Stroke::new(1.0, app_theme.border_color()))
+                .corner_radius(CornerRadius::same(4))
+                .inner_margin(Vec2::new(8.0, 8.0))
+                .show(ui, |ui| {
+                    // 1. Render header
+                    self.render_header(ui);
+                    
                     ui.separator();
-                    self.render_actions(ui, &mut action);
-                }
-            });
+                    
+                    // 2. Render content with scroll area
+                    self.render_content_area(ui, &mut action);
+                    
+                    // 3. Render action buttons if applicable
+                    if self.should_show_actions() {
+                        ui.separator();
+                        self.render_actions(ui, &mut action);
+                    }
+                });
+        });
             
         action
     }
@@ -107,34 +110,35 @@ impl<'a> SimplifiedToolRenderer<'a> {
         // Calculate minimum height based on tool type
         let min_height = self.get_min_height_for_tool();
         
-        // Use a fixed max height instead of calculating from available space
-        let content_height = Self::MAX_HEIGHT;
+        // Use a reasonable max height
+        let available_height = ui.available_height();
+        let max_scroll_height = available_height.min(Self::MAX_HEIGHT).max(200.0); // Ensure at least 200px
         
+        // Use a simpler ScrollArea configuration
         ScrollArea::vertical()
-            .id_source(&self.unique_id)  // Unique ID to prevent scroll interference
-            .max_height(content_height)
-            .auto_shrink([false, false])  // Don't auto-shrink to maintain consistent size
-            .always_show_scroll(true)   // Always show scroll bar
+            .id_salt(&self.unique_id)  // Use unique ID to prevent scroll conflicts
+            .max_height(max_scroll_height)
+            .auto_shrink([false, false])  // Don't auto-shrink
             .show(ui, |ui| {
-                // Ensure the UI knows we might need more space than visible
-                ui.set_min_height(min_height);
-                ui.set_min_width(ui.available_width());
-                ui.add_space(Self::CONTENT_PADDING);
-                
-                // Delegate to specific renderer based on tool type
-                match self.tool_name {
-                    name if name.contains("read_file") || name == "Read" => self.render_file_content(ui),
-                    name if name.contains("write_file") || name == "Write" => self.render_write_result(ui),
-                    name if name.contains("search") || name.contains("query") => self.render_search_results(ui, action),
-                    name if name.contains("shell") || name.contains("bash") || name == "Bash" => self.render_shell_output(ui),
-                    name if name.contains("todo") => self.render_todo_list(ui),
-                    name if name.contains("repository") || name.contains("repo") => self.render_repository_info(ui),
-                    name if name.contains("edit_file") || name.contains("multi_edit") || name == "Edit" || name == "MultiEdit" => self.render_edit_result(ui),
-                    name if name.contains("ping") => self.render_ping_result(ui),
-                    _ => self.render_generic_content(ui),
-                }
-                
-                ui.add_space(Self::CONTENT_PADDING);
+                // Add content within a vertical layout to ensure proper sizing
+                ui.vertical(|ui| {
+                    ui.add_space(Self::CONTENT_PADDING);
+                    
+                    // Delegate to specific renderer based on tool type
+                    match self.tool_name {
+                        name if name.contains("read_file") || name == "Read" => self.render_file_content(ui),
+                        name if name.contains("write_file") || name == "Write" => self.render_write_result(ui),
+                        name if name.contains("search") || name.contains("query") => self.render_search_results(ui, action),
+                        name if name.contains("shell") || name.contains("bash") || name == "Bash" => self.render_shell_output(ui),
+                        name if name.contains("todo") => self.render_todo_list(ui),
+                        name if name.contains("repository") || name.contains("repo") => self.render_repository_info(ui),
+                        name if name.contains("edit_file") || name.contains("multi_edit") || name == "Edit" || name == "MultiEdit" => self.render_edit_result(ui),
+                        name if name.contains("ping") => self.render_ping_result(ui),
+                        _ => self.render_generic_content(ui),
+                    }
+                    
+                    ui.add_space(Self::CONTENT_PADDING);
+                });
             });
     }
     
@@ -312,8 +316,6 @@ impl<'a> SimplifiedToolRenderer<'a> {
                 .and_then(|path| path.split('.').last())
                 .unwrap_or("txt");
                 
-            // Don't truncate - show full content with scrollbar
-            
             // Get font size for this file
             let file_path_key = self.result.get("file_path")
                 .and_then(|v| v.as_str())
@@ -345,21 +347,31 @@ impl<'a> SimplifiedToolRenderer<'a> {
             ui.add_space(4.0);
             
             // Render with syntax highlighting - full content
-            // Wrap in a frame to ensure proper sizing
+            // The syntax highlighter will handle the content size
             Frame::NONE
                 .fill(self.app_theme.code_background())
                 .inner_margin(Vec2::new(8.0, 6.0))
                 .corner_radius(CornerRadius::same(4))
                 .stroke(Stroke::new(0.5, self.app_theme.border_color()))
                 .show(ui, |ui| {
+                    // Ensure we have enough width
+                    let width = ui.available_width();
+                    
                     render_syntax_highlighted_code_with_font_size(
                         ui,
                         content,
                         file_ext,
                         &self.app_theme.code_background(),
-                        ui.available_width(),
+                        width,
                         font_size,
                     );
+                    
+                    // Force a minimum height to ensure scrolling works
+                    let line_count = content.lines().count();
+                    if line_count > 10 {
+                        // For files with many lines, allocate extra space to trigger scrolling
+                        ui.allocate_space(Vec2::new(0.0, 0.0));
+                    }
                 });
         } else {
             ui.label("No content available");
