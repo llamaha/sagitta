@@ -110,16 +110,20 @@ impl<'a> SimplifiedToolRenderer<'a> {
         // Calculate minimum height based on tool type
         let min_height = self.get_min_height_for_tool();
         
-        // Use a reasonable max height
-        let available_height = ui.available_height();
-        let max_scroll_height = available_height.min(Self::MAX_HEIGHT).max(200.0); // Ensure at least 200px
+        // FIXED: Use consistent heights for all tool cards
+        // Don't use available_height which can vary - use fixed max height
+        let max_scroll_height = Self::MAX_HEIGHT;
         
         // Use a simpler ScrollArea configuration
         ScrollArea::vertical()
             .id_salt(&self.unique_id)  // Use unique ID to prevent scroll conflicts
             .max_height(max_scroll_height)
+            .min_scrolled_height(min_height)  // Ensure minimum height is respected
             .auto_shrink([false, false])  // Don't auto-shrink
             .show(ui, |ui| {
+                // Set consistent width for content
+                ui.set_max_width(Self::MAX_WIDTH - 20.0);
+                
                 // Add content within a vertical layout to ensure proper sizing
                 ui.vertical(|ui| {
                     ui.add_space(Self::CONTENT_PADDING);
@@ -366,12 +370,7 @@ impl<'a> SimplifiedToolRenderer<'a> {
                         font_size,
                     );
                     
-                    // Force a minimum height to ensure scrolling works
-                    let line_count = content.lines().count();
-                    if line_count > 10 {
-                        // For files with many lines, allocate extra space to trigger scrolling
-                        ui.allocate_space(Vec2::new(0.0, 0.0));
-                    }
+                    // Don't force any additional space - let the scroll area handle it
                 });
         } else {
             ui.label("No content available");
