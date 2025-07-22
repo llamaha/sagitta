@@ -53,6 +53,9 @@ impl<'a> SimplifiedToolRenderer<'a> {
         let app_theme = self.app_theme;
         
         // Outer frame for the entire tool result
+        // Limit the width of the tool card
+        ui.set_max_width(Self::MAX_WIDTH);
+        
         Frame::NONE
             .fill(app_theme.panel_background())
             .stroke(Stroke::new(1.0, app_theme.border_color()))
@@ -104,11 +107,17 @@ impl<'a> SimplifiedToolRenderer<'a> {
         // Calculate minimum height based on tool type
         let min_height = self.get_min_height_for_tool();
         
+        let available_rect = ui.available_rect_before_wrap();
+        let content_height = (available_rect.height() - Self::HEADER_HEIGHT - Self::ACTION_BAR_HEIGHT).min(Self::MAX_HEIGHT);
+        
         ScrollArea::vertical()
             .id_source(&self.unique_id)  // Unique ID to prevent scroll interference
-            .max_height(Self::MAX_HEIGHT)
+            .max_height(content_height)
             .min_scrolled_height(min_height)
             .auto_shrink([false, false])  // Don't auto-shrink to maintain consistent size
+            .enable_scrolling(true)  // Explicitly enable scrolling
+            .drag_to_scroll(true)    // Enable drag to scroll
+            .stick_to_bottom(false)  // Don't stick to bottom
             .show(ui, |ui| {
                 ui.add_space(Self::CONTENT_PADDING);
                 
