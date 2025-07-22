@@ -175,6 +175,374 @@ pub fn modern_chat_view_ui(ui: &mut egui::Ui, items: &[ChatItem], app_theme: App
     clicked_tool
 }
 
+/// A centralized renderer for tool results that ensures consistent spacing and layout
+struct ToolResultRenderer<'a> {
+    ui: &'a mut egui::Ui,
+    tool_name: &'a str,
+    result: &'a serde_json::Value,
+    app_theme: AppTheme,
+}
+
+impl<'a> ToolResultRenderer<'a> {
+    /// Render the tool result with consistent spacing for action buttons
+    fn render(self) -> Option<(String, String)> {
+        let mut action = None;
+        let ui = self.ui;
+        let tool_name = self.tool_name;
+        let result = self.result;
+        let app_theme = self.app_theme;
+        
+        // Check if this tool type needs special rendering without a group
+        let needs_group = !is_shell_command_result(tool_name, result) && 
+                         !is_code_change_result(tool_name, result);
+        
+        if needs_group {
+            // Render main content in a group for most tools
+            ui.group(|ui| {
+                Self::render_tool_content_static(ui, tool_name, result, app_theme, &mut action);
+            });
+        } else {
+            // For terminal output and diff output, render without group
+            Self::render_tool_content_static(ui, tool_name, result, app_theme, &mut action);
+        }
+        
+        // Render action buttons OUTSIDE the group with consistent spacing
+        if Self::should_show_actions_static(tool_name) {
+            ui.add_space(4.0); // Consistent small spacing
+            ui.horizontal(|ui| {
+                Self::render_action_buttons_static(ui, tool_name, result, app_theme, &mut action);
+            });
+        }
+        
+        action
+    }
+    
+    /// Render the actual tool content based on tool type (static version)
+    fn render_tool_content_static(ui: &mut egui::Ui, tool_name: &str, result: &serde_json::Value, app_theme: AppTheme, action: &mut Option<(String, String)>) {
+        match tool_name {
+            name if is_search_result(name, result) => {
+                Self::render_search_content_static(ui, result, app_theme, action);
+            }
+            name if is_file_read_result(name, result) => {
+                Self::render_file_read_content_static(ui, result, app_theme);
+            }
+            name if is_file_write_result(name, result) => {
+                Self::render_file_write_content_static(ui, result);
+            }
+            name if is_repository_result(name, result) => {
+                Self::render_repository_content_static(ui, result, app_theme);
+            }
+            name if is_todo_result(name, result) => {
+                Self::render_todo_content_static(ui, result, app_theme);
+            }
+            name if is_ping_result(name, result) => {
+                Self::render_ping_content_static(ui, result, app_theme);
+            }
+            name if is_shell_command_result(name, result) => {
+                render_terminal_output(ui, result, app_theme);
+            }
+            name if is_code_change_result(name, result) => {
+                render_diff_output(ui, result, app_theme);
+            }
+            _ => {
+                // Default: use markdown rendering for unknown tool types
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                
+                // Try to use the formatter for better presentation
+                let formatter = crate::gui::app::tool_formatting::ToolResultFormatter::new();
+                let tool_result = crate::agent::events::ToolResult::Success { output: result.to_string() };
+                let formatted_result = formatter.format_tool_result_for_preview(tool_name, &tool_result);
+                
+                // Use markdown rendering for formatted results
+                crate::gui::chat::view::COMMONMARK_CACHE.with(|cache| {
+                    let mut cache = cache.borrow_mut();
+                    let viewer = egui_commonmark::CommonMarkViewer::new();
+                    viewer.show(ui, &mut cache, &formatted_result);
+                });
+            }
+        }
+    }
+    
+    /// Determine if this tool type should show action buttons (static version)
+    fn should_show_actions_static(tool_name: &str) -> bool {
+        matches!(tool_name, 
+            "semantic_code_search" | "search_file" | "read_file" | 
+            "write_file" | "repository_list" | "repository_sync" | 
+            "repository_add" | "edit_file" | "multi_edit_file"
+        )
+    }
+    
+    /// Render action buttons like "View JSON" and tool-specific actions (static version)
+    fn render_action_buttons_static(ui: &mut egui::Ui, tool_name: &str, result: &serde_json::Value, app_theme: AppTheme, action: &mut Option<(String, String)>) {
+        // View JSON button (for most tools)
+        if Self::should_show_view_json_static(tool_name) {
+            if ui.link(egui::RichText::new("View JSON")
+                .color(app_theme.hint_text_color())
+                .small())
+                .clicked() 
+            {
+                let json_str = serde_json::to_string_pretty(result)
+                    .unwrap_or_else(|_| "Failed to serialize JSON".to_string());
+                *action = Some(("__VIEW_JSON__".to_string(), json_str));
+            }
+        }
+        
+        // Add spacing between buttons if there are multiple
+        if tool_name == "read_file" && Self::should_show_view_json_static(tool_name) {
+            ui.add_space(8.0);
+        }
+        
+        // Tool-specific action buttons
+        match tool_name {
+            "read_file" => Self::render_file_read_actions_static(ui, result, app_theme, action),
+            "write_file" => Self::render_file_write_actions_static(ui, result, app_theme, action),
+            _ => {}
+        }
+    }
+    
+    /// Determine if View JSON button should be shown (static version)
+    fn should_show_view_json_static(tool_name: &str) -> bool {
+        // Show for all tools except ping and simple status messages
+        !matches!(tool_name, "ping")
+    }
+    
+    // Content rendering methods (static versions)
+    fn render_search_content_static(ui: &mut egui::Ui, result: &serde_json::Value, app_theme: AppTheme, action: &mut Option<(String, String)>) {
+        // Search results display
+        if let Some(query) = result.get("queryText").and_then(|v| v.as_str()) {
+            ui.label(egui::RichText::new(format!("`{query}`")).color(app_theme.hint_text_color()).small());
+        }
+        
+        // Handle different search result formats
+        if let Some(results) = result.get("results").and_then(|v| v.as_array()) {
+            ui.label(egui::RichText::new(format!("Found {} results", results.len())).color(app_theme.success_color()).small());
+            ui.add_space(4.0);
+            
+            // Always use scroll area for consistent layout, but adjust height based on results
+            let max_height = if results.len() > 10 { 500.0 } else { 400.0 };
+            
+            egui::ScrollArea::vertical()
+                .max_height(max_height)
+                .auto_shrink([false, false]) // Don't auto-shrink to maintain consistent height
+                .show(ui, |ui| {
+                    for (i, result_item) in results.iter().enumerate() {
+                        if let Some(action_data) = render_search_result_item(ui, i, result_item, app_theme) {
+                            // Return the action immediately when a result is clicked
+                            log::debug!("Search result clicked: action_data = {:?}", action_data);
+                            *action = Some(action_data);
+                            break; // Exit the loop once we have an action
+                        }
+                    }
+                });
+        } else if let Some(matches) = result.get("matchingFiles").and_then(|v| v.as_array()) {
+            ui.label(egui::RichText::new(format!("Found {} files", matches.len())).color(app_theme.success_color()).small());
+            ui.add_space(4.0);
+            
+            for (i, file) in matches.iter().enumerate().take(10) {
+                if let Some(file_path) = file.as_str() {
+                    ui.label(egui::RichText::new(format!("{}. {}", i + 1, file_path)).color(app_theme.text_color()).small());
+                }
+            }
+            
+            if matches.len() > 10 {
+                ui.label(egui::RichText::new(format!("... and {} more", matches.len() - 10)).color(app_theme.hint_text_color()).small());
+            }
+        } else if result.get("sources").is_some() || result.get("answer").is_some() || result.get("response").is_some() {
+            // Web search results - use the formatter output which handles these properly
+            let formatter = crate::gui::app::tool_formatting::ToolResultFormatter::new();
+            let tool_result = crate::agent::events::ToolResult::Success { output: result.to_string() };
+            let formatted_result = formatter.format_tool_result_for_preview("web_search", &tool_result);
+            
+            // Use markdown rendering for the formatted result
+            crate::gui::chat::view::COMMONMARK_CACHE.with(|cache| {
+                let mut cache = cache.borrow_mut();
+                let viewer = egui_commonmark::CommonMarkViewer::new();
+                viewer.show(ui, &mut cache, &formatted_result);
+            });
+        } else {
+            // For any other search results, try to display whatever data we have
+            let has_content = result.as_object().map(|obj| !obj.is_empty()).unwrap_or(false);
+            
+            if has_content {
+                // Try using the formatter for generic web search results
+                let formatter = crate::gui::app::tool_formatting::ToolResultFormatter::new();
+                let tool_result = crate::agent::events::ToolResult::Success { output: result.to_string() };
+                let formatted_result = formatter.format_tool_result_for_preview("web_search", &tool_result);
+                
+                // Check if the formatter produced meaningful output (not just the fallback JSON)
+                if !formatted_result.starts_with("```json") {
+                    // Use the formatted result
+                    crate::gui::chat::view::COMMONMARK_CACHE.with(|cache| {
+                        let mut cache = cache.borrow_mut();
+                        let viewer = egui_commonmark::CommonMarkViewer::new();
+                        viewer.show(ui, &mut cache, &formatted_result);
+                    });
+                } else {
+                    // Show a more informative message with the actual data
+                    ui.label(egui::RichText::new("Search completed").color(app_theme.success_color()).small());
+                    ui.add_space(4.0);
+                    
+                    // Try to extract and display any meaningful fields
+                    if let Some(obj) = result.as_object() {
+                        for (key, value) in obj.iter().take(5) {
+                            let value_str = match value {
+                                serde_json::Value::String(s) => s.clone(),
+                                serde_json::Value::Number(n) => n.to_string(),
+                                serde_json::Value::Bool(b) => b.to_string(),
+                                serde_json::Value::Array(arr) => format!("[{} items]", arr.len()),
+                                serde_json::Value::Object(obj) => format!("{{...}} ({} fields)", obj.len()),
+                                serde_json::Value::Null => "null".to_string(),
+                            };
+                            ui.label(egui::RichText::new(format!("{}: {}", key, value_str)).color(app_theme.text_color()).small());
+                        }
+                        if obj.len() > 5 {
+                            ui.label(egui::RichText::new(format!("... and {} more fields", obj.len() - 5)).color(app_theme.hint_text_color()).small());
+                        }
+                    }
+                }
+            } else {
+                ui.label(egui::RichText::new("No results found").color(app_theme.hint_text_color()).small());
+            }
+        }
+    }
+    
+    fn render_file_read_content_static(
+        ui: &mut egui::Ui,
+        result: &serde_json::Value,
+        app_theme: AppTheme,
+    ) -> bool {
+        if let Some(file_path) = result.get("filePath").and_then(|v| v.as_str()) {
+            if let Some(content) = result.get("content").and_then(|v| v.as_str()) {
+                // Extract file extension for syntax highlighting
+                let language = file_path
+                    .split('.')
+                    .last()
+                    .unwrap_or("txt");
+                
+                render_syntax_highlighted_code_with_font_size(
+                    ui,
+                    content,
+                    language,
+                    &app_theme.code_background(),
+                    ui.available_width(),
+                    12.0
+                );
+                return true;
+            }
+        }
+        false
+    }
+    
+    fn render_file_write_content_static(
+        ui: &mut egui::Ui,
+        result: &serde_json::Value,
+    ) -> bool {
+        if let Some(file_path) = result.get("filePath").and_then(|v| v.as_str()) {
+            if let Some(written) = result.get("written").and_then(|v| v.as_bool()) {
+                if written {
+                    ui.label(format!("✓ Successfully wrote to {}", file_path));
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    
+    fn render_repository_content_static(
+        ui: &mut egui::Ui,
+        result: &serde_json::Value,
+        app_theme: AppTheme,
+    ) {
+        // Handle list repositories
+        if let Some(repos) = result.get("repositories").and_then(|v| v.as_array()) {
+            if repos.is_empty() {
+                ui.label("No repositories configured");
+            } else {
+                for repo in repos {
+                    if let Some(name) = repo.get("name").and_then(|v| v.as_str()) {
+                        ui.label(format!("• {}", name));
+                    }
+                }
+            }
+            return;
+        }
+        
+        // Handle repository add/sync/remove results
+        if let Some(status) = result.get("status").and_then(|v| v.as_str()) {
+            ui.label(status);
+            return;
+        }
+    }
+    
+    fn render_todo_content_static(
+        ui: &mut egui::Ui,
+        result: &serde_json::Value,
+        app_theme: AppTheme,
+    ) {
+        if let Some(todos) = result.get("todos").and_then(|v| v.as_array()) {
+            if todos.is_empty() {
+                ui.label("No todos");
+            } else {
+                for todo in todos {
+                    if let Some(content) = todo.get("content").and_then(|v| v.as_str()) {
+                        if let Some(status) = todo.get("status").and_then(|v| v.as_str()) {
+                            let emoji = match status {
+                                "completed" => "✅",
+                                "in_progress" => "🔄",
+                                _ => "⭕",
+                            };
+                            ui.label(format!("{} {}", emoji, content));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    fn render_ping_content_static(
+        ui: &mut egui::Ui,
+        result: &serde_json::Value,
+        app_theme: AppTheme,
+    ) {
+        if let Some(status) = result.get("status").and_then(|v| v.as_str()) {
+            ui.label(format!("Server status: {}", status));
+        }
+    }
+    
+    fn render_file_read_actions_static(
+        ui: &mut egui::Ui,
+        result: &serde_json::Value,
+        app_theme: AppTheme,
+        action: &mut Option<(String, String)>,
+    ) {
+        if let Some(file_path) = result.get("filePath").and_then(|v| v.as_str()) {
+            if ui.link(egui::RichText::new("Open in Editor")
+                .color(app_theme.hint_text_color())
+                .small())
+                .clicked() 
+            {
+                *action = Some(("__OPEN_FILE__".to_string(), file_path.to_string()));
+            }
+        }
+    }
+    
+    fn render_file_write_actions_static(
+        ui: &mut egui::Ui,
+        result: &serde_json::Value,
+        app_theme: AppTheme,
+        action: &mut Option<(String, String)>,
+    ) {
+        if let Some(file_path) = result.get("filePath").and_then(|v| v.as_str()) {
+            if ui.link(egui::RichText::new("Open in Editor")
+                .color(app_theme.hint_text_color())
+                .small())
+                .clicked() 
+            {
+                *action = Some(("__OPEN_FILE__".to_string(), file_path.to_string()));
+            }
+        }
+    }
+}
 
 /// Render a single tool call as a compact, clickable card
 pub fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, _copy_state: &mut CopyButtonState, tool_cards_collapsed: bool, tool_card_individual_states: &mut HashMap<String, bool>) -> Option<(String, String)> {
@@ -384,31 +752,18 @@ pub fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Co
                                 .show(ui, |ui| {
                                     ui.set_max_width(tool_card_width - 24.0);
                                     
-                                    // Check tool type for special rendering (skip for errors)
-                                    if !matches!(tool_call.status, MessageStatus::Error(_)) && is_shell_command_result(&tool_call.name, &result_json) {
-                                        render_terminal_output(ui, &result_json, app_theme);
-                                    } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_code_change_result(&tool_call.name, &result_json) {
-                                        render_diff_output(ui, &result_json, app_theme);
-                                    } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_file_read_result(&tool_call.name, &result_json) {
-                                        if let Some((key, value)) = render_file_read_output(ui, &result_json, app_theme) {
-                                            clicked_tool_result = Some((key, value));
+                                    // Use ToolResultRenderer for consistent rendering
+                                    if !matches!(tool_call.status, MessageStatus::Error(_)) {
+                                        if let Some(action) = (ToolResultRenderer {
+                                            ui,
+                                            tool_name: &tool_call.name,
+                                            result: &result_json,
+                                            app_theme,
+                                        }).render() {
+                                            clicked_tool_result = Some(action);
                                         }
-                                    } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_file_write_result(&tool_call.name, &result_json) {
-                                        if let Some((key, value)) = render_file_write_output(ui, &result_json, app_theme) {
-                                            clicked_tool_result = Some((key, value));
-                                        }
-                                    } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_search_result(&tool_call.name, &result_json) {
-                                        if let Some((key, value)) = render_search_output(ui, &result_json, app_theme) {
-                                            clicked_tool_result = Some((key, value));
-                                        }
-                                    } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_repository_result(&tool_call.name, &result_json) {
-                                        render_repository_output(ui, &result_json, app_theme);
-                                    } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_todo_result(&tool_call.name, &result_json) {
-                                        render_todo_output(ui, &result_json, app_theme);
-                                    } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_ping_result(&tool_call.name, &result_json) {
-                                        render_ping_output(ui, &result_json, app_theme);
                                     } else {
-                                        // Default rendering with markdown support
+                                        // Error status - use default markdown rendering
                                         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                                         
                                         // Use markdown rendering for formatted results
@@ -423,31 +778,18 @@ pub fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Co
                             // Small content - render directly without scroll area
                             ui.set_max_width(tool_card_width - 24.0);
                             
-                            // Check tool type for special rendering (skip for errors)
-                            if !matches!(tool_call.status, MessageStatus::Error(_)) && is_shell_command_result(&tool_call.name, &result_json) {
-                                render_terminal_output(ui, &result_json, app_theme);
-                            } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_code_change_result(&tool_call.name, &result_json) {
-                                render_diff_output(ui, &result_json, app_theme);
-                            } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_file_read_result(&tool_call.name, &result_json) {
-                                if let Some((key, value)) = render_file_read_output(ui, &result_json, app_theme) {
-                                    clicked_tool_result = Some((key, value));
+                            // Use ToolResultRenderer for consistent rendering
+                            if !matches!(tool_call.status, MessageStatus::Error(_)) {
+                                if let Some(action) = (ToolResultRenderer {
+                                    ui,
+                                    tool_name: &tool_call.name,
+                                    result: &result_json,
+                                    app_theme,
+                                }).render() {
+                                    clicked_tool_result = Some(action);
                                 }
-                            } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_file_write_result(&tool_call.name, &result_json) {
-                                if let Some((key, value)) = render_file_write_output(ui, &result_json, app_theme) {
-                                    clicked_tool_result = Some((key, value));
-                                }
-                            } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_search_result(&tool_call.name, &result_json) {
-                                if let Some((key, value)) = render_search_output(ui, &result_json, app_theme) {
-                                    clicked_tool_result = Some((key, value));
-                                }
-                            } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_repository_result(&tool_call.name, &result_json) {
-                                render_repository_output(ui, &result_json, app_theme);
-                            } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_todo_result(&tool_call.name, &result_json) {
-                                render_todo_output(ui, &result_json, app_theme);
-                            } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_ping_result(&tool_call.name, &result_json) {
-                                render_ping_output(ui, &result_json, app_theme);
                             } else {
-                                // Default rendering with markdown support
+                                // Error status - use default markdown rendering
                                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                                 
                                 // Use markdown rendering for formatted results
@@ -490,7 +832,7 @@ fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Co
         if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state, tool_cards_collapsed, tool_card_individual_states) {
             clicked_tool_result = Some(tool_info);
         }
-        ui.add_space(8.0); // Spacing between tool cards
+        ui.add_space(4.0); // Consistent spacing between tool cards
     }
     
     clicked_tool_result
@@ -2396,6 +2738,18 @@ fn render_file_write_output(ui: &mut egui::Ui, result: &serde_json::Value, app_t
 
 /// Render search results with nice formatting
 fn render_search_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme: AppTheme) -> Option<(String, String)> {
+    // NOTE: This function is kept for backward compatibility but the content has been moved to ToolResultRenderer
+    // Use ToolResultRenderer directly instead of this function
+    (ToolResultRenderer {
+        ui,
+        tool_name: "search", // Generic search name
+        result,
+        app_theme,
+    }).render()
+}
+
+// Legacy function - content moved to ToolResultRenderer
+fn render_search_output_legacy(ui: &mut egui::Ui, result: &serde_json::Value, app_theme: AppTheme) -> Option<(String, String)> {
     let mut action = None;
     
     ui.group(|ui| {
