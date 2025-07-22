@@ -207,12 +207,7 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
                     "head_lines": { "type": "integer", "description": "Show only the first N lines of output. Example: 20 for first 20 lines" },
                     "tail_lines": { "type": "integer", "description": "Show only the last N lines of output. Example: 50 for last 50 lines" }
                 },
-                "required": ["command"],
-                "oneOf": [
-                    { "required": ["grep_pattern"] },
-                    { "required": ["head_lines"] },
-                    { "required": ["tail_lines"] }
-                ]
+                "required": ["command"]
             }),
             is_required: false,
         },
