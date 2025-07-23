@@ -362,30 +362,65 @@ impl<'a> SimplifiedToolRenderer<'a> {
     
     /// File write result renderer
     fn render_write_result(&self, ui: &mut Ui) {
-        let mut info_parts = Vec::new();
-        
-        if let Some(bytes_written) = self.result.get("bytes_written").and_then(|v| v.as_i64()) {
-            info_parts.push(format!("{} bytes written", bytes_written));
-        }
-        
-        if let Some(created) = self.result.get("created").and_then(|v| v.as_bool()) {
-            if created {
-                info_parts.push("File created".to_string());
-            } else {
-                info_parts.push("File updated".to_string());
+        // Check if we have diff/changes to display
+        if let Some(diff_content) = self.result.get("diff")
+            .or_else(|| self.result.get("changes"))
+            .and_then(|v| v.as_str()) {
+            // Show file info first
+            let mut info_parts = Vec::new();
+            
+            if let Some(bytes_written) = self.result.get("bytes_written").and_then(|v| v.as_i64()) {
+                info_parts.push(format!("{} bytes written", bytes_written));
             }
-        }
-        
-        if !info_parts.is_empty() {
-            ui.label(RichText::new(info_parts.join(" | ")).color(self.app_theme.success_color()));
+            
+            if let Some(created) = self.result.get("created").and_then(|v| v.as_bool()) {
+                if created {
+                    info_parts.push("File created".to_string());
+                } else {
+                    info_parts.push("File updated".to_string());
+                }
+            }
+            
+            if !info_parts.is_empty() {
+                ui.label(RichText::new(info_parts.join(" | ")).color(self.app_theme.success_color()));
+                ui.add_space(4.0);
+            }
+            
+            // Render the diff
+            self.render_diff_content(ui, diff_content);
         } else {
-            ui.label(RichText::new("File written successfully").color(self.app_theme.success_color()));
+            // No diff, show basic info
+            let mut info_parts = Vec::new();
+            
+            if let Some(bytes_written) = self.result.get("bytes_written").and_then(|v| v.as_i64()) {
+                info_parts.push(format!("{} bytes written", bytes_written));
+            }
+            
+            if let Some(created) = self.result.get("created").and_then(|v| v.as_bool()) {
+                if created {
+                    info_parts.push("File created".to_string());
+                } else {
+                    info_parts.push("File updated".to_string());
+                }
+            }
+            
+            if !info_parts.is_empty() {
+                ui.label(RichText::new(info_parts.join(" | ")).color(self.app_theme.success_color()));
+            } else {
+                ui.label(RichText::new("File written successfully").color(self.app_theme.success_color()));
+            }
         }
     }
     
     /// Edit result renderer
     fn render_edit_result(&self, ui: &mut Ui) {
-        if let Some(success) = self.result.get("success").and_then(|v| v.as_bool()) {
+        // Check if we have diff/changes to display
+        if let Some(diff_content) = self.result.get("diff")
+            .or_else(|| self.result.get("changes"))
+            .and_then(|v| v.as_str()) {
+            // Render the diff
+            self.render_diff_content(ui, diff_content);
+        } else if let Some(success) = self.result.get("success").and_then(|v| v.as_bool()) {
             if success {
                 ui.label(RichText::new("Edit applied successfully").color(self.app_theme.success_color()));
                 
@@ -590,6 +625,33 @@ impl<'a> SimplifiedToolRenderer<'a> {
             ui.label(message);
         } else {
             ui.label("Repository operation completed");
+        }
+    }
+    
+    /// Render diff content with syntax highlighting
+    fn render_diff_content(&self, ui: &mut Ui, diff_content: &str) {
+        // Render diff lines with appropriate colors
+        for line in diff_content.lines() {
+            let (text_color, bg_color) = if line.starts_with('+') && !line.starts_with("+++") {
+                (self.app_theme.diff_added_text(), Some(self.app_theme.diff_added_bg()))
+            } else if line.starts_with('-') && !line.starts_with("---") {
+                (self.app_theme.diff_removed_text(), Some(self.app_theme.diff_removed_bg()))
+            } else if line.starts_with("@@") {
+                (self.app_theme.accent_color(), None)
+            } else {
+                (self.app_theme.text_color(), None)
+            };
+            
+            if let Some(bg) = bg_color {
+                Frame::NONE
+                    .fill(bg)
+                    .inner_margin(Vec2::new(4.0, 2.0))
+                    .show(ui, |ui| {
+                        ui.label(RichText::new(line).monospace().color(text_color));
+                    });
+            } else {
+                ui.label(RichText::new(line).monospace().color(text_color));
+            }
         }
     }
     
