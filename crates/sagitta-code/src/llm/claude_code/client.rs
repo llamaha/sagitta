@@ -432,6 +432,11 @@ impl LlmClient for ClaudeCodeClient {
         log::warn!("CLAUDE_CODE: Grounding not supported by Claude Code");
         self.generate_stream_with_thinking(messages, tools, thinking_config).await
     }
+    
+    async fn cancel(&self) {
+        // Delegate to our cancel implementation
+        ClaudeCodeClient::cancel(self).await;
+    }
 }
 
 impl ClaudeCodeClient {

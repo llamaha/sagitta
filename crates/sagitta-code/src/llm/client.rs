@@ -260,5 +260,11 @@ pub trait LlmClient: Send + Sync {
         thinking_config: &ThinkingConfig,
         grounding_config: &GroundingConfig,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError>;
+    
+    /// Cancel any ongoing operations (default implementation does nothing)
+    async fn cancel(&self) {
+        // Default implementation does nothing
+        // Clients that support cancellation should override this
+    }
 }
 
