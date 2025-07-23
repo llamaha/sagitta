@@ -43,7 +43,7 @@ impl ConversationSidebar {
             .frame(panel_frame)
             .default_width(default_width)
             .min_width(min_width)
-            .resizable(true)
+            .resizable(false)
             .show(ctx, |ui| {
                 ScrollArea::vertical()
                     .show(ui, |ui| {

@@ -174,7 +174,7 @@ pub fn format_tool_parameters_for_inline(tool_name: &str, args: &serde_json::Val
         "read_file" | "Read" | "write_file" | "Write" | "repository_view_file" => {
             if let Some(path) = args.get("file_path").or_else(|| args.get("path")).and_then(|v| v.as_str()) {
                 // Truncate long paths but keep the filename
-                let truncated = if path.len() > 40 {
+                let truncated = if path.len() > 80 {
                     if let Some(filename) = path.split('/').last() {
                         format!(".../{}", filename)
                     } else {
@@ -190,7 +190,7 @@ pub fn format_tool_parameters_for_inline(tool_name: &str, args: &serde_json::Val
         // Edit operations - show file and summary
         "edit_file" | "Edit" | "multi_edit_file" | "MultiEdit" => {
             if let Some(path) = args.get("file_path").or_else(|| args.get("path")).and_then(|v| v.as_str()) {
-                let truncated = if path.len() > 30 {
+                let truncated = if path.len() > 60 {
                     if let Some(filename) = path.split('/').last() {
                         format!(".../{}", filename)
                     } else {

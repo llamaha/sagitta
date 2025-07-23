@@ -271,6 +271,14 @@ impl<'a> SimplifiedToolRenderer<'a> {
                 if let Some(p) = add_str_param(params_source, "path", None) { params.push(p); }
                 if let Some(p) = add_str_param(params_source, "include", None) { params.push(p); }
             }
+            "ripgrep" => {
+                if let Some(p) = add_str_param(params_source, "pattern", None) { params.push(p); }
+                if let Some(p) = add_str_param(params_source, "filePattern", Some("files")) { params.push(p); }
+                if let Some(p) = add_str_param(params_source, "repositoryName", Some("repo")) { params.push(p); }
+                if let Some(p) = add_bool_param(params_source, "caseSensitive", Some("case-sensitive")) { params.push(p); }
+                if let Some(p) = add_num_param(params_source, "contextLines", Some("context")) { params.push(p); }
+                if let Some(p) = add_num_param(params_source, "maxResults", Some("max")) { params.push(p); }
+            }
             
             // File operations
             "read_file" | "Read" => {
@@ -365,7 +373,7 @@ impl<'a> SimplifiedToolRenderer<'a> {
         match key {
             // Truncate long paths but keep the filename
             "file_path" | "path" | "local_path" | "notebook_path" | "working_directory" => {
-                if value.len() > 40 {
+                if value.len() > 80 {
                     if let Some(filename) = value.split('/').last() {
                         if filename.len() < 20 {
                             format!(".../{}", filename)
