@@ -46,10 +46,7 @@ impl ConversationSidebar {
             .resizable(true)
             .show(ctx, |ui| {
                 ScrollArea::vertical()
-                    .auto_shrink(false)
-                    .max_height(ui.available_height())
                     .show(ui, |ui| {
-                        ui.set_min_width(ui.available_width());
                         
                         self.render_header(ui, app_state, theme);
                         
