@@ -92,10 +92,12 @@ impl<'a> SimplifiedToolRenderer<'a> {
             let name = get_human_friendly_tool_name(self.tool_name);
             ui.label(RichText::new(name).strong());
             
-            // Add key parameters inline (e.g., filename for file operations)
-            if let Some(params) = self.get_inline_params() {
+            // Add all relevant parameters inline
+            if let Some(params) = self.get_all_inline_params() {
                 ui.separator();
-                ui.label(RichText::new(params).small().color(self.app_theme.hint_text_color()));
+                ui.label(RichText::new(params)
+                    .size(self.app_theme.small_font_size())
+                    .color(self.app_theme.hint_text_color()));
             }
             
             // Status indicator on the right
@@ -143,6 +145,218 @@ impl<'a> SimplifiedToolRenderer<'a> {
                     ui.add_space(Self::CONTENT_PADDING);
                 });
             });
+    }
+    
+    /// Extract all relevant parameters to show inline in header
+    fn get_all_inline_params(&self) -> Option<String> {
+        let mut params = Vec::new();
+        
+        // Helper to add a parameter if it exists
+        let mut add_param = |key: &str, display_key: Option<&str>| {
+            if let Some(value) = self.result.get(key).and_then(|v| v.as_str()) {
+                if !value.is_empty() {
+                    let display = display_key.unwrap_or(key);
+                    params.push(format!("{}: {}", display, self.format_param_value(key, value)));
+                }
+            }
+        };
+        
+        // Helper to add a number parameter if it exists
+        let mut add_number_param = |key: &str, display_key: Option<&str>| {
+            if let Some(value) = self.result.get(key).and_then(|v| v.as_i64()) {
+                let display = display_key.unwrap_or(key);
+                params.push(format!("{}: {}", display, value));
+            }
+        };
+        
+        // Helper to add a boolean parameter if it exists and is true
+        let mut add_bool_param = |key: &str, display_key: Option<&str>| {
+            if let Some(value) = self.result.get(key).and_then(|v| v.as_bool()) {
+                if value {
+                    let display = display_key.unwrap_or(key);
+                    params.push(format!("{}: {}", display, value));
+                }
+            }
+        };
+        
+        match self.tool_name {
+            // Repository operations
+            "repository_add" => {
+                add_param("name", None);
+                add_param("url", None);
+                add_param("local_path", Some("path"));
+                add_param("branch", None);
+                add_param("ssh_key", None);
+                // Skip ssh_passphrase for security
+            }
+            "repository_sync" => {
+                add_param("name", None);
+            }
+            "repository_switch_branch" => {
+                add_param("repositoryName", Some("repo"));
+                add_param("branchName", Some("branch"));
+                add_param("targetRef", Some("ref"));
+                add_bool_param("force", None);
+                add_bool_param("noAutoResync", Some("no-resync"));
+            }
+            "repository_list_branches" => {
+                add_param("repositoryName", Some("repo"));
+                add_param("filter", None);
+                add_bool_param("includeRemote", Some("remote"));
+                add_bool_param("includeTags", Some("tags"));
+                add_number_param("limit", None);
+            }
+            
+            // Search operations
+            "semantic_code_search" | "Search" | "query" => {
+                add_param("repositoryName", Some("repo"));
+                add_param("queryText", Some("query"));
+                add_param("elementType", Some("type"));
+                add_param("lang", None);
+                add_number_param("limit", None);
+                add_param("branchName", Some("branch"));
+            }
+            "search_file" | "Glob" => {
+                add_param("repositoryName", Some("repo"));
+                add_param("pattern", None);
+                add_bool_param("caseSensitive", Some("case-sensitive"));
+            }
+            "grep" | "Grep" => {
+                add_param("pattern", None);
+                add_param("path", None);
+                add_param("include", None);
+            }
+            
+            // File operations
+            "read_file" | "Read" => {
+                add_param("file_path", Some("path"));
+                add_number_param("start_line", Some("from"));
+                add_number_param("end_line", Some("to"));
+            }
+            "write_file" | "Write" => {
+                add_param("file_path", Some("path"));
+                add_bool_param("create_parents", Some("create-dirs"));
+            }
+            "edit_file" | "Edit" => {
+                add_param("file_path", Some("path"));
+                add_bool_param("replace_all", Some("replace-all"));
+            }
+            "multi_edit_file" | "MultiEdit" => {
+                add_param("file_path", Some("path"));
+                // Show edit count
+                if let Some(edits) = self.result.get("edits").and_then(|v| v.as_array()) {
+                    params.push(format!("edits: {}", edits.len()));
+                }
+            }
+            
+            // Shell operations
+            "shell_execute" | "Bash" => {
+                add_param("command", Some("cmd"));
+                add_param("working_directory", Some("dir"));
+                add_number_param("timeout_ms", Some("timeout"));
+                add_param("grep_pattern", Some("grep"));
+                add_number_param("head_lines", Some("head"));
+                add_number_param("tail_lines", Some("tail"));
+            }
+            
+            // Web operations
+            "web_search" | "WebSearch" => {
+                add_param("query", None);
+                // Show allowed/blocked domains if present
+                if let Some(allowed) = self.result.get("allowed_domains").and_then(|v| v.as_array()) {
+                    if !allowed.is_empty() {
+                        params.push(format!("allowed: {}", allowed.len()));
+                    }
+                }
+                if let Some(blocked) = self.result.get("blocked_domains").and_then(|v| v.as_array()) {
+                    if !blocked.is_empty() {
+                        params.push(format!("blocked: {}", blocked.len()));
+                    }
+                }
+            }
+            "web_fetch" | "WebFetch" => {
+                add_param("url", None);
+                add_param("prompt", None);
+            }
+            
+            // Other tools
+            "NotebookRead" => {
+                add_param("notebook_path", Some("path"));
+                add_param("cell_id", Some("cell"));
+            }
+            "NotebookEdit" => {
+                add_param("notebook_path", Some("path"));
+                add_param("cell_id", Some("cell"));
+                add_param("cell_type", Some("type"));
+                add_param("edit_mode", Some("mode"));
+            }
+            "LS" => {
+                add_param("path", None);
+                if let Some(ignore) = self.result.get("ignore").and_then(|v| v.as_array()) {
+                    if !ignore.is_empty() {
+                        params.push(format!("ignore: {} patterns", ignore.len()));
+                    }
+                }
+            }
+            "Task" => {
+                add_param("description", None);
+                // Don't show prompt as it's too long
+            }
+            
+            _ => {
+                // For unknown tools, don't show parameters
+            }
+        }
+        
+        if params.is_empty() {
+            None
+        } else {
+            Some(params.join(", "))
+        }
+    }
+    
+    /// Format parameter values for display
+    fn format_param_value(&self, key: &str, value: &str) -> String {
+        match key {
+            // Truncate long paths but keep the filename
+            "file_path" | "path" | "local_path" | "notebook_path" | "working_directory" => {
+                if value.len() > 40 {
+                    if let Some(filename) = value.split('/').last() {
+                        if filename.len() < 20 {
+                            format!(".../{}", filename)
+                        } else {
+                            format!("...{}", &value[value.len().saturating_sub(30)..])
+                        }
+                    } else {
+                        format!("...{}", &value[value.len().saturating_sub(30)..])
+                    }
+                } else {
+                    value.to_string()
+                }
+            }
+            // Truncate long queries/commands
+            "queryText" | "query" | "command" | "prompt" | "pattern" => {
+                if value.len() > 50 {
+                    format!("{}...", &value[..47])
+                } else {
+                    value.to_string()
+                }
+            }
+            // Show just domain for URLs
+            "url" => {
+                if let Some(start) = value.find("://") {
+                    if let Some(domain_end) = value[start+3..].find('/') {
+                        value[start+3..start+3+domain_end].to_string()
+                    } else {
+                        value[start+3..].to_string()
+                    }
+                } else {
+                    value.to_string()
+                }
+            }
+            // Default: show as-is
+            _ => value.to_string()
+        }
     }
     
     /// Extract key parameters to show in header
