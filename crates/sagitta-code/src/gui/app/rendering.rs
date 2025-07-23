@@ -1945,7 +1945,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
         .show(ctx, |ui| {
             // Force UI to use the full available width and reset text wrap settings
             ui.set_min_width(ui.available_width());
-            ui.with_layout(egui::Layout::top_down_justified(egui::Align::Center), |ui| {
+            ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
                 // Show sync status warning if repository is out of sync
                 if let Some(sync_status) = app.git_controls.get_current_sync_status() {
                     if sync_status.is_out_of_sync {
