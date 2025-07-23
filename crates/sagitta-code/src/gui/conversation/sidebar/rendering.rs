@@ -24,14 +24,8 @@ impl ConversationSidebar {
         // Auto-save state periodically
         self.auto_save_state(sagitta_config.clone());
         
-        let panel_frame = Frame {
-            inner_margin: Margin::same(8),
-            outer_margin: Margin::same(0),
-            corner_radius: egui::CornerRadius::same(4),
-            fill: theme.panel_background(),
-            stroke: egui::Stroke::NONE,
-            ..Default::default()
-        };
+        // Use the same frame style as other panels for consistency
+        let panel_frame = theme.side_panel_frame();
 
         // Get screen size for responsive constraints
         let screen_size = ctx.screen_rect().size();
