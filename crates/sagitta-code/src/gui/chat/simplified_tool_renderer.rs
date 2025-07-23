@@ -617,7 +617,9 @@ impl<'a> SimplifiedToolRenderer<'a> {
                         ui.label(RichText::new(clean_name).strong());
                         
                         if let Some(branch) = repo.get("branch").and_then(|v| v.as_str()) {
-                            ui.label(RichText::new(format!("[{}]", branch)).small().color(self.app_theme.hint_text_color()));
+                            if !branch.is_empty() {
+                                ui.label(RichText::new(format!("[{}]", branch)).small().color(self.app_theme.hint_text_color()));
+                            }
                         }
                     });
                     
