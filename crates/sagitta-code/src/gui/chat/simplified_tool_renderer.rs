@@ -106,10 +106,20 @@ impl<'a> SimplifiedToolRenderer<'a> {
             
             // Add all relevant parameters inline
             if let Some(params) = self.get_all_inline_params() {
+                tracing::debug!("Rendering inline params for {} (cleaned: {}): {}", 
+                    self.tool_name, 
+                    get_human_friendly_tool_name(self.tool_name), 
+                    params
+                );
                 ui.separator();
                 ui.label(RichText::new(params)
                     .size(self.app_theme.small_font_size())
                     .color(self.app_theme.hint_text_color()));
+            } else {
+                tracing::debug!("No inline params for tool: {} (input_params: {:?})", 
+                    self.tool_name,
+                    self.input_params
+                );
             }
             
             // Status indicator on the right
@@ -201,7 +211,23 @@ impl<'a> SimplifiedToolRenderer<'a> {
             }
         };
         
-        match self.tool_name {
+        // Clean up mcp__ prefix if present to get the actual tool name
+        let clean_tool_name = if self.tool_name.starts_with("mcp__") {
+            // Extract just the tool name part after the second underscore
+            if let Some(parts) = self.tool_name.strip_prefix("mcp__") {
+                if let Some((_provider, actual_tool)) = parts.split_once("__") {
+                    actual_tool
+                } else {
+                    parts
+                }
+            } else {
+                self.tool_name
+            }
+        } else {
+            self.tool_name
+        };
+        
+        match clean_tool_name {
             // Repository operations
             "repository_add" => {
                 if let Some(p) = add_str_param(params_source, "name", None) { params.push(p); }
