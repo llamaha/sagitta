@@ -337,14 +337,11 @@ impl Agent {
         let token = self.cancellation_token.lock().await;
         token.cancel();
         
-        // TODO: Re-enable when claude_code module is implemented in Phase 2
-        /*
         // Also cancel the LLM client if it's ClaudeCodeClient
         if let Some(claude_client) = self.llm_client.as_any().downcast_ref::<crate::llm::claude_code::client::ClaudeCodeClient>() {
             claude_client.cancel();
             log::info!("Cancelled ClaudeCodeClient stream");
         }
-        */
         
         // Also request loop break for consistency
         self.request_loop_break().await;
