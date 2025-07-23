@@ -86,6 +86,23 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
             is_required: false,
         },
         ToolDefinition {
+            name: "ripgrep".to_string(),
+            description: "Performs recursive regex search for content within repository files. Similar to ripgrep (rg) command. Searches file contents, not just filenames.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "pattern": { "type": "string", "description": "Regular expression pattern to search for in file contents" },
+                    "file_pattern": { "type": "string", "description": "Optional glob pattern to filter files (e.g., '*.rs' for Rust files)" },
+                    "repository_name": { "type": "string", "description": "Optional repository name to search within. If not specified, searches the current repository" },
+                    "case_sensitive": { "type": "boolean", "description": "Whether the search should be case-sensitive (default: false)" },
+                    "context_lines": { "type": "integer", "description": "Number of context lines to show before and after matches (default: 2)" },
+                    "max_results": { "type": "integer", "description": "Maximum number of matches to return (default: 100)" }
+                },
+                "required": ["pattern"]
+            }),
+            is_required: false,
+        },
+        ToolDefinition {
             name: "repository_switch_branch".to_string(),
             description: "Switches to a different branch or Git reference in a repository with automatic resync.".to_string(),
             parameters: json!({

@@ -105,7 +105,7 @@ fn test_no_tools_removed_regression() {
     }
     
     // Minimum expected tool count (should not decrease)
-    let min_tool_count = 14; // Adjusted for disabled branch tools
+    let min_tool_count = 14; // Includes ripgrep tool
     
     assert!(
         tools.len() >= min_tool_count,

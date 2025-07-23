@@ -30,6 +30,7 @@ pub fn get_human_friendly_tool_name(tool_name: &str) -> String {
         "semantic_code_search" | "Search" | "query" => "Semantic Code Search".to_string(),
         "repository_search" => "Search Repository".to_string(),
         "grep" | "Grep" => "Grep".to_string(),
+        "ripgrep" => "Ripgrep".to_string(),
         
         // Repository operations
         "repository_add" => "Add Repository".to_string(),
@@ -111,6 +112,7 @@ pub fn get_tool_icon(tool_name: &str) -> &'static str {
         "semantic_code_search" | "Search" | "query" => "[S]",
         "repository_search" => "[?]",
         "grep" | "Grep" => "[G]",
+        "ripgrep" => "[RG]",
         
         // Repository operations
         "repository_add" => "+",
@@ -250,6 +252,37 @@ pub fn format_tool_parameters_for_inline(tool_name: &str, args: &serde_json::Val
                     pattern.to_string()
                 };
                 params.push(("pattern".to_string(), truncated));
+            }
+        },
+        
+        "ripgrep" => {
+            // Show pattern first
+            if let Some(pattern) = args.get("pattern").and_then(|v| v.as_str()) {
+                let truncated = if pattern.len() > 25 {
+                    format!("{}...", &pattern[..22])
+                } else {
+                    pattern.to_string()
+                };
+                params.push(("pattern".to_string(), truncated));
+            }
+            
+            // Show file pattern if present
+            if let Some(file_pattern) = args.get("file_pattern").and_then(|v| v.as_str()) {
+                let truncated = if file_pattern.len() > 15 {
+                    format!("{}...", &file_pattern[..12])
+                } else {
+                    file_pattern.to_string()
+                };
+                params.push(("files".to_string(), truncated));
+            }
+            
+            // Show repository if present
+            if let Some(repo) = args.get("repository_name").and_then(|v| v.as_str()) {
+                if repo.len() > 15 {
+                    params.push(("repo".to_string(), format!("{}...", &repo[..12])));
+                } else {
+                    params.push(("repo".to_string(), repo.to_string()));
+                }
             }
         },
         

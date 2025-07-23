@@ -140,6 +140,96 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
                 }
             }
             // clicked_tool_info already cleared by take()
+        } else if tool_name == "__OPEN_SEARCH_RESULT__" {
+            // Handle semantic search result display
+            if let Ok(result) = serde_json::from_str::<serde_json::Value>(&tool_args) {
+                // Format the search result for human-readable display
+                let mut formatted_output = String::new();
+                
+                // File path and line range
+                if let Some(file_path) = result.get("filePath").and_then(|v| v.as_str()) {
+                    formatted_output.push_str(&format!("File: {}\n", file_path));
+                }
+                
+                if let (Some(start), Some(end)) = (
+                    result.get("startLine").and_then(|v| v.as_i64()),
+                    result.get("endLine").and_then(|v| v.as_i64())
+                ) {
+                    formatted_output.push_str(&format!("Lines: {}-{}\n", start, end));
+                }
+                
+                // Context info
+                if let Some(context_info) = result.get("contextInfo") {
+                    if let Some(desc) = context_info.get("description").and_then(|v| v.as_str()) {
+                        formatted_output.push_str(&format!("\nDescription: {}\n", desc));
+                    }
+                    
+                    if let Some(identifiers) = context_info.get("identifiers").and_then(|v| v.as_array()) {
+                        if !identifiers.is_empty() {
+                            formatted_output.push_str(&format!("\nIdentifiers ({}):\n", identifiers.len()));
+                            for id in identifiers {
+                                if let Some(id_str) = id.as_str() {
+                                    formatted_output.push_str(&format!("  - {}\n", id_str));
+                                }
+                            }
+                        }
+                    }
+                    
+                    if let Some(calls) = context_info.get("outgoing_calls").and_then(|v| v.as_array()) {
+                        if !calls.is_empty() {
+                            formatted_output.push_str(&format!("\nOutgoing Calls ({}):\n", calls.len()));
+                            for call in calls {
+                                if let Some(call_str) = call.as_str() {
+                                    formatted_output.push_str(&format!("  - {}\n", call_str));
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Code snippet
+                if let Some(snippet) = result.get("snippet").and_then(|v| v.as_str()) {
+                    formatted_output.push_str(&format!("\nCode:\n{}\n", snippet));
+                }
+                
+                // Read the actual file content for the lines
+                if let Some(file_path) = result.get("filePath").and_then(|v| v.as_str()) {
+                    let start_line = result.get("startLine").and_then(|v| v.as_i64()).unwrap_or(1) as usize;
+                    let end_line = result.get("endLine").and_then(|v| v.as_i64()).unwrap_or(start_line as i64 + 10) as usize;
+                    
+                    let path = std::path::Path::new(file_path);
+                    let full_path = if path.is_absolute() {
+                        path.to_path_buf()
+                    } else {
+                        std::env::current_dir().unwrap_or_default().join(path)
+                    };
+                    
+                    if let Ok(content) = std::fs::read_to_string(&full_path) {
+                        let lines: Vec<&str> = content.lines().collect();
+                        let snippet_start = start_line.saturating_sub(1).max(0);
+                        let snippet_end = end_line.min(lines.len());
+                        
+                        if formatted_output.contains("\nCode:\n") {
+                            // Already have snippet, don't add another
+                        } else {
+                            formatted_output.push_str("\nCode:\n");
+                            for i in snippet_start..snippet_end {
+                                if i < lines.len() {
+                                    formatted_output.push_str(&format!("{:>4}: {}\n", i + 1, lines[i]));
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Set up modal to display the formatted result
+                app.state.file_content_modal_data = Some((
+                    result.get("filePath").and_then(|v| v.as_str()).unwrap_or("Search Result").to_string(),
+                    formatted_output
+                ));
+                app.state.show_file_content_modal = true;
+            }
+            // clicked_tool_info already cleared by take()
         } else if tool_name == "__READ_FULL_FILE__" {
             // Handle full file read request
             if let Ok(file_data) = serde_json::from_str::<serde_json::Value>(&tool_args) {

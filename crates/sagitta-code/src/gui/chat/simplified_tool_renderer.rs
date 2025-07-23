@@ -709,16 +709,8 @@ impl<'a> SimplifiedToolRenderer<'a> {
                 ui.horizontal(|ui| {
                     ui.label(format!("{}.", i + 1));
                     if ui.link(file_path).clicked() {
-                        // Return file path and line number as action
-                        let mut action_data = serde_json::json!({
-                            "file_path": file_path
-                        });
-                        
-                        if let Some(line) = result.get("startLine").and_then(|v| v.as_i64()) {
-                            action_data["start_line"] = serde_json::json!(line);
-                        }
-                        
-                        *action = Some(("__OPEN_FILE__".to_string(), action_data.to_string()));
+                        // Return the full result information as action
+                        *action = Some(("__OPEN_SEARCH_RESULT__".to_string(), result.to_string()));
                     }
                 });
                 
@@ -736,12 +728,55 @@ impl<'a> SimplifiedToolRenderer<'a> {
                 if let Some(lang) = result.get("language").and_then(|v| v.as_str()) {
                     metadata.push(format!("[{}]", lang));
                 }
+                
+                // Add line range
+                let start_line = result.get("startLine").and_then(|v| v.as_i64());
+                let end_line = result.get("endLine").and_then(|v| v.as_i64());
+                if let (Some(start), Some(end)) = (start_line, end_line) {
+                    if start == end {
+                        metadata.push(format!("Line {}", start));
+                    } else {
+                        metadata.push(format!("Lines {}-{}", start, end));
+                    }
+                }
+                
                 if let Some(score) = result.get("score").and_then(|v| v.as_f64()) {
                     metadata.push(format!("Score: {:.2}", score));
                 }
                 
                 if !metadata.is_empty() {
                     ui.label(RichText::new(metadata.join(" • ")).small().color(self.app_theme.hint_text_color()));
+                }
+                
+                // Show contextInfo if available
+                if let Some(context_info) = result.get("contextInfo") {
+                    // Show description if available
+                    if let Some(desc) = context_info.get("description").and_then(|v| v.as_str()) {
+                        ui.label(RichText::new(format!("  {}", desc))
+                            .small()
+                            .color(self.app_theme.hint_text_color()));
+                    }
+                    
+                    // Show identifiers and outgoing calls counts
+                    let mut context_metadata = Vec::new();
+                    
+                    if let Some(identifiers) = context_info.get("identifiers").and_then(|v| v.as_array()) {
+                        if !identifiers.is_empty() {
+                            context_metadata.push(format!("{} identifiers", identifiers.len()));
+                        }
+                    }
+                    
+                    if let Some(calls) = context_info.get("outgoing_calls").and_then(|v| v.as_array()) {
+                        if !calls.is_empty() {
+                            context_metadata.push(format!("{} calls", calls.len()));
+                        }
+                    }
+                    
+                    if !context_metadata.is_empty() {
+                        ui.label(RichText::new(format!("  {}", context_metadata.join(" • ")))
+                            .small()
+                            .color(self.app_theme.hint_text_color()));
+                    }
                 }
                 
                 ui.add_space(4.0);

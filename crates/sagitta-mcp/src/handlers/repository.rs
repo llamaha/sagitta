@@ -724,22 +724,38 @@ pub async fn handle_repository_search_file(
             }
         })?;
     
-    // Apply hard limit to prevent excessive results
-    const MAX_SEARCH_RESULTS: usize = 1000;
-    let truncated = matching_paths.len() > MAX_SEARCH_RESULTS;
-    if truncated {
-        log::warn!("Search returned {} files, truncating to {}", 
-            matching_paths.len(), 
-            MAX_SEARCH_RESULTS
-        );
-        matching_paths.truncate(MAX_SEARCH_RESULTS);
+    // Check file count before processing
+    const MAX_SEARCH_RESULTS: usize = 500;
+    if matching_paths.len() > MAX_SEARCH_RESULTS {
+        return Err(ErrorObject {
+            code: error_codes::INVALID_REQUEST,
+            message: format!(
+                "Too many results: {} files found (limit: {}). Try with a more specific pattern. Examples: 'src/*.rs' instead of '*.rs', 'test_*.py' instead of '*.py'",
+                matching_paths.len(),
+                MAX_SEARCH_RESULTS
+            ),
+            data: None,
+        });
     }
 
     // Convert PathBufs to Strings for JSON response
-    let matching_files_str = matching_paths
+    let matching_files_str: Vec<String> = matching_paths
         .into_iter()
         .map(|p| p.to_string_lossy().to_string())
         .collect();
+
+    // Check total output size
+    let total_size: usize = matching_files_str.iter().map(|s| s.len() + 1).sum(); // +1 for newline
+    if total_size > 5000 {
+        return Err(ErrorObject {
+            code: error_codes::INVALID_REQUEST,
+            message: format!(
+                "Output too large: {} characters (limit: 5000). Try with a more specific pattern.",
+                total_size
+            ),
+            data: None,
+        });
+    }
 
     Ok(RepositorySearchFileResult { matching_files: matching_files_str })
 }
@@ -884,6 +900,36 @@ pub async fn handle_repository_ripgrep(
                 });
             }
         }
+    }
+    
+    // Calculate total content size
+    let mut total_content_size = 0;
+    for match_item in &matches {
+        total_content_size += match_item.line_content.len();
+        if let Some(ref before) = match_item.before_context {
+            for line in before {
+                total_content_size += line.len() + 1; // +1 for newline
+            }
+        }
+        if let Some(ref after) = match_item.after_context {
+            for line in after {
+                total_content_size += line.len() + 1; // +1 for newline
+            }
+        }
+    }
+    
+    // Check if content exceeds limit
+    if total_content_size > 5000 {
+        return Err(ErrorObject {
+            code: error_codes::INVALID_REQUEST,
+            message: format!(
+                "Output too large: {} characters (limit: 5000). Found {} matches across {} files. Try with stricter filters: more specific pattern, file_pattern (e.g., '*.rs'), or lower max_results.",
+                total_content_size,
+                total_matches,
+                files_matched.len()
+            ),
+            data: None,
+        });
     }
     
     Ok(RepositoryRipgrepResult {
