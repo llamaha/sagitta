@@ -94,20 +94,21 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
         //         Err(e) => Err(e),
         //     }
         // }
-        "repository_switch_branch" => {
-            let switch_params: RepositorySwitchBranchParams = deserialize_value(arguments, tool_name)?;
-             match handle_repository_switch_branch(switch_params, config, qdrant_client, None).await {
-                Ok(res) => result_to_call_result(res),
-                Err(e) => Err(e),
-            }
-        }
-        "repository_list_branches" => {
-            let list_branches_params: RepositoryListBranchesParams = deserialize_value(arguments, tool_name)?;
-             match handle_repository_list_branches(list_branches_params, config, None).await {
-                Ok(res) => result_to_call_result(res),
-                Err(e) => Err(e),
-            }
-        }
+        // DISABLED: Reducing scope for stability
+        // "repository_switch_branch" => {
+        //     let switch_params: RepositorySwitchBranchParams = deserialize_value(arguments, tool_name)?;
+        //      match handle_repository_switch_branch(switch_params, config, qdrant_client, None).await {
+        //         Ok(res) => result_to_call_result(res),
+        //         Err(e) => Err(e),
+        //     }
+        // }
+        // "repository_list_branches" => {
+        //     let list_branches_params: RepositoryListBranchesParams = deserialize_value(arguments, tool_name)?;
+        //      match handle_repository_list_branches(list_branches_params, config, None).await {
+        //         Ok(res) => result_to_call_result(res),
+        //         Err(e) => Err(e),
+        //     }
+        // }
         "todo_read" => {
             let todo_read_params: TodoReadParams = deserialize_value(arguments, tool_name)?;
             match handle_todo_read(todo_read_params, config, qdrant_client, None).await {
@@ -157,13 +158,14 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
                 Err(e) => Err(e),
             }
         }
-        "current_working_directory" => {
-            let cwd_params: CurrentWorkingDirectoryParams = deserialize_value(arguments, tool_name)?;
-            match handle_current_working_directory(cwd_params, config, qdrant_client, None).await {
-                Ok(res) => result_to_call_result(res),
-                Err(e) => Err(e),
-            }
-        }
+        // DISABLED: Reducing scope for stability
+        // "current_working_directory" => {
+        //     let cwd_params: CurrentWorkingDirectoryParams = deserialize_value(arguments, tool_name)?;
+        //     match handle_current_working_directory(cwd_params, config, qdrant_client, None).await {
+        //         Ok(res) => result_to_call_result(res),
+        //         Err(e) => Err(e),
+        //     }
+        // }
         _ => Err(ErrorObject {
             code: error_codes::METHOD_NOT_FOUND,
             message: format!("Tool '{tool_name}' not found or not callable via tools/call"),
@@ -362,52 +364,53 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         //         open_world_hint: Some(false),
         //     }),
         // },
-        // --- Repository Switch Branch ---
-        ToolDefinition {
-            name: "repository_switch_branch".to_string(),
-            description: Some("Switches to a different branch or Git reference in a repository with automatic resync.".to_string()),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "repositoryName": { "type": "string", "description": "Name of the repository to switch branches in." },
-                    "branchName": { "type": "string", "description": "Target branch name to switch to. Either this or targetRef must be provided, but not both." },
-                    "targetRef": { "type": "string", "description": "Optional specific Git ref (tag, commit hash, branch name) to check out. If provided, this ref will be checked out instead of branchName. Supports any valid git reference including tags, commits, and remote branches." },
-                    "force": { "type": "boolean", "description": "Force switch even with uncommitted changes (default: false)." },
-                    "noAutoResync": { "type": "boolean", "description": "Disable automatic resync after branch switch (default: false)." }
-                },
-                "required": ["repositoryName"]
-            }),
-             annotations: Some(ToolAnnotations {
-                title: Some("Switch Repository Branch/Ref".to_string()),
-                read_only_hint: Some(false),
-                destructive_hint: Some(false), // Changes state but doesn't delete data
-                idempotent_hint: Some(true), // Switching to the same branch/ref is safe
-                open_world_hint: Some(false),
-            }),
-        },
-        // --- Repository List Branches ---
-        ToolDefinition {
-            name: "repository_list_branches".to_string(),
-            description: Some("Lists branches and references in a repository with optional filtering. Use filters to avoid overwhelming output in large repositories.".to_string()),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "repositoryName": { "type": "string", "description": "Name of the repository to list branches for." },
-                    "filter": { "type": "string", "description": "Optional: Filter pattern for branch/ref names (e.g., 'feature*', 'v1.*', 'main'). Supports glob patterns." },
-                    "includeRemote": { "type": "boolean", "description": "Include remote branches (default: true)." },
-                    "includeTags": { "type": "boolean", "description": "Include tags (default: true)." },
-                    "limit": { "type": "integer", "description": "Maximum number of results to return (default: 50, max: 200)." }
-                },
-                "required": ["repositoryName"]
-            }),
-             annotations: Some(ToolAnnotations {
-                title: Some("List Repository Branches".to_string()),
-                read_only_hint: Some(true),
-                destructive_hint: Some(false),
-                idempotent_hint: Some(true),
-                open_world_hint: Some(false),
-            }),
-        },
+        // DISABLED: Reducing scope for stability
+        // // --- Repository Switch Branch ---
+        // ToolDefinition {
+        //     name: "repository_switch_branch".to_string(),
+        //     description: Some("Switches to a different branch or Git reference in a repository with automatic resync.".to_string()),
+        //     input_schema: json!({
+        //         "type": "object",
+        //         "properties": {
+        //             "repositoryName": { "type": "string", "description": "Name of the repository to switch branches in." },
+        //             "branchName": { "type": "string", "description": "Target branch name to switch to. Either this or targetRef must be provided, but not both." },
+        //             "targetRef": { "type": "string", "description": "Optional specific Git ref (tag, commit hash, branch name) to check out. If provided, this ref will be checked out instead of branchName. Supports any valid git reference including tags, commits, and remote branches." },
+        //             "force": { "type": "boolean", "description": "Force switch even with uncommitted changes (default: false)." },
+        //             "noAutoResync": { "type": "boolean", "description": "Disable automatic resync after branch switch (default: false)." }
+        //         },
+        //         "required": ["repositoryName"]
+        //     }),
+        //      annotations: Some(ToolAnnotations {
+        //         title: Some("Switch Repository Branch/Ref".to_string()),
+        //         read_only_hint: Some(false),
+        //         destructive_hint: Some(false), // Changes state but doesn't delete data
+        //         idempotent_hint: Some(true), // Switching to the same branch/ref is safe
+        //         open_world_hint: Some(false),
+        //     }),
+        // },
+        // // --- Repository List Branches ---
+        // ToolDefinition {
+        //     name: "repository_list_branches".to_string(),
+        //     description: Some("Lists branches and references in a repository with optional filtering. Use filters to avoid overwhelming output in large repositories.".to_string()),
+        //     input_schema: json!({
+        //         "type": "object",
+        //         "properties": {
+        //             "repositoryName": { "type": "string", "description": "Name of the repository to list branches for." },
+        //             "filter": { "type": "string", "description": "Optional: Filter pattern for branch/ref names (e.g., 'feature*', 'v1.*', 'main'). Supports glob patterns." },
+        //             "includeRemote": { "type": "boolean", "description": "Include remote branches (default: true)." },
+        //             "includeTags": { "type": "boolean", "description": "Include tags (default: true)." },
+        //             "limit": { "type": "integer", "description": "Maximum number of results to return (default: 50, max: 200)." }
+        //         },
+        //         "required": ["repositoryName"]
+        //     }),
+        //      annotations: Some(ToolAnnotations {
+        //         title: Some("List Repository Branches".to_string()),
+        //         read_only_hint: Some(true),
+        //         destructive_hint: Some(false),
+        //         idempotent_hint: Some(true),
+        //         open_world_hint: Some(false),
+        //     }),
+        // },
         
         // --- Todo Read ---
         ToolDefinition {
@@ -426,23 +429,24 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         
-        // --- Current Working Directory ---
-        ToolDefinition {
-            name: "current_working_directory".to_string(),
-            description: Some("Returns the current working directory context. Shows the repository path if one is active, or the current system directory otherwise.".to_string()),
-            input_schema: json!({
-                "type": "object",
-                "properties": {},
-                "required": []
-            }),
-            annotations: Some(ToolAnnotations {
-                title: Some("Current Working Directory".to_string()),
-                read_only_hint: Some(true),
-                destructive_hint: Some(false),
-                idempotent_hint: Some(true),
-                open_world_hint: Some(false),
-            }),
-        },
+        // DISABLED: Reducing scope for stability
+        // // --- Current Working Directory ---
+        // ToolDefinition {
+        //     name: "current_working_directory".to_string(),
+        //     description: Some("Returns the current working directory context. Shows the repository path if one is active, or the current system directory otherwise.".to_string()),
+        //     input_schema: json!({
+        //         "type": "object",
+        //         "properties": {},
+        //         "required": []
+        //     }),
+        //     annotations: Some(ToolAnnotations {
+        //         title: Some("Current Working Directory".to_string()),
+        //         read_only_hint: Some(true),
+        //         destructive_hint: Some(false),
+        //         idempotent_hint: Some(true),
+        //         open_world_hint: Some(false),
+        //     }),
+        // },
 
         // --- Todo Write ---
         ToolDefinition {
@@ -625,80 +629,81 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_switch_branch_tool_is_exposed() {
-        let tools = get_tool_definitions();
-        
-        // Find the switch branch tool
-        let switch_branch_tool = tools.iter()
-            .find(|tool| tool.name == "repository_switch_branch")
-            .expect("repository_switch_branch tool should be defined");
-        
-        // Verify the tool has proper description
-        assert!(switch_branch_tool.description.is_some());
-        assert!(switch_branch_tool.description.as_ref().unwrap().contains("branch"));
-        
-        // Verify the tool has proper input schema
-        let schema = &switch_branch_tool.input_schema;
-        assert_eq!(schema["type"], "object");
-        assert!(schema["properties"]["repositoryName"].is_object());
-        assert!(schema["properties"]["branchName"].is_object());
-        assert!(schema["properties"]["targetRef"].is_object());
-        
-        // Verify required fields
-        assert!(schema["required"].as_array().unwrap().contains(&serde_json::Value::String("repositoryName".to_string())));
-        
-        // Verify annotations
-        assert!(switch_branch_tool.annotations.is_some());
-        let annotations = switch_branch_tool.annotations.as_ref().unwrap();
-        assert_eq!(annotations.read_only_hint, Some(false));
-        assert_eq!(annotations.destructive_hint, Some(false));
-        assert_eq!(annotations.idempotent_hint, Some(true));
-    }
+    // DISABLED: These tests are for tools we disabled
+    // #[test]
+    // fn test_switch_branch_tool_is_exposed() {
+    //     let tools = get_tool_definitions();
+    //     
+    //     // Find the switch branch tool
+    //     let switch_branch_tool = tools.iter()
+    //         .find(|tool| tool.name == "repository_switch_branch")
+    //         .expect("repository_switch_branch tool should be defined");
+    //     
+    //     // Verify the tool has proper description
+    //     assert!(switch_branch_tool.description.is_some());
+    //     assert!(switch_branch_tool.description.as_ref().unwrap().contains("branch"));
+    //     
+    //     // Verify the tool has proper input schema
+    //     let schema = &switch_branch_tool.input_schema;
+    //     assert_eq!(schema["type"], "object");
+    //     assert!(schema["properties"]["repositoryName"].is_object());
+    //     assert!(schema["properties"]["branchName"].is_object());
+    //     assert!(schema["properties"]["targetRef"].is_object());
+    //     
+    //     // Verify required fields
+    //     assert!(schema["required"].as_array().unwrap().contains(&serde_json::Value::String("repositoryName".to_string())));
+    //     
+    //     // Verify annotations
+    //     assert!(switch_branch_tool.annotations.is_some());
+    //     let annotations = switch_branch_tool.annotations.as_ref().unwrap();
+    //     assert_eq!(annotations.read_only_hint, Some(false));
+    //     assert_eq!(annotations.destructive_hint, Some(false));
+    //     assert_eq!(annotations.idempotent_hint, Some(true));
+    // }
 
-    #[test]
-    fn test_debug_branch_tool_json_size() {
-        let tools = get_tool_definitions();
-        
-        // Find the problematic tools
-        let switch_branch_tool = tools.iter()
-            .find(|tool| tool.name == "repository_switch_branch")
-            .expect("repository_switch_branch tool should be defined");
-            
-        let list_branches_tool = tools.iter()
-            .find(|tool| tool.name == "repository_list_branches")
-            .expect("repository_list_branches tool should be defined");
-        
-        // Serialize to JSON to see actual size and content
-        let switch_json = serde_json::to_string_pretty(switch_branch_tool).unwrap();
-        let list_json = serde_json::to_string_pretty(list_branches_tool).unwrap();
-        
-        println!("=== SWITCH BRANCH TOOL JSON ({} chars) ===", switch_json.len());
-        println!("{}", switch_json);
-        println!("\n=== LIST BRANCHES TOOL JSON ({} chars) ===", list_json.len());
-        println!("{}", list_json);
-        
-        // Check for specific problematic patterns
-        if switch_json.contains("oneOf") {
-            println!("\n⚠️  SWITCH BRANCH TOOL CONTAINS 'oneOf' SCHEMA CONSTRAINT");
-        }
-        
-        if switch_json.len() > 2000 {
-            println!("\n⚠️  SWITCH BRANCH TOOL JSON IS VERY LARGE: {} characters", switch_json.len());
-        }
-        
-        // Check description lengths
-        let switch_desc = switch_branch_tool.description.as_ref().unwrap();
-        let list_desc = list_branches_tool.description.as_ref().unwrap();
-        
-        println!("\n=== DESCRIPTION LENGTHS ===");
-        println!("Switch branch: {} characters", switch_desc.len());
-        println!("List branches: {} characters", list_desc.len());
-        
-        if switch_desc.len() > 200 {
-            println!("⚠️  SWITCH BRANCH DESCRIPTION IS VERY LONG");
-        }
-    }
+    // #[test]
+    // fn test_debug_branch_tool_json_size() {
+    //     let tools = get_tool_definitions();
+    //     
+    //     // Find the problematic tools
+    //     let switch_branch_tool = tools.iter()
+    //         .find(|tool| tool.name == "repository_switch_branch")
+    //         .expect("repository_switch_branch tool should be defined");
+    //         
+    //     let list_branches_tool = tools.iter()
+    //         .find(|tool| tool.name == "repository_list_branches")
+    //         .expect("repository_list_branches tool should be defined");
+    //     
+    //     // Serialize to JSON to see actual size and content
+    //     let switch_json = serde_json::to_string_pretty(switch_branch_tool).unwrap();
+    //     let list_json = serde_json::to_string_pretty(list_branches_tool).unwrap();
+    //     
+    //     println!("=== SWITCH BRANCH TOOL JSON ({} chars) ===", switch_json.len());
+    //     println!("{}", switch_json);
+    //     println!("\n=== LIST BRANCHES TOOL JSON ({} chars) ===", list_json.len());
+    //     println!("{}", list_json);
+    //     
+    //     // Check for specific problematic patterns
+    //     if switch_json.contains("oneOf") {
+    //         println!("\n⚠️  SWITCH BRANCH TOOL CONTAINS 'oneOf' SCHEMA CONSTRAINT");
+    //     }
+    //     
+    //     if switch_json.len() > 2000 {
+    //         println!("\n⚠️  SWITCH BRANCH TOOL JSON IS VERY LARGE: {} characters", switch_json.len());
+    //     }
+    //     
+    //     // Check description lengths
+    //     let switch_desc = switch_branch_tool.description.as_ref().unwrap();
+    //     let list_desc = list_branches_tool.description.as_ref().unwrap();
+    //     
+    //     println!("\n=== DESCRIPTION LENGTHS ===");
+    //     println!("Switch branch: {} characters", switch_desc.len());
+    //     println!("List branches: {} characters", list_desc.len());
+    //     
+    //     if switch_desc.len() > 200 {
+    //         println!("⚠️  SWITCH BRANCH DESCRIPTION IS VERY LONG");
+    //     }
+    // }
 
     #[test]
     fn test_all_expected_tools_are_exposed() {
@@ -714,8 +719,8 @@ mod tests {
             "semantic_code_search",
             "search_file",
             // "repository_map", // DISABLED - consumes too many tokens
-            "repository_switch_branch",
-            "repository_list_branches",
+            // "repository_switch_branch", // DISABLED
+            // "repository_list_branches", // DISABLED
             "todo_read",
             "todo_write",
             "edit_file",

@@ -284,7 +284,7 @@ async fn handle_read_file_inner(params: ReadFileParams) -> Result<ReadFileResult
     }
     
     // Get file metadata with timeout
-    let metadata = read_metadata_with_timeout(&params.file_path).await?;
+    let metadata = read_metadata_with_timeout(file_path.to_str().unwrap_or(&params.file_path)).await?;
     let file_size = metadata.len();
     
     // File size check no longer needed since we always require line ranges
@@ -790,9 +790,15 @@ mod tests {
         fs::create_dir(&repo_dir).await.unwrap();
         
         // Create a file in the repo directory
-        let file_path = repo_dir.join("test.txt");
+        let file_path = repo_dir.join("repo_context_test.txt");
         let test_content = "Repository context test file";
         fs::write(&file_path, test_content).await.unwrap();
+        
+        // Verify file was created
+        assert!(file_path.exists(), "Test file should exist at {:?}", file_path);
+        
+        // Small delay to ensure file system has synced
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         
         // Set up the repository context file
         let config_dir = dirs::config_dir().unwrap();
@@ -802,9 +808,13 @@ mod tests {
         let context_file = sagitta_config_dir.join("current_repository.txt");
         fs::write(&context_file, repo_dir.to_str().unwrap()).await.unwrap();
         
+        // Verify context file was created with correct content
+        let context_content = fs::read_to_string(&context_file).await.unwrap();
+        assert_eq!(context_content.trim(), repo_dir.to_str().unwrap(), "Context file should contain correct repo path");
+        
         // Test with relative path - should use repository context
         let params = ReadFileParams {
-            file_path: "test.txt".to_string(),
+            file_path: "repo_context_test.txt".to_string(),
             start_line: 1,
             end_line: 10,
         };
@@ -813,7 +823,10 @@ mod tests {
         let client = create_mock_qdrant();
         
         let result = handle_read_file(params, config, client, None).await;
-        assert!(result.is_ok());
+        match &result {
+            Err(e) => panic!("Read file failed: {}", e.message),
+            Ok(_) => {}
+        }
         
         let file_result = result.unwrap();
         assert_eq!(file_result.content, test_content);
@@ -831,7 +844,7 @@ mod tests {
         std::env::set_current_dir(temp_dir.path()).unwrap();
         
         let test_content = "No repository context test file";
-        fs::write("test.txt", test_content).await.unwrap();
+        fs::write("no_context_test.txt", test_content).await.unwrap();
         
         // Make sure no repository context exists
         let config_dir = dirs::config_dir().unwrap();
@@ -840,7 +853,7 @@ mod tests {
         
         // Test with relative path - should use current directory
         let params = ReadFileParams {
-            file_path: "test.txt".to_string(),
+            file_path: "no_context_test.txt".to_string(),
             start_line: 1,
             end_line: 10,
         };
@@ -849,7 +862,10 @@ mod tests {
         let client = create_mock_qdrant();
         
         let result = handle_read_file(params, config, client, None).await;
-        assert!(result.is_ok());
+        match &result {
+            Err(e) => panic!("Read file failed: {}", e.message),
+            Ok(_) => {}
+        }
         
         let file_result = result.unwrap();
         assert_eq!(file_result.content, test_content);

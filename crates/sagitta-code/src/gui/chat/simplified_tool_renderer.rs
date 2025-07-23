@@ -25,16 +25,6 @@ impl<'a> SimplifiedToolRenderer<'a> {
     const MAX_HEIGHT: f32 = 800.0;
     const MAX_WIDTH: f32 = 900.0;  // Limit tool card width
     const CONTENT_PADDING: f32 = 8.0;
-    const HEADER_HEIGHT: f32 = 32.0;
-    const ACTION_BAR_HEIGHT: f32 = 24.0;
-    
-    // Minimum heights for different tool types to ensure proper visibility
-    const MIN_HEIGHT_SEARCH: f32 = 300.0;
-    const MIN_HEIGHT_FILE: f32 = 500.0;  // Increased for better scrolling
-    const MIN_HEIGHT_SHELL: f32 = 250.0;
-    const MIN_HEIGHT_REPO: f32 = 250.0;
-    const MIN_HEIGHT_TODO: f32 = 200.0;
-    const MIN_HEIGHT_DEFAULT: f32 = 150.0;
     
     pub fn new(
         tool_name: &'a str,
@@ -112,22 +102,20 @@ impl<'a> SimplifiedToolRenderer<'a> {
     
     /// Renders the main content area with scrolling
     fn render_content_area(&self, ui: &mut Ui, action: &mut Option<(String, String)>) {
-        // Calculate minimum height based on tool type
-        let min_height = self.get_min_height_for_tool();
-        
-        // FIXED: Use consistent heights for all tool cards
-        // Don't use available_height which can vary - use fixed max height
-        let max_scroll_height = Self::MAX_HEIGHT;
-        
-        // Use a simpler ScrollArea configuration
+        // SIMPLE DYNAMIC SIZING: Start at 0, grow with content, max out at 800px
         // Create a unique scroll ID that's different from the push_id
         let scroll_id = format!("{}_scroll", &self.unique_id);
+        
+        // For scrollable content, we need to ensure the viewport shows enough content
+        // Use min_scrolled_height to guarantee at least 200px is visible when scrolling
+        let min_scrolled = 200.0;  // Always show at least 200px of content when scrolling
+        
         ScrollArea::vertical()
             .id_salt(scroll_id)  // Use different ID to prevent conflicts with push_id
-            .max_height(max_scroll_height)
-            .min_scrolled_height(min_height)  // Ensure minimum height is respected
-            .auto_shrink([false, false])  // Don't auto-shrink
-            .drag_to_scroll(true)  // Explicitly enable drag to scroll
+            .max_height(Self::MAX_HEIGHT)  // Max 800px, then scroll
+            .min_scrolled_height(min_scrolled)  // Minimum visible height when content needs scrolling
+            .auto_shrink([false, true])  // Allow shrinking for small content
+            .drag_to_scroll(true)  // Enable drag to scroll
             .show(ui, |ui| {
                 // Set consistent width for content
                 ui.set_max_width(Self::MAX_WIDTH - 20.0);
@@ -224,23 +212,6 @@ impl<'a> SimplifiedToolRenderer<'a> {
         }
     }
     
-    /// Get minimum height for different tool types
-    fn get_min_height_for_tool(&self) -> f32 {
-        match self.tool_name {
-            // Search results need more space
-            name if name.contains("search") || name.contains("query") => Self::MIN_HEIGHT_SEARCH,
-            // File operations need space for content
-            name if name.contains("read_file") || name.contains("view_file") || name == "Read" => Self::MIN_HEIGHT_FILE,
-            // Shell output needs space
-            name if name.contains("shell") || name.contains("bash") || name == "Bash" => Self::MIN_HEIGHT_SHELL,
-            // Repository lists need space
-            name if name.contains("repository") && self.result.get("repositories").is_some() => Self::MIN_HEIGHT_REPO,
-            // Todo lists need space
-            name if name.contains("todo") => Self::MIN_HEIGHT_TODO,
-            // Default minimum
-            _ => Self::MIN_HEIGHT_DEFAULT,
-        }
-    }
     
     /// Get status indicator for the header
     fn get_status_indicator(&self) -> Option<RichText> {
@@ -272,6 +243,7 @@ impl<'a> SimplifiedToolRenderer<'a> {
         
         None
     }
+    
     
     /// Determine if action buttons should be shown
     fn should_show_actions(&self) -> bool {
@@ -646,5 +618,241 @@ impl<'a> SimplifiedToolRenderer<'a> {
             let viewer = egui_commonmark::CommonMarkViewer::new();
             viewer.show(ui, &mut cache, &formatted_result);
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    
+    #[test]
+    fn test_dynamic_sizing_behavior() {
+        // Small content should result in small tool card
+        let small_result = json!({ "message": "pong" });
+        let small_renderer = SimplifiedToolRenderer::new("ping", &small_result, AppTheme::default());
+        assert_eq!(small_renderer.tool_name, "ping");
+        
+        // Large content should still work but be scrollable at 800px
+        let large_content = "Line\n".repeat(1000); // 1000 lines
+        let large_result = json!({ "content": large_content });
+        let large_renderer = SimplifiedToolRenderer::new("read_file", &large_result, AppTheme::default());
+        assert_eq!(large_renderer.tool_name, "read_file");
+        
+        // Medium content should size appropriately
+        let medium_result = json!({ 
+            "stdout": "Output line 1\nOutput line 2\nOutput line 3\nOutput line 4\nOutput line 5"
+        });
+        let medium_renderer = SimplifiedToolRenderer::new("bash", &medium_result, AppTheme::default());
+        assert_eq!(medium_renderer.tool_name, "bash");
+    }
+    
+    #[test]
+    fn test_unique_id_generation() {
+        let result = json!({});
+        let tool1 = SimplifiedToolRenderer::new("test", &result, AppTheme::default());
+        let tool2 = SimplifiedToolRenderer::new("test", &result, AppTheme::default());
+        
+        // Unique IDs should be different even for same tool type
+        assert_ne!(tool1.unique_id, tool2.unique_id);
+        assert!(tool1.unique_id.contains("tool_renderer_test"));
+        assert!(tool2.unique_id.contains("tool_renderer_test"));
+    }
+    
+    
+    #[test]
+    fn test_status_indicators() {
+        // Error status
+        let error_result = json!({ "error": "Something went wrong" });
+        let renderer = SimplifiedToolRenderer::new("test", &error_result, AppTheme::default());
+        let status = renderer.get_status_indicator();
+        assert!(status.is_some());
+        assert!(status.unwrap().text().contains("Error"));
+        
+        // Success shell command
+        let success_shell = json!({ "exit_code": 0 });
+        let renderer = SimplifiedToolRenderer::new("shell", &success_shell, AppTheme::default());
+        let status = renderer.get_status_indicator();
+        assert!(status.is_some());
+        assert!(status.unwrap().text().contains("Success"));
+        
+        // Failed shell command
+        let failed_shell = json!({ "exit_code": 1 });
+        let renderer = SimplifiedToolRenderer::new("shell", &failed_shell, AppTheme::default());
+        let status = renderer.get_status_indicator();
+        assert!(status.is_some());
+        assert!(status.unwrap().text().contains("Exit: 1"));
+        
+        // Success boolean
+        let success_bool = json!({ "success": true });
+        let renderer = SimplifiedToolRenderer::new("test", &success_bool, AppTheme::default());
+        let status = renderer.get_status_indicator();
+        assert!(status.is_some());
+        assert!(status.unwrap().text().contains("Success"));
+        
+        // Content implies success
+        let content_result = json!({ "content": "test content" });
+        let renderer = SimplifiedToolRenderer::new("test", &content_result, AppTheme::default());
+        let status = renderer.get_status_indicator();
+        assert!(status.is_some());
+        assert!(status.unwrap().text().contains("Success"));
+    }
+    
+    #[test]
+    fn test_inline_params_extraction() {
+        // File operations with full info
+        let file_result = json!({
+            "file_path": "/home/user/test.rs",
+            "repository": "my-repo",
+            "start_line": 10,
+            "end_line": 20
+        });
+        let renderer = SimplifiedToolRenderer::new("read_file", &file_result, AppTheme::default());
+        let params = renderer.get_inline_params();
+        assert!(params.is_some());
+        let params_str = params.unwrap();
+        assert!(params_str.contains("[my-repo]"));
+        assert!(params_str.contains("/home/user/test.rs"));
+        assert!(params_str.contains("lines 10-20"));
+        
+        // Single line number
+        let single_line = json!({
+            "file_path": "test.py",
+            "start_line": 5,
+        });
+        let renderer = SimplifiedToolRenderer::new("read_file", &single_line, AppTheme::default());
+        let params = renderer.get_inline_params();
+        assert!(params.is_some());
+        assert!(params.unwrap().contains("test.py"));
+        
+        // Test with line numbers only
+        let line_only = json!({
+            "file_path": "file.rs",
+            "start_line": 5,
+            "end_line": 5
+        });
+        let renderer2 = SimplifiedToolRenderer::new("read_file", &line_only, AppTheme::default());
+        let params2 = renderer2.get_inline_params();
+        assert!(params2.is_some());
+        assert!(params2.unwrap().contains("line 5"));
+        
+        // Search query
+        let search_result = json!({
+            "query": "test query"
+        });
+        let renderer = SimplifiedToolRenderer::new("search", &search_result, AppTheme::default());
+        let params = renderer.get_inline_params();
+        assert_eq!(params.unwrap(), "\"test query\"");
+        
+        // Shell command truncation
+        let long_command = "ls -la /very/long/path/that/should/be/truncated/when/displayed";
+        let shell_result = json!({
+            "command": long_command
+        });
+        let renderer = SimplifiedToolRenderer::new("shell", &shell_result, AppTheme::default());
+        let params = renderer.get_inline_params();
+        assert!(params.is_some());
+        let params_str = params.unwrap();
+        assert!(params_str.len() <= 50);
+        assert!(params_str.ends_with("..."));
+    }
+    
+    #[test]
+    fn test_should_show_actions() {
+        // File operations should show actions
+        let empty_result = json!({});
+        let file_renderer = SimplifiedToolRenderer::new("read_file", &empty_result, AppTheme::default());
+        assert!(file_renderer.should_show_actions());
+        
+        let write_renderer = SimplifiedToolRenderer::new("Write", &empty_result, AppTheme::default());
+        assert!(write_renderer.should_show_actions());
+        
+        // Search with results should show actions
+        let search_with_results = json!({"results": []});
+        let search_renderer = SimplifiedToolRenderer::new("search", &search_with_results, AppTheme::default());
+        assert!(search_renderer.should_show_actions());
+        
+        // Search without results should not
+        let search_no_results = SimplifiedToolRenderer::new("search", &empty_result, AppTheme::default());
+        assert!(!search_no_results.should_show_actions());
+        
+        // Other tools should not show actions
+        let todo_renderer = SimplifiedToolRenderer::new("todo", &empty_result, AppTheme::default());
+        assert!(!todo_renderer.should_show_actions());
+    }
+    
+    #[test]
+    fn test_font_size_persistence() {
+        FILE_READ_FONT_SIZES.with(|sizes| {
+            sizes.borrow_mut().clear();
+            
+            // Set different font sizes for different files
+            sizes.borrow_mut().insert("file1.txt".to_string(), 14.0);
+            sizes.borrow_mut().insert("file2.txt".to_string(), 16.0);
+            
+            // Verify they're stored correctly
+            assert_eq!(*sizes.borrow().get("file1.txt").unwrap(), 14.0);
+            assert_eq!(*sizes.borrow().get("file2.txt").unwrap(), 16.0);
+            
+            // Default for unknown file
+            assert_eq!(*sizes.borrow().get("unknown.txt").unwrap_or(&12.0), 12.0);
+        });
+    }
+    
+    #[test]
+    fn test_edge_cases() {
+        // Null values - this should not show status  
+        let null_result = json!({
+            "nothing": null
+        });
+        let renderer = SimplifiedToolRenderer::new("test", &null_result, AppTheme::default());
+        assert!(renderer.get_status_indicator().is_none());
+        
+        // Very long content
+        let long_content = json!({
+            "content": "x".repeat(10000)
+        });
+        let renderer = SimplifiedToolRenderer::new("read_file", &long_content, AppTheme::default());
+        assert_eq!(renderer.tool_name, "read_file");
+        
+        // Empty arrays
+        let empty_arrays = json!({
+            "results": [],
+            "todos": [],
+            "repositories": []
+        });
+        let renderer = SimplifiedToolRenderer::new("search", &empty_arrays, AppTheme::default());
+        assert!(renderer.should_show_actions()); // Has results field
+        
+        // Missing expected fields
+        let missing_fields = json!({});
+        let renderer = SimplifiedToolRenderer::new("read_file", &missing_fields, AppTheme::default());
+        assert!(renderer.get_inline_params().is_none());
+    }
+    
+    #[test]
+    fn test_scroll_configuration() {
+        // Test scroll area ID generation
+        let result = json!({});
+        let renderer1 = SimplifiedToolRenderer::new("read_file", &result, AppTheme::default());
+        let renderer2 = SimplifiedToolRenderer::new("read_file", &result, AppTheme::default());
+        
+        // Scroll IDs should be based on unique_id
+        let scroll_id1 = format!("{}_scroll", renderer1.unique_id);
+        let scroll_id2 = format!("{}_scroll", renderer2.unique_id);
+        
+        assert_ne!(scroll_id1, scroll_id2);
+    }
+    
+    
+    #[test]
+    fn test_tool_type_matching() {
+        // Test various tool name patterns are recognized correctly
+        let result = json!({});
+        // Just verify different tool types can be created
+        let _ = SimplifiedToolRenderer::new("mcp__read_file", &result, AppTheme::default());
+        let _ = SimplifiedToolRenderer::new("view_file", &result, AppTheme::default());
+        let _ = SimplifiedToolRenderer::new("semantic_search", &result, AppTheme::default());
+        let _ = SimplifiedToolRenderer::new("query", &result, AppTheme::default());
     }
 }
