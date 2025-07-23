@@ -463,13 +463,51 @@ impl<'a> ToolResultRenderer<'a> {
         result: &serde_json::Value,
         app_theme: AppTheme,
     ) -> bool {
-        if let Some(file_path) = result.get("filePath").and_then(|v| v.as_str()) {
+        // Check both filePath and file_path (different tools use different keys)
+        let file_path = result.get("filePath")
+            .or_else(|| result.get("file_path"))
+            .and_then(|v| v.as_str());
+            
+        if let Some(file_path) = file_path {
             if let Some(content) = result.get("content").and_then(|v| v.as_str()) {
+                // Show file path header
+                ui.label(egui::RichText::new(format!("`{file_path}`"))
+                    .color(app_theme.hint_text_color())
+                    .small());
+                
+                // Show metadata if available
+                let mut info_parts = Vec::new();
+                
+                if let Some(line_count) = result.get("line_count").and_then(|v| v.as_i64()) {
+                    info_parts.push(format!("{} lines", line_count));
+                }
+                
+                if let Some(file_size) = result.get("file_size").and_then(|v| v.as_i64()) {
+                    info_parts.push(format!("{} bytes", file_size));
+                }
+                
+                if let Some(start_line) = result.get("start_line").and_then(|v| v.as_i64()) {
+                    if let Some(end_line) = result.get("end_line").and_then(|v| v.as_i64()) {
+                        info_parts.push(format!("Lines {}-{}", start_line, end_line));
+                    }
+                }
+                
+                if !info_parts.is_empty() {
+                    ui.label(egui::RichText::new(info_parts.join(" | "))
+                        .color(app_theme.hint_text_color())
+                        .small());
+                }
+                
+                ui.add_space(4.0);
+                
                 // Extract file extension for syntax highlighting
                 let language = file_path
                     .split('.')
                     .last()
                     .unwrap_or("txt");
+                
+                // Use the theme's code font size from settings
+                let code_font_size = app_theme.code_font_size();
                 
                 render_syntax_highlighted_code_with_font_size(
                     ui,
@@ -477,7 +515,7 @@ impl<'a> ToolResultRenderer<'a> {
                     language,
                     &app_theme.code_background(),
                     ui.available_width(),
-                    12.0
+                    code_font_size
                 );
                 return true;
             }
