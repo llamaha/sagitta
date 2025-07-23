@@ -1,6 +1,6 @@
 // UI rendering for the Sagitta Code application
 
-use egui::{Context, Key, TopBottomPanel, Frame, Vec2};
+use egui::{Context, Key, TopBottomPanel, Frame, Vec2, Margin};
 use crate::gui::app::AppEvent;
 use crate::gui::conversation::sidebar::OrganizationMode;
 use super::SagittaCodeApp;
@@ -1941,7 +1941,9 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
 
     // --- Chat View Panel (Central) ---
     egui::CentralPanel::default()
-        .frame(Frame::NONE.fill(theme_to_background_color(app.state.current_theme)))
+        .frame(Frame::NONE
+            .fill(theme_to_background_color(app.state.current_theme))
+            .inner_margin(Margin::same(8)))
         .show(ctx, |ui| {
             // Force UI to use the full available width and reset text wrap settings
             ui.set_min_width(ui.available_width());
