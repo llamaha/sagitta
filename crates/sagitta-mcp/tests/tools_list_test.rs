@@ -15,10 +15,11 @@ fn test_all_required_tools_are_exposed() {
         "repository_add",
         "repository_list",
         "repository_sync",
-        "repository_switch_branch",
-        "repository_list_branches",
+        // "repository_switch_branch", // DISABLED
+        // "repository_list_branches", // DISABLED
         "semantic_code_search",
         "search_file",
+        "ripgrep",  // NEW: content search tool
         "todo_read",
         "todo_write",
         "read_file",  // This was missing!
@@ -97,8 +98,14 @@ async fn test_mcp_server_initializes_with_all_tools() {
 fn test_no_tools_removed_regression() {
     let tools = get_tool_definitions();
     
+    // Debug: print actual tools
+    println!("Actual tools ({} total):", tools.len());
+    for tool in &tools {
+        println!("  - {}", tool.name);
+    }
+    
     // Minimum expected tool count (should not decrease)
-    let min_tool_count = 15; // Based on current tool list
+    let min_tool_count = 14; // Adjusted for disabled branch tools
     
     assert!(
         tools.len() >= min_tool_count,

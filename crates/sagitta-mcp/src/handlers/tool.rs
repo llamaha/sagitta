@@ -3,7 +3,7 @@ use crate::mcp::{
     types::{
         CallToolParams, CallToolResult, ContentBlock, ErrorObject, PingParams, QueryParams,
         RepositoryAddParams, RepositoryListParams, RepositorySyncParams, ToolAnnotations, ToolDefinition,
-        RepositorySearchFileParams,
+        RepositorySearchFileParams, RepositoryRipgrepParams,
         RepositorySwitchBranchParams, RepositoryListBranchesParams,
         TodoReadParams, TodoWriteParams,
         EditFileParams, MultiEditFileParams,
@@ -82,6 +82,13 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
         "search_file" => {
             let search_params: RepositorySearchFileParams = deserialize_value(arguments, tool_name)?;
              match handle_repository_search_file(search_params, config, None).await {
+                Ok(res) => result_to_call_result(res),
+                Err(e) => Err(e),
+            }
+        }
+        "ripgrep" => {
+            let ripgrep_params: RepositoryRipgrepParams = deserialize_value(arguments, tool_name)?;
+             match handle_repository_ripgrep(ripgrep_params, config, None).await {
                 Ok(res) => result_to_call_result(res),
                 Err(e) => Err(e),
             }
@@ -335,6 +342,38 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             }),
              annotations: Some(ToolAnnotations {
                 title: Some("Search Files".to_string()),
+                read_only_hint: Some(true),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(true),
+                open_world_hint: Some(false),
+            }),
+        },
+        // --- Ripgrep ---
+        ToolDefinition {
+            name: "ripgrep".to_string(),
+            description: Some("Searches for content within files using regular expressions (powered by ripgrep). Much faster and more powerful than basic grep.\n\n**KEY FEATURES:**\n• Uses Rust regex syntax for patterns\n• Respects .gitignore by default\n• Shows context lines around matches\n• Limits results to prevent overwhelming output\n\n**PATTERN EXAMPLES:**\n• 'function.*test' - Lines containing 'function' followed by 'test'\n• '^import.*from' - Lines starting with 'import' and containing 'from'\n• 'TODO|FIXME' - Lines containing either TODO or FIXME\n• '\\bclass\\s+\\w+' - Class definitions (word boundary + whitespace)\n\n**FILE FILTERING:**\n• Use filePattern to search only specific files\n• Examples: '*.rs', 'src/**/*.ts', 'test_*.py'\n\nThis is ideal for finding code patterns, TODOs, specific implementations, or any text content within repository files.".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "pattern": { 
+                        "type": "string", 
+                        "description": "Regular expression pattern to search for in file contents.",
+                        "examples": ["TODO", "function.*test", "^import.*from", "class\\s+\\w+"]
+                    },
+                    "repositoryName": { "type": "string", "description": "Optional: Name of the repository to search within (defaults to active repository)." },
+                    "filePattern": { 
+                        "type": "string", 
+                        "description": "Optional: Glob pattern to filter files (e.g., '*.rs', 'src/**/*.ts').",
+                        "examples": ["*.rs", "src/**/*.ts", "test_*.py", "**/*.md"]
+                    },
+                    "caseSensitive": { "type": "boolean", "description": "Perform case-sensitive matching (default: false)." },
+                    "contextLines": { "type": "integer", "description": "Number of context lines to show before/after matches (default: 2).", "minimum": 0, "maximum": 10 },
+                    "maxResults": { "type": "integer", "description": "Maximum number of results to return (default: 100).", "minimum": 1, "maximum": 1000 }
+                },
+                "required": ["pattern"]
+            }),
+             annotations: Some(ToolAnnotations {
+                title: Some("Ripgrep Search".to_string()),
                 read_only_hint: Some(true),
                 destructive_hint: Some(false),
                 idempotent_hint: Some(true),
@@ -718,6 +757,7 @@ mod tests {
             "repository_sync",
             "semantic_code_search",
             "search_file",
+            "ripgrep",
             // "repository_map", // DISABLED - consumes too many tokens
             // "repository_switch_branch", // DISABLED
             // "repository_list_branches", // DISABLED

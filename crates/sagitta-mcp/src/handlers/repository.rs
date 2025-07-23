@@ -5,6 +5,7 @@ use crate::mcp::{
         RepositoryListResult, RepositoryRemoveParams, RepositoryRemoveResult, RepositorySyncParams,
         RepositorySyncResult, RepositorySearchFileParams, RepositorySearchFileResult, RepositoryViewFileParams, RepositoryViewFileResult,
         RepositorySwitchBranchParams, RepositorySwitchBranchResult, RepositoryListBranchesParams, RepositoryListBranchesResult, SyncDetails,
+        RepositoryRipgrepParams, RepositoryRipgrepResult, RipgrepMatch,
     },
 };
 use anyhow::{anyhow, Result};
@@ -741,6 +742,155 @@ pub async fn handle_repository_search_file(
         .collect();
 
     Ok(RepositorySearchFileResult { matching_files: matching_files_str })
+}
+
+pub async fn handle_repository_ripgrep(
+    params: RepositoryRipgrepParams,
+    config: Arc<RwLock<AppConfig>>,
+    auth_user_ext: Option<Extension<AuthenticatedUser>>,
+) -> Result<RepositoryRipgrepResult, ErrorObject> {
+    use grep::regex::RegexMatcherBuilder;
+    use grep::searcher::{BinaryDetection, SearcherBuilder};
+    use grep::matcher::Matcher;
+    use ignore::WalkBuilder;
+    use std::io::BufReader;
+    
+    let config_guard = config.read().await;
+    let repo_config = get_repo_config_mcp(&config_guard, params.repository_name.as_deref())?;
+
+    info!(repo_name = %repo_config.name, pattern = %params.pattern, "Processing ripgrep search");
+
+    let search_path = &repo_config.local_path;
+    let case_sensitive = params.case_sensitive.unwrap_or(false);
+    let context_lines = params.context_lines.unwrap_or(2);
+    let max_results = params.max_results.unwrap_or(100);
+    
+    // Build the regex matcher
+    let matcher = RegexMatcherBuilder::new()
+        .case_insensitive(!case_sensitive)
+        .build(&params.pattern)
+        .map_err(|e| {
+            ErrorObject {
+                code: error_codes::INVALID_PARAMS,
+                message: format!("Invalid regex pattern: {}", e),
+                data: None,
+            }
+        })?;
+    
+    // Build the file walker with optional file pattern filter
+    let mut walker = WalkBuilder::new(search_path);
+    walker.standard_filters(true); // Respect .gitignore
+    
+    if let Some(file_pattern) = &params.file_pattern {
+        walker.add(file_pattern);
+    }
+    
+    let mut matches = Vec::new();
+    let mut total_matches = 0;
+    let mut files_matched = std::collections::HashSet::new();
+    
+    // Walk through files and search
+    for entry in walker.build() {
+        if matches.len() >= max_results {
+            break;
+        }
+        
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        
+        // Get relative path for the result
+        let relative_path = path.strip_prefix(search_path)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .to_string();
+        
+        // Search the file
+        let file = match fs::File::open(path) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        
+        let mut searcher = SearcherBuilder::new()
+            .binary_detection(BinaryDetection::quit(b'\0'))
+            .line_number(true)
+            .build();
+        
+        let mut line_matches = Vec::new();
+        let result = searcher.search_reader(
+            &matcher,
+            BufReader::new(file),
+            grep::searcher::sinks::UTF8(|line_num, line| {
+                if matches.len() + line_matches.len() >= max_results {
+                    return Ok(false); // Stop searching
+                }
+                
+                // Store the match
+                line_matches.push((line_num as usize, line.to_string()));
+                total_matches += 1;
+                Ok(true)
+            }),
+        );
+        
+        if result.is_ok() && !line_matches.is_empty() {
+            files_matched.insert(relative_path.clone());
+            
+            // Read the file to get context lines
+            let file_content = fs::read_to_string(path).unwrap_or_default();
+            let lines: Vec<&str> = file_content.lines().collect();
+            
+            for (line_num, line_content) in line_matches {
+                if matches.len() >= max_results {
+                    break;
+                }
+                
+                let mut before_context = None;
+                let mut after_context = None;
+                
+                if context_lines > 0 {
+                    // Get before context
+                    let start = line_num.saturating_sub(context_lines + 1);
+                    let before: Vec<String> = lines[start..line_num.saturating_sub(1)]
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect();
+                    if !before.is_empty() {
+                        before_context = Some(before);
+                    }
+                    
+                    // Get after context
+                    let end = (line_num + context_lines).min(lines.len());
+                    let after: Vec<String> = lines[line_num..end]
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect();
+                    if !after.is_empty() {
+                        after_context = Some(after);
+                    }
+                }
+                
+                matches.push(RipgrepMatch {
+                    file_path: relative_path.clone(),
+                    line_number: line_num,
+                    line_content: line_content.trim_end().to_string(),
+                    before_context,
+                    after_context,
+                });
+            }
+        }
+    }
+    
+    Ok(RepositoryRipgrepResult {
+        matches,
+        total_matches,
+        files_matched: files_matched.len(),
+    })
 }
 
 #[instrument(skip(config), fields(repo_name = ?params.repository_name, file_path = %params.file_path))]

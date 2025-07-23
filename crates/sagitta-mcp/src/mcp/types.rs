@@ -456,6 +456,56 @@ pub struct RepositorySearchFileResult {
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct RepositoryRipgrepParams {
+    /// Regular expression pattern to search for in file contents.
+    pub pattern: String,
+    /// Optional: Glob pattern to filter files (e.g., "*.rs", "src/**/*.ts").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_pattern: Option<String>,
+    /// Optional: Specify the repository name to search in (overrides active repo concept if used).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository_name: Option<String>,
+    /// Optional: Perform case-sensitive matching (defaults to false).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub case_sensitive: Option<bool>,
+    /// Optional: Include surrounding context lines (defaults to 2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_lines: Option<usize>,
+    /// Optional: Maximum number of results to return (defaults to 100).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_results: Option<usize>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RipgrepMatch {
+    /// The file path relative to the repository root.
+    pub file_path: String,
+    /// The line number where the match was found (1-based).
+    pub line_number: usize,
+    /// The actual line content containing the match.
+    pub line_content: String,
+    /// Optional: Lines before the match for context.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before_context: Option<Vec<String>>,
+    /// Optional: Lines after the match for context.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after_context: Option<Vec<String>>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryRipgrepResult {
+    /// List of matches found across files.
+    pub matches: Vec<RipgrepMatch>,
+    /// Total number of matches found (may be more than returned if max_results was hit).
+    pub total_matches: usize,
+    /// Number of files that contained matches.
+    pub files_matched: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct RepositoryViewFileParams {
     /// Relative path to the file within the repository.
     pub file_path: String, // Using String for JSON compatibility
