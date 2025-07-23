@@ -41,6 +41,16 @@ impl<'a> SimplifiedToolRenderer<'a> {
         Self { tool_name, result, app_theme, unique_id }
     }
     
+    pub fn with_id(
+        tool_name: &'a str,
+        result: &'a serde_json::Value,
+        app_theme: AppTheme,
+        id: String,
+    ) -> Self {
+        // Use the provided stable ID instead of generating a new one
+        Self { tool_name, result, app_theme, unique_id: id }
+    }
+    
     /// Main entry point - renders the complete tool result
     pub fn render(self, ui: &mut egui::Ui) -> Option<(String, String)> {
         let mut action = None;
