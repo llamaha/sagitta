@@ -33,17 +33,16 @@ impl ConversationSidebar {
             screen_size.x <= self.config.responsive.small_screen_breakpoint;
         
         // Responsive width constraints - made wider to show more information
-        let (default_width, min_width, max_width) = if is_small_screen {
-            (280.0, 220.0, 380.0)
+        let (default_width, min_width) = if is_small_screen {
+            (280.0, 220.0)
         } else {
-            (360.0, 280.0, 500.0)
+            (360.0, 280.0)
         };
 
         egui::SidePanel::left("conversation_sidebar")
             .frame(panel_frame)
             .default_width(default_width)
             .min_width(min_width)
-            .max_width(max_width)
             .resizable(true)
             .show(ctx, |ui| {
                 ScrollArea::vertical()
