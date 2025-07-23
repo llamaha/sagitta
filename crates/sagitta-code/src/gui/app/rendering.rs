@@ -424,13 +424,20 @@ fn render_file_content_modal(app: &mut SagittaCodeApp, ctx: &Context) {
         }
         
         let theme = app.state.current_theme;
+        
+        // Get available screen size to ensure modal fits
+        let available_rect = ctx.available_rect();
+        let max_width = (available_rect.width() * 0.9).min(900.0);
+        let max_height = (available_rect.height() * 0.85).min(700.0);
+        
         egui::Window::new("View File Content")
             .collapsible(false)
             .resizable(true)
-            .default_width(900.0)
-            .default_height(700.0)
+            .default_width(max_width)
+            .default_height(max_height)
             .min_height(400.0)
             .min_width(600.0)
+            .max_height(available_rect.height() * 0.95)
             .frame(egui::Frame::window(&ctx.style()).fill(theme.panel_background()))
             .show(ctx, |ui| {
                 // Apply theme to UI elements
@@ -446,19 +453,24 @@ fn render_file_content_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     ui.label(egui::RichText::new(format!("📄 {}", file_path_clone)).color(theme.accent_color()).strong());
                     ui.separator();
                     
-                    // Create a scrollable area for the file content
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        // Determine file language from path for syntax highlighting
-                        let language = if let Some(ext) = std::path::Path::new(&file_path_clone).extension().and_then(|e| e.to_str()) {
-                            ext
-                        } else {
-                            "txt"
-                        };
-                        
-                        // Use syntax highlighting for the content
-                        use crate::gui::chat::syntax_highlighting::render_syntax_highlighted_code;
-                        render_syntax_highlighted_code(ui, &content_clone, language, &egui::Color32::TRANSPARENT, ui.available_width());
-                    });
+                    // Create a scrollable area for the file content with proper width
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            // Set the width for the scroll area content
+                            ui.set_min_width(ui.available_width());
+                            
+                            // Determine file language from path for syntax highlighting
+                            let language = if let Some(ext) = std::path::Path::new(&file_path_clone).extension().and_then(|e| e.to_str()) {
+                                ext
+                            } else {
+                                "txt"
+                            };
+                            
+                            // Use syntax highlighting for the content
+                            use crate::gui::chat::syntax_highlighting::render_syntax_highlighted_code;
+                            render_syntax_highlighted_code(ui, &content_clone, language, &egui::Color32::TRANSPARENT, ui.available_width());
+                        });
                     
                     ui.separator();
                     
