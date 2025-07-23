@@ -151,98 +151,106 @@ impl<'a> SimplifiedToolRenderer<'a> {
     fn get_all_inline_params(&self) -> Option<String> {
         let mut params = Vec::new();
         
-        // Helper to add a parameter if it exists
-        let mut add_param = |key: &str, display_key: Option<&str>| {
-            if let Some(value) = self.result.get(key).and_then(|v| v.as_str()) {
+        // Helper functions that don't capture params
+        let add_str_param = |result: &serde_json::Value, key: &str, display_key: Option<&str>| -> Option<String> {
+            if let Some(value) = result.get(key).and_then(|v| v.as_str()) {
                 if !value.is_empty() {
                     let display = display_key.unwrap_or(key);
-                    params.push(format!("{}: {}", display, self.format_param_value(key, value)));
+                    Some(format!("{}: {}", display, self.format_param_value(key, value)))
+                } else {
+                    None
                 }
+            } else {
+                None
             }
         };
         
-        // Helper to add a number parameter if it exists
-        let mut add_number_param = |key: &str, display_key: Option<&str>| {
-            if let Some(value) = self.result.get(key).and_then(|v| v.as_i64()) {
+        let add_num_param = |result: &serde_json::Value, key: &str, display_key: Option<&str>| -> Option<String> {
+            if let Some(value) = result.get(key).and_then(|v| v.as_i64()) {
                 let display = display_key.unwrap_or(key);
-                params.push(format!("{}: {}", display, value));
+                Some(format!("{}: {}", display, value))
+            } else {
+                None
             }
         };
         
-        // Helper to add a boolean parameter if it exists and is true
-        let mut add_bool_param = |key: &str, display_key: Option<&str>| {
-            if let Some(value) = self.result.get(key).and_then(|v| v.as_bool()) {
+        let add_bool_param = |result: &serde_json::Value, key: &str, display_key: Option<&str>| -> Option<String> {
+            if let Some(value) = result.get(key).and_then(|v| v.as_bool()) {
                 if value {
                     let display = display_key.unwrap_or(key);
-                    params.push(format!("{}: {}", display, value));
+                    Some(format!("{}: {}", display, value))
+                } else {
+                    None
                 }
+            } else {
+                None
             }
         };
         
         match self.tool_name {
             // Repository operations
             "repository_add" => {
-                add_param("name", None);
-                add_param("url", None);
-                add_param("local_path", Some("path"));
-                add_param("branch", None);
-                add_param("ssh_key", None);
+                if let Some(p) = add_str_param(&self.result, "name", None) { params.push(p); }
+                if let Some(p) = add_str_param(&self.result, "url", None) { params.push(p); }
+                if let Some(p) = add_str_param(&self.result, "local_path", Some("path")) { params.push(p); }
+                if let Some(p) = add_str_param(&self.result, "branch", None) { params.push(p); }
+                if let Some(p) = add_str_param(&self.result, "ssh_key", None) { params.push(p); }
                 // Skip ssh_passphrase for security
             }
             "repository_sync" => {
-                add_param("name", None);
+                if let Some(p) = add_str_param(&self.result, "name", None) { params.push(p); }
             }
             "repository_switch_branch" => {
-                add_param("repositoryName", Some("repo"));
-                add_param("branchName", Some("branch"));
-                add_param("targetRef", Some("ref"));
-                add_bool_param("force", None);
-                add_bool_param("noAutoResync", Some("no-resync"));
+                if let Some(p) = add_str_param(&self.result, "repositoryName", Some("repo")) { params.push(p); }
+                if let Some(p) = add_str_param(&self.result, "branchName", Some("branch")) { params.push(p); }
+                if let Some(p) = add_str_param(&self.result, "targetRef", Some("ref")) { params.push(p); }
+                if let Some(p) = add_bool_param(&self.result, "force", None) { params.push(p); }
+                if let Some(p) = add_bool_param(&self.result, "noAutoResync", Some("no-resync")) { params.push(p); }
             }
             "repository_list_branches" => {
-                add_param("repositoryName", Some("repo"));
-                add_param("filter", None);
-                add_bool_param("includeRemote", Some("remote"));
-                add_bool_param("includeTags", Some("tags"));
-                add_number_param("limit", None);
+                if let Some(p) = add_str_param(&self.result, "repositoryName", Some("repo")) { params.push(p); }
+                if let Some(p) = add_str_param(&self.result, "filter", None) { params.push(p); }
+                if let Some(p) = add_bool_param(&self.result, "includeRemote", Some("remote")) { params.push(p); }
+                if let Some(p) = add_bool_param(&self.result, "includeTags", Some("tags")) { params.push(p); }
+                if let Some(p) = add_num_param(&self.result, "limit", None) { params.push(p); }
             }
             
             // Search operations
             "semantic_code_search" | "Search" | "query" => {
-                add_param("repositoryName", Some("repo"));
-                add_param("queryText", Some("query"));
-                add_param("elementType", Some("type"));
-                add_param("lang", None);
-                add_number_param("limit", None);
-                add_param("branchName", Some("branch"));
+                if let Some(p) = add_str_param(&self.result, "repositoryName", Some("repo")) { params.push(p); }
+                if let Some(p) = add_str_param(&self.result, "queryText", Some("query")) { params.push(p); }
+                if let Some(p) = add_str_param(&self.result, "elementType", Some("type")) { params.push(p); }
+                if let Some(p) = add_str_param(&self.result, "lang", None) { params.push(p); }
+                if let Some(p) = add_num_param(&self.result, "limit", None) { params.push(p); }
+                if let Some(p) = add_str_param(&self.result, "branchName", Some("branch")) { params.push(p); }
             }
             "search_file" | "Glob" => {
-                add_param("repositoryName", Some("repo"));
-                add_param("pattern", None);
-                add_bool_param("caseSensitive", Some("case-sensitive"));
+                if let Some(p) = add_str_param(&self.result, "repositoryName", Some("repo")) { params.push(p); }
+                if let Some(p) = add_str_param(&self.result, "pattern", None) { params.push(p); }
+                if let Some(p) = add_bool_param(&self.result, "caseSensitive", Some("case-sensitive")) { params.push(p); }
             }
             "grep" | "Grep" => {
-                add_param("pattern", None);
-                add_param("path", None);
-                add_param("include", None);
+                if let Some(p) = add_str_param(&self.result, "pattern", None) { params.push(p); }
+                if let Some(p) = add_str_param(&self.result, "path", None) { params.push(p); }
+                if let Some(p) = add_str_param(&self.result, "include", None) { params.push(p); }
             }
             
             // File operations
             "read_file" | "Read" => {
-                add_param("file_path", Some("path"));
-                add_number_param("start_line", Some("from"));
-                add_number_param("end_line", Some("to"));
+                if let Some(p) = add_str_param(&self.result, "file_path", Some("path")) { params.push(p); }
+                if let Some(p) = add_num_param(&self.result, "start_line", Some("from")) { params.push(p); }
+                if let Some(p) = add_num_param(&self.result, "end_line", Some("to")) { params.push(p); }
             }
             "write_file" | "Write" => {
-                add_param("file_path", Some("path"));
-                add_bool_param("create_parents", Some("create-dirs"));
+                if let Some(p) = add_str_param(&self.result, "file_path", Some("path")) { params.push(p); }
+                if let Some(p) = add_bool_param(&self.result, "create_parents", Some("create-dirs")) { params.push(p); }
             }
             "edit_file" | "Edit" => {
-                add_param("file_path", Some("path"));
-                add_bool_param("replace_all", Some("replace-all"));
+                if let Some(p) = add_str_param(&self.result, "file_path", Some("path")) { params.push(p); }
+                if let Some(p) = add_bool_param(&self.result, "replace_all", Some("replace-all")) { params.push(p); }
             }
             "multi_edit_file" | "MultiEdit" => {
-                add_param("file_path", Some("path"));
+                if let Some(p) = add_str_param(&self.result, "file_path", Some("path")) { params.push(p); }
                 // Show edit count
                 if let Some(edits) = self.result.get("edits").and_then(|v| v.as_array()) {
                     params.push(format!("edits: {}", edits.len()));
@@ -251,17 +259,17 @@ impl<'a> SimplifiedToolRenderer<'a> {
             
             // Shell operations
             "shell_execute" | "Bash" => {
-                add_param("command", Some("cmd"));
-                add_param("working_directory", Some("dir"));
-                add_number_param("timeout_ms", Some("timeout"));
-                add_param("grep_pattern", Some("grep"));
-                add_number_param("head_lines", Some("head"));
-                add_number_param("tail_lines", Some("tail"));
+                if let Some(p) = add_str_param(&self.result, "command", Some("cmd")) { params.push(p); }
+                if let Some(p) = add_str_param(&self.result, "working_directory", Some("dir")) { params.push(p); }
+                if let Some(p) = add_num_param(&self.result, "timeout_ms", Some("timeout")) { params.push(p); }
+                if let Some(p) = add_str_param(&self.result, "grep_pattern", Some("grep")) { params.push(p); }
+                if let Some(p) = add_num_param(&self.result, "head_lines", Some("head")) { params.push(p); }
+                if let Some(p) = add_num_param(&self.result, "tail_lines", Some("tail")) { params.push(p); }
             }
             
             // Web operations
             "web_search" | "WebSearch" => {
-                add_param("query", None);
+                if let Some(p) = add_str_param(&self.result, "query", None) { params.push(p); }
                 // Show allowed/blocked domains if present
                 if let Some(allowed) = self.result.get("allowed_domains").and_then(|v| v.as_array()) {
                     if !allowed.is_empty() {
@@ -275,23 +283,23 @@ impl<'a> SimplifiedToolRenderer<'a> {
                 }
             }
             "web_fetch" | "WebFetch" => {
-                add_param("url", None);
-                add_param("prompt", None);
+                if let Some(p) = add_str_param(&self.result, "url", None) { params.push(p); }
+                if let Some(p) = add_str_param(&self.result, "prompt", None) { params.push(p); }
             }
             
             // Other tools
             "NotebookRead" => {
-                add_param("notebook_path", Some("path"));
-                add_param("cell_id", Some("cell"));
+                if let Some(p) = add_str_param(&self.result, "notebook_path", Some("path")) { params.push(p); }
+                if let Some(p) = add_str_param(&self.result, "cell_id", Some("cell")) { params.push(p); }
             }
             "NotebookEdit" => {
-                add_param("notebook_path", Some("path"));
-                add_param("cell_id", Some("cell"));
-                add_param("cell_type", Some("type"));
-                add_param("edit_mode", Some("mode"));
+                if let Some(p) = add_str_param(&self.result, "notebook_path", Some("path")) { params.push(p); }
+                if let Some(p) = add_str_param(&self.result, "cell_id", Some("cell")) { params.push(p); }
+                if let Some(p) = add_str_param(&self.result, "cell_type", Some("type")) { params.push(p); }
+                if let Some(p) = add_str_param(&self.result, "edit_mode", Some("mode")) { params.push(p); }
             }
             "LS" => {
-                add_param("path", None);
+                if let Some(p) = add_str_param(&self.result, "path", None) { params.push(p); }
                 if let Some(ignore) = self.result.get("ignore").and_then(|v| v.as_array()) {
                     if !ignore.is_empty() {
                         params.push(format!("ignore: {} patterns", ignore.len()));
@@ -299,7 +307,7 @@ impl<'a> SimplifiedToolRenderer<'a> {
                 }
             }
             "Task" => {
-                add_param("description", None);
+                if let Some(p) = add_str_param(&self.result, "description", None) { params.push(p); }
                 // Don't show prompt as it's too long
             }
             
