@@ -79,11 +79,11 @@ impl ClaudeCodeClient {
     }
     
     /// Cancel any ongoing stream
-    pub fn cancel(&self) {
+    pub async fn cancel(&self) {
         log::info!("CLAUDE_CODE: Cancelling client");
-        if let Ok(token) = self.cancellation_token.try_lock() {
-            token.cancel();
-        }
+        let token = self.cancellation_token.lock().await;
+        token.cancel();
+        log::info!("CLAUDE_CODE: Cancellation token cancelled");
     }
     
     /// Get or create a fresh cancellation token for a new stream

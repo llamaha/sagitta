@@ -338,9 +338,22 @@ impl Agent {
         token.cancel();
         
         // Also cancel the LLM client if it's ClaudeCodeClient
+        log::info!("Attempting to downcast LLM client to ClaudeCodeClient");
         if let Some(claude_client) = self.llm_client.as_any().downcast_ref::<crate::llm::claude_code::client::ClaudeCodeClient>() {
+            log::info!("Successfully downcasted to ClaudeCodeClient, calling cancel()");
             claude_client.cancel().await;
             log::info!("Cancelled ClaudeCodeClient stream");
+        } else {
+            // Check the actual type for debugging
+            let client_type = self.llm_client.client_type();
+            log::warn!("Failed to downcast LLM client to ClaudeCodeClient. Actual client type: {}", client_type);
+            
+            // Try alternative: check if it's a providers::claude_code::client::ClaudeCodeClient
+            if let Some(claude_client) = self.llm_client.as_any().downcast_ref::<crate::providers::claude_code::client::ClaudeCodeClient>() {
+                log::info!("Successfully downcasted to providers::claude_code::client::ClaudeCodeClient, calling cancel()");
+                claude_client.cancel().await;
+                log::info!("Cancelled providers ClaudeCodeClient stream");
+            }
         }
         
         // Also request loop break for consistency
