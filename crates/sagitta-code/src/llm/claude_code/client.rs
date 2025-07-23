@@ -226,8 +226,16 @@ impl LlmClient for ClaudeCodeClient {
                 .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?
         };
         
-        let fresh_token = self.get_fresh_cancellation_token().await;
-        let stream = ClaudeCodeStream::new_with_cancellation(child, fresh_token);
+        // Get cancellation token - this will reset it if it was previously cancelled
+        let mut token_guard = self.cancellation_token.lock().await;
+        if token_guard.is_cancelled() {
+            // Reset the token for this new request
+            *token_guard = CancellationToken::new();
+            log::debug!("CLAUDE_CODE: Reset cancellation token for new stream");
+        }
+        let current_token = Arc::new(token_guard.clone());
+        drop(token_guard); // Release the lock before creating the stream
+        let stream = ClaudeCodeStream::new_with_cancellation(child, current_token);
         
         // Collect all chunks
         let mut message_parts = Vec::new();
@@ -381,8 +389,16 @@ impl LlmClient for ClaudeCodeClient {
                 .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?
         };
         
-        let fresh_token = self.get_fresh_cancellation_token().await;
-        let stream = ClaudeCodeStream::new_with_cancellation(child, fresh_token);
+        // Get cancellation token - this will reset it if it was previously cancelled
+        let mut token_guard = self.cancellation_token.lock().await;
+        if token_guard.is_cancelled() {
+            // Reset the token for this new request
+            *token_guard = CancellationToken::new();
+            log::debug!("CLAUDE_CODE: Reset cancellation token for new stream");
+        }
+        let current_token = Arc::new(token_guard.clone());
+        drop(token_guard); // Release the lock before creating the stream
+        let stream = ClaudeCodeStream::new_with_cancellation(child, current_token);
         Ok(Box::pin(stream))
     }
     
