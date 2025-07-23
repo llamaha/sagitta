@@ -61,29 +61,26 @@ impl<'a> SimplifiedToolRenderer<'a> {
         // Limit the width of the tool card
         ui.set_max_width(Self::MAX_WIDTH);
         
-        // Use push_id to ensure unique IDs for nested components
-        ui.push_id(&self.unique_id, |ui| {
-            Frame::NONE
-                .fill(app_theme.panel_background())
-                .stroke(Stroke::new(1.0, app_theme.border_color()))
-                .corner_radius(CornerRadius::same(4))
-                .inner_margin(Vec2::new(8.0, 8.0))
-                .show(ui, |ui| {
-                    // 1. Render header
-                    self.render_header(ui);
-                    
+        Frame::NONE
+            .fill(app_theme.panel_background())
+            .stroke(Stroke::new(1.0, app_theme.border_color()))
+            .corner_radius(CornerRadius::same(4))
+            .inner_margin(Vec2::new(8.0, 8.0))
+            .show(ui, |ui| {
+                // 1. Render header
+                self.render_header(ui);
+                
+                ui.separator();
+                
+                // 2. Render content with scroll area
+                self.render_content_area(ui, &mut action);
+                
+                // 3. Render action buttons if applicable
+                if self.should_show_actions() {
                     ui.separator();
-                    
-                    // 2. Render content with scroll area
-                    self.render_content_area(ui, &mut action);
-                    
-                    // 3. Render action buttons if applicable
-                    if self.should_show_actions() {
-                        ui.separator();
-                        self.render_actions(ui, &mut action);
-                    }
-                });
-        });
+                    self.render_actions(ui, &mut action);
+                }
+            });
             
         action
     }
@@ -113,19 +110,15 @@ impl<'a> SimplifiedToolRenderer<'a> {
     /// Renders the main content area with scrolling
     fn render_content_area(&self, ui: &mut Ui, action: &mut Option<(String, String)>) {
         // SIMPLE DYNAMIC SIZING: Start at 0, grow with content, max out at 800px
-        // Create a unique scroll ID that's different from the push_id
-        let scroll_id = format!("{}_scroll", &self.unique_id);
-        
         // For scrollable content, we need to ensure the viewport shows enough content
         // Use min_scrolled_height to guarantee at least 200px is visible when scrolling
         let min_scrolled = 200.0;  // Always show at least 200px of content when scrolling
         
         ScrollArea::vertical()
-            .id_salt(scroll_id)  // Use different ID to prevent conflicts with push_id
+            .id_salt(&self.unique_id)  // Use the stable ID directly, just like legacy code
             .max_height(Self::MAX_HEIGHT)  // Max 800px, then scroll
             .min_scrolled_height(min_scrolled)  // Minimum visible height when content needs scrolling
             .auto_shrink([false, true])  // Allow shrinking for small content
-            .drag_to_scroll(true)  // Enable drag to scroll
             .show(ui, |ui| {
                 // Set consistent width for content
                 ui.set_max_width(Self::MAX_WIDTH - 20.0);
