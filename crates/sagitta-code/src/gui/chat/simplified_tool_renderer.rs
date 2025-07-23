@@ -10,9 +10,6 @@ use std::collections::HashMap;
 use std::cell::RefCell;
 use uuid;
 
-thread_local! {
-    static FILE_READ_FONT_SIZES: RefCell<HashMap<String, f32>> = RefCell::new(HashMap::new());
-}
 
 pub struct SimplifiedToolRenderer<'a> {
     tool_name: &'a str,
@@ -565,58 +562,18 @@ impl<'a> SimplifiedToolRenderer<'a> {
                 .and_then(|path| path.split('.').last())
                 .unwrap_or("txt");
                 
-            // Get font size for this file
-            let file_path_key = self.result.get("file_path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("default")
-                .to_string();
+            // Use the theme's code font size
+            let font_size = self.app_theme.code_font_size();
             
-            let font_size = FILE_READ_FONT_SIZES.with(|sizes| {
-                *sizes.borrow().get(&file_path_key).unwrap_or(&12.0)
-            });
-            
-            // Font size controls
-            ui.horizontal(|ui| {
-                ui.label("Font size:");
-                if ui.button("-").clicked() {
-                    let new_size = (font_size - 2.0).max(8.0);
-                    FILE_READ_FONT_SIZES.with(|sizes| {
-                        sizes.borrow_mut().insert(file_path_key.clone(), new_size);
-                    });
-                }
-                ui.label(format!("{}pt", font_size as i32));
-                if ui.button("+").clicked() {
-                    let new_size = (font_size + 2.0).min(24.0);
-                    FILE_READ_FONT_SIZES.with(|sizes| {
-                        sizes.borrow_mut().insert(file_path_key.clone(), new_size);
-                    });
-                }
-            });
-            
-            ui.add_space(4.0);
-            
-            // Render with syntax highlighting - full content
-            // The syntax highlighter will handle the content size
-            Frame::NONE
-                .fill(self.app_theme.code_background())
-                .inner_margin(Vec2::new(8.0, 6.0))
-                .corner_radius(CornerRadius::same(4))
-                .stroke(Stroke::new(0.5, self.app_theme.border_color()))
-                .show(ui, |ui| {
-                    // Ensure we have enough width
-                    let width = ui.available_width();
-                    
-                    render_syntax_highlighted_code_with_font_size(
-                        ui,
-                        content,
-                        file_ext,
-                        &self.app_theme.code_background(),
-                        width,
-                        font_size,
-                    );
-                    
-                    // Don't force any additional space - let the scroll area handle it
-                });
+            // Render with syntax highlighting directly (no nested Frame)
+            render_syntax_highlighted_code_with_font_size(
+                ui,
+                content,
+                file_ext,
+                &self.app_theme.code_background(),
+                ui.available_width(),
+                font_size,
+            );
         } else {
             ui.label("No content available");
         }
@@ -1118,21 +1075,14 @@ mod tests {
     }
     
     #[test]
-    fn test_font_size_persistence() {
-        FILE_READ_FONT_SIZES.with(|sizes| {
-            sizes.borrow_mut().clear();
-            
-            // Set different font sizes for different files
-            sizes.borrow_mut().insert("file1.txt".to_string(), 14.0);
-            sizes.borrow_mut().insert("file2.txt".to_string(), 16.0);
-            
-            // Verify they're stored correctly
-            assert_eq!(*sizes.borrow().get("file1.txt").unwrap(), 14.0);
-            assert_eq!(*sizes.borrow().get("file2.txt").unwrap(), 16.0);
-            
-            // Default for unknown file
-            assert_eq!(*sizes.borrow().get("unknown.txt").unwrap_or(&12.0), 12.0);
-        });
+    fn test_font_size_uses_theme() {
+        // Font sizes now come from the theme, not from per-file storage
+        let theme = AppTheme::default();
+        let code_font_size = theme.code_font_size();
+        
+        // Verify the theme provides a reasonable default
+        assert!(code_font_size >= 8.0);
+        assert!(code_font_size <= 24.0);
     }
     
     #[test]
