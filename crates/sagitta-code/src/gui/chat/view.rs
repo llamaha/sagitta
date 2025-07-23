@@ -604,19 +604,38 @@ fn render_single_tool_call_simplified(ui: &mut Ui, tool_call: &ToolCall, _max_wi
         ui.vertical(|ui| {
             ui.set_max_width(900.0);
             
+            // Parse the arguments
+            let args_json = if !tool_call.arguments.is_empty() {
+                serde_json::from_str::<serde_json::Value>(&tool_call.arguments).ok()
+            } else {
+                None
+            };
+            
             // Parse the result if available
             if let Some(result_str) = &tool_call.result {
                 if let Ok(result_json) = serde_json::from_str::<serde_json::Value>(result_str) {
-                    SimplifiedToolRenderer::with_id(&tool_call.name, &result_json, app_theme, tool_call.id.clone()).render(ui)
+                    if let Some(args) = args_json.as_ref() {
+                        SimplifiedToolRenderer::with_params(&tool_call.name, &result_json, args, app_theme, tool_call.id.clone()).render(ui)
+                    } else {
+                        SimplifiedToolRenderer::with_id(&tool_call.name, &result_json, app_theme, tool_call.id.clone()).render(ui)
+                    }
                 } else {
                     // Fallback for non-JSON results
                     let result = serde_json::json!({ "result": result_str });
-                    SimplifiedToolRenderer::with_id(&tool_call.name, &result, app_theme, tool_call.id.clone()).render(ui)
+                    if let Some(args) = args_json.as_ref() {
+                        SimplifiedToolRenderer::with_params(&tool_call.name, &result, args, app_theme, tool_call.id.clone()).render(ui)
+                    } else {
+                        SimplifiedToolRenderer::with_id(&tool_call.name, &result, app_theme, tool_call.id.clone()).render(ui)
+                    }
                 }
             } else {
                 // Show pending state
                 let result = serde_json::json!({ "status": "running" });
-                SimplifiedToolRenderer::with_id(&tool_call.name, &result, app_theme, tool_call.id.clone()).render(ui)
+                if let Some(args) = args_json.as_ref() {
+                    SimplifiedToolRenderer::with_params(&tool_call.name, &result, args, app_theme, tool_call.id.clone()).render(ui)
+                } else {
+                    SimplifiedToolRenderer::with_id(&tool_call.name, &result, app_theme, tool_call.id.clone()).render(ui)
+                }
             }
         }).inner
     }).inner
@@ -944,7 +963,7 @@ fn render_tool_card_simplified(ui: &mut Ui, tool_card: &ToolCard, _max_width: f3
         }
     };
     
-    SimplifiedToolRenderer::with_id(&tool_card.tool_name, &result, app_theme, tool_card.run_id.to_string()).render(ui)
+    SimplifiedToolRenderer::with_params(&tool_card.tool_name, &result, &tool_card.input_params, app_theme, tool_card.run_id.to_string()).render(ui)
     }).inner
 }
 
