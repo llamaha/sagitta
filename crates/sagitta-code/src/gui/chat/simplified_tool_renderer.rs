@@ -608,16 +608,23 @@ impl<'a> SimplifiedToolRenderer<'a> {
             
             for repo in repositories {
                 if let Some(name) = repo.get("name").and_then(|v| v.as_str()) {
+                    // Clean up the name - remove trailing parentheses if present
+                    let clean_name = name.trim_end_matches("()");
+                    
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(name).strong());
+                        // Use bullet point format
+                        ui.label("•");
+                        ui.label(RichText::new(clean_name).strong());
                         
                         if let Some(branch) = repo.get("branch").and_then(|v| v.as_str()) {
-                            ui.label(RichText::new(format!("({})", branch)).small().color(self.app_theme.hint_text_color()));
+                            ui.label(RichText::new(format!("[{}]", branch)).small().color(self.app_theme.hint_text_color()));
                         }
                     });
                     
                     if let Some(path) = repo.get("path").and_then(|v| v.as_str()) {
-                        ui.label(RichText::new(path).small().color(self.app_theme.hint_text_color()));
+                        ui.indent("repo_path", |ui| {
+                            ui.label(RichText::new(path).small().color(self.app_theme.hint_text_color()));
+                        });
                     }
                 }
             }
