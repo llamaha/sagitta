@@ -339,7 +339,7 @@ impl Agent {
         
         // Also cancel the LLM client if it's ClaudeCodeClient
         if let Some(claude_client) = self.llm_client.as_any().downcast_ref::<crate::llm::claude_code::client::ClaudeCodeClient>() {
-            claude_client.cancel();
+            claude_client.cancel().await;
             log::info!("Cancelled ClaudeCodeClient stream");
         }
         

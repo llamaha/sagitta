@@ -57,7 +57,7 @@ walkdir = "2.4"           # For project detection
 similar = "2.7"           # For text similarity and diffs
 sha1 = "0.10"             # For content deduplication hashing
 notify = "6.1"            # For file system watching and change detection
-nix = { version = "0.27", features = ["signal"] } # For process signal handling
+nix = { version = "0.27", features = ["signal", "fs"] } # For process signal handling and file operations
 
 # UI dependencies (optional, for GUI components)
 eframe = { version = "0.31.1", optional = true }

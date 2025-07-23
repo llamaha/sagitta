@@ -90,6 +90,16 @@ impl ClaudeCodeStream {
                     }
                 }
                 
+                // Set stdout to non-blocking mode for better cancellation responsiveness
+                #[cfg(unix)]
+                {
+                    use std::os::unix::io::AsRawFd;
+                    use nix::fcntl::{fcntl, FcntlArg, OFlag};
+                    let fd = stdout.as_raw_fd();
+                    let flags = fcntl(fd, FcntlArg::F_GETFL).unwrap_or(0);
+                    let _ = fcntl(fd, FcntlArg::F_SETFL(OFlag::from_bits_truncate(flags) | OFlag::O_NONBLOCK));
+                }
+                
                 // Process bytes as they arrive for real-time streaming
                 loop {
                     // Check if cancellation was requested
@@ -309,6 +319,11 @@ impl ClaudeCodeStream {
                             } else {
                                 log::debug!("CLAUDE_CODE: No bytes to drain, buffer size: {}", json_buffer.len());
                             }
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            // No data available right now, sleep briefly and check cancellation
+                            std::thread::sleep(std::time::Duration::from_millis(10));
+                            continue;
                         }
                         Err(e) => {
                             log::error!("CLAUDE_CODE: Error reading bytes: {e}");
