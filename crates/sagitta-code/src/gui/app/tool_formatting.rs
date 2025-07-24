@@ -846,10 +846,15 @@ impl ToolResultFormatter {
                 if let Some(name) = repo.get("name").and_then(|v| v.as_str()) {
                     result.push_str(&format!("• **{}**", name));
                     
-                    // Show branch if available
+                    // Show branch/ref if available
                     if let Some(branch) = repo.get("branch").and_then(|v| v.as_str()) {
                         if !branch.is_empty() {
-                            result.push_str(&format!(" - {}", branch));
+                            // Check if this looks like a version/tag/commit (contains dots, starts with v, or is hex)
+                            if branch.contains('.') || branch.starts_with('v') || branch.len() == 8 && branch.chars().all(|c| c.is_ascii_hexdigit()) {
+                                result.push_str(&format!(" @ {}", branch));
+                            } else {
+                                result.push_str(&format!(" - {}", branch));
+                            }
                         }
                     }
                     

@@ -227,9 +227,32 @@ pub async fn handle_repository_list(
         .repositories
         .into_iter()
         .map(|enhanced_repo| {
-            // Determine branch information
-            let branch = enhanced_repo.active_branch
-                .or(Some(enhanced_repo.default_branch));
+            // Determine branch/ref information to display
+            let branch = if let Some(target_ref) = &enhanced_repo.target_ref {
+                // For pinned repositories, show the target ref
+                Some(target_ref.clone())
+            } else if let Some(git_status) = &enhanced_repo.git_status {
+                if git_status.is_detached_head {
+                    // Show commit hash for detached HEAD
+                    Some(format!("{}", &git_status.current_commit[..8]))
+                } else if let Some(active_branch) = &enhanced_repo.active_branch {
+                    // Show active branch if available
+                    Some(active_branch.clone())
+                } else if !enhanced_repo.default_branch.is_empty() {
+                    // Fall back to default branch if not empty
+                    Some(enhanced_repo.default_branch.clone())
+                } else {
+                    None
+                }
+            } else if let Some(active_branch) = &enhanced_repo.active_branch {
+                // Show active branch if available (no git status)
+                Some(active_branch.clone())
+            } else if !enhanced_repo.default_branch.is_empty() {
+                // Fall back to default branch if not empty
+                Some(enhanced_repo.default_branch.clone())
+            } else {
+                None
+            };
 
             // Create description with enhanced information
             let mut description_parts = Vec::new();

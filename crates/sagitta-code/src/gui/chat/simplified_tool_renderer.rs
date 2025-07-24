@@ -873,7 +873,7 @@ impl<'a> SimplifiedToolRenderer<'a> {
                     // Clean up the name - remove trailing parentheses if present
                     let clean_name = name.trim_end_matches("()");
                     
-                    // Repository name and branch on same line
+                    // Repository name and branch/ref on same line
                     ui.horizontal(|ui| {
                         ui.label("•");
                         ui.label(RichText::new(clean_name).strong());
@@ -881,7 +881,12 @@ impl<'a> SimplifiedToolRenderer<'a> {
                         if let Some(branch) = repo.get("branch").and_then(|v| v.as_str()) {
                             if !branch.is_empty() {
                                 ui.add_space(4.0);
-                                ui.label(RichText::new(branch).color(self.app_theme.accent_color()));
+                                // Check if this looks like a version/tag/commit (contains dots, starts with v, or is hex)
+                                if branch.contains('.') || branch.starts_with('v') || branch.len() == 8 && branch.chars().all(|c| c.is_ascii_hexdigit()) {
+                                    ui.label(RichText::new(format!("@ {}", branch)).color(self.app_theme.accent_color()));
+                                } else {
+                                    ui.label(RichText::new(branch).color(self.app_theme.accent_color()));
+                                }
                             }
                         }
                     });
