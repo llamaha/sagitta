@@ -904,6 +904,8 @@ pub struct FilesystemStatus {
 pub struct GitRepositoryStatus {
     /// Current commit hash
     pub current_commit: String,
+    /// Current branch name (None if in detached HEAD state)
+    pub current_branch: Option<String>,
     /// Whether repository is clean (no uncommitted changes)
     pub is_clean: bool,
     /// Remote URL from git configuration
@@ -1116,14 +1118,12 @@ pub async fn get_enhanced_repository_info(repo_config: &RepositoryConfig) -> Res
         Vec::new()
     };
     
-    // Determine the current active branch
-    let _active_branch = if let Some(git_status) = &git_status {
-        if git_status.is_detached_head {
-            None // Don't show branch name for detached HEAD
-        } else {
-            Some(git_status.current_commit.clone())
-        }
+    // Determine the current active branch from git status
+    let active_branch = if let Some(git_status) = &git_status {
+        // Use the current branch from git status if available
+        git_status.current_branch.clone()
     } else {
+        // Fall back to repo config if no git status
         repo_config.active_branch.clone()
     };
     
@@ -1132,7 +1132,7 @@ pub async fn get_enhanced_repository_info(repo_config: &RepositoryConfig) -> Res
         url: repo_config.url.clone(),
         local_path: repo_config.local_path.clone(),
         default_branch: repo_config.default_branch.clone(),
-        active_branch: repo_config.active_branch.clone(),
+        active_branch,
         tracked_branches: repo_config.tracked_branches.clone(),
         filesystem_status,
         git_status,
@@ -1213,8 +1213,16 @@ async fn get_git_repository_status(path: &Path) -> Result<GitRepositoryStatus> {
     // Check if in detached HEAD state
     let is_detached_head = repo_info.current_branch.starts_with("detached-");
     
+    // Extract current branch name (None if detached)
+    let current_branch = if is_detached_head {
+        None
+    } else {
+        Some(repo_info.current_branch.clone())
+    };
+    
     Ok(GitRepositoryStatus {
         current_commit: repo_info.current_commit,
+        current_branch,
         is_clean: repo_info.is_clean,
         remote_url: repo_info.remote_url,
         available_branches,
