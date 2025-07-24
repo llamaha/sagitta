@@ -540,17 +540,42 @@ where
         let target_oid = git2_repo.revparse_single(commit_id)?.id();
         let mut tags = Vec::new();
         
-        if let Ok(tag_names) = git2_repo.tag_names(None) {
-            for tag_name in tag_names.iter().flatten() {
-                if let Ok(reference) = git2_repo.find_reference(&format!("refs/tags/{}", tag_name)) {
-                    if let Some(oid) = reference.target() {
-                        if oid == target_oid {
-                            tags.push(tag_name.to_string());
+        // Method 1: Check all references
+        if let Ok(references) = git2_repo.references() {
+            for reference in references.flatten() {
+                if let Some(name) = reference.name() {
+                    if name.starts_with("refs/tags/") {
+                        let tag_name = &name[10..]; // Remove "refs/tags/" prefix
+                        
+                        // Check if this tag points to our commit
+                        if let Ok(peeled) = reference.peel_to_commit() {
+                            if peeled.id() == target_oid {
+                                tags.push(tag_name.to_string());
+                            }
+                        } else if let Some(direct_oid) = reference.target() {
+                            if direct_oid == target_oid {
+                                tags.push(tag_name.to_string());
+                            }
                         }
-                    } else if let Ok(peeled) = reference.peel_to_commit() {
-                        // Handle annotated tags
-                        if peeled.id() == target_oid {
-                            tags.push(tag_name.to_string());
+                    }
+                }
+            }
+        }
+        
+        // If no tags found with method 1, try method 2 (original approach)
+        if tags.is_empty() {
+            if let Ok(tag_names) = git2_repo.tag_names(None) {
+                for tag_name in tag_names.iter().flatten() {
+                    if let Ok(reference) = git2_repo.find_reference(&format!("refs/tags/{}", tag_name)) {
+                        if let Some(oid) = reference.target() {
+                            if oid == target_oid {
+                                tags.push(tag_name.to_string());
+                            }
+                        } else if let Ok(peeled) = reference.peel_to_commit() {
+                            // Handle annotated tags
+                            if peeled.id() == target_oid {
+                                tags.push(tag_name.to_string());
+                            }
                         }
                     }
                 }

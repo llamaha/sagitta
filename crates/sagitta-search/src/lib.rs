@@ -1226,6 +1226,9 @@ async fn get_git_repository_status(path: &Path) -> Result<GitRepositoryStatus> {
     let tags_at_commit = git_manager.get_tags_at_commit(path, &repo_info.current_commit)
         .unwrap_or_default();
     
+    log::debug!("Git status for {}: detached={}, commit={}, tags={:?}", 
+               path.display(), is_detached_head, &repo_info.current_commit[..8], tags_at_commit);
+    
     Ok(GitRepositoryStatus {
         current_commit: repo_info.current_commit,
         current_branch,

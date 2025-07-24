@@ -234,6 +234,8 @@ pub async fn handle_repository_list(
             } else if let Some(git_status) = &enhanced_repo.git_status {
                 if git_status.is_detached_head {
                     // Check if there are tags at this commit
+                    log::debug!("Repository {} is in detached HEAD with tags: {:?}", 
+                               enhanced_repo.name, git_status.tags_at_commit);
                     if !git_status.tags_at_commit.is_empty() {
                         // Show the first tag (usually there's only one)
                         Some(git_status.tags_at_commit[0].clone())
