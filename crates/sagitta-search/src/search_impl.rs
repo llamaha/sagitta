@@ -433,8 +433,10 @@ fn deduplicate_search_results(results: Vec<ScoredPoint>) -> Vec<ScoredPoint> {
         }
     }
     
-    // Collect results and maintain original order by score (they should already be sorted)
-    seen_map.into_values().collect()
+    // Collect results and sort by score in descending order
+    let mut deduplicated: Vec<ScoredPoint> = seen_map.into_values().collect();
+    deduplicated.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    deduplicated
 }
 
 #[cfg(test)]
