@@ -840,15 +840,17 @@ impl ToolResultFormatter {
         let mut result = String::new();
         
         if let Some(repos) = value.get("repositories").and_then(|v| v.as_array()) {
-            result.push_str(&format!("📚 **{} repositories**\n\n", repos.len()));
+            result.push_str(&format!("**{} repositories**\n\n", repos.len()));
             
             for repo in repos {
                 if let Some(name) = repo.get("name").and_then(|v| v.as_str()) {
-                    result.push_str(&format!("• **{name}**"));
+                    result.push_str(&format!("• **{}**", name));
                     
                     // Show branch if available
                     if let Some(branch) = repo.get("branch").and_then(|v| v.as_str()) {
-                        result.push_str(&format!(" ({branch})"));
+                        if !branch.is_empty() {
+                            result.push_str(&format!(" - {}", branch));
+                        }
                     }
                     
                     result.push('\n');
@@ -856,31 +858,44 @@ impl ToolResultFormatter {
                     // Show remote URL
                     if let Some(remote) = repo.get("remote").and_then(|v| v.as_str()) {
                         if !remote.is_empty() {
-                            result.push_str(&format!("  🔗 {remote}\n"));
+                            result.push_str(&format!("  🔗 {}\n", remote));
                         }
                     }
                     
-                    // Show description which contains sync status and other info
+                    // Parse and display description in a more structured way
                     if let Some(description) = repo.get("description").and_then(|v| v.as_str()) {
-                        result.push_str(&format!("  ℹ️  {description}\n"));
+                        let parts: Vec<&str> = description.split(" | ").collect();
+                        
+                        for part in parts {
+                            if part == "Git repository" {
+                                // Skip redundant info
+                                continue;
+                            }
+                            
+                            if part.contains("synced") || part.contains("needs sync") {
+                                let icon = if part.contains("needs sync") { "⚠️" } else { "✅" };
+                                result.push_str(&format!("  {} **{}**\n", icon, part));
+                            } else if part.contains("files") || part.contains("MB") || part.contains("KB") {
+                                result.push_str(&format!("  📁 {}\n", part));
+                            } else if part.contains("Extensions:") {
+                                result.push_str(&format!("  📄 *{}*\n", part));
+                            }
+                        }
                     }
                     
-                    // Show dependencies if any
+                    // Show dependencies with better formatting
                     if let Some(deps) = repo.get("dependencies").and_then(|v| v.as_array()) {
                         if !deps.is_empty() {
-                            result.push_str("  🔗 Dependencies: ");
-                            let dep_names: Vec<String> = deps.iter()
-                                .filter_map(|d| {
-                                    let name = d.get("repositoryName").and_then(|v| v.as_str())?;
-                                    if let Some(target_ref) = d.get("targetRef").and_then(|v| v.as_str()) {
-                                        Some(format!("{} ({})", name, target_ref))
-                                    } else {
-                                        Some(name.to_string())
+                            result.push_str("  **Dependencies:**\n");
+                            for dep in deps {
+                                if let Some(name) = dep.get("repositoryName").and_then(|v| v.as_str()) {
+                                    result.push_str(&format!("    • {}", name));
+                                    if let Some(target_ref) = dep.get("targetRef").and_then(|v| v.as_str()) {
+                                        result.push_str(&format!(" @ {}", target_ref));
                                     }
-                                })
-                                .collect();
-                            result.push_str(&dep_names.join(", "));
-                            result.push('\n');
+                                    result.push('\n');
+                                }
+                            }
                         }
                     }
                     

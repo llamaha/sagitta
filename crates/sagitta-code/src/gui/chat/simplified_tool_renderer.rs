@@ -866,61 +866,95 @@ impl<'a> SimplifiedToolRenderer<'a> {
     fn render_repository_info(&self, ui: &mut Ui) {
         if let Some(repositories) = self.result.get("repositories").and_then(|v| v.as_array()) {
             ui.label(format!("{} repositories", repositories.len()));
-            ui.add_space(4.0);
+            ui.add_space(8.0);
             
             for repo in repositories {
                 if let Some(name) = repo.get("name").and_then(|v| v.as_str()) {
                     // Clean up the name - remove trailing parentheses if present
                     let clean_name = name.trim_end_matches("()");
                     
+                    // Repository name and branch on same line
                     ui.horizontal(|ui| {
-                        // Use bullet point format
                         ui.label("•");
                         ui.label(RichText::new(clean_name).strong());
                         
                         if let Some(branch) = repo.get("branch").and_then(|v| v.as_str()) {
                             if !branch.is_empty() {
-                                ui.label(RichText::new(format!("[{}]", branch)).small().color(self.app_theme.hint_text_color()));
+                                ui.add_space(4.0);
+                                ui.label(RichText::new(branch).color(self.app_theme.accent_color()));
                             }
                         }
                     });
                     
-                    // Show remote URL if available
+                    // Show remote URL on its own line with proper indentation
                     if let Some(remote) = repo.get("remote").and_then(|v| v.as_str()) {
                         if !remote.is_empty() {
                             ui.indent("repo_remote", |ui| {
-                                ui.label(RichText::new(format!("🔗 {}", remote)).small().color(self.app_theme.hint_text_color()));
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new("🔗").color(self.app_theme.hint_text_color()));
+                                    ui.label(RichText::new(remote).color(self.app_theme.hint_text_color()));
+                                });
                             });
                         }
                     }
                     
-                    // Show description which contains sync status and other info
+                    // Parse and display description in a more structured way
                     if let Some(description) = repo.get("description").and_then(|v| v.as_str()) {
-                        ui.indent("repo_description", |ui| {
-                            ui.label(RichText::new(format!("ℹ️  {}", description)).small().color(self.app_theme.hint_text_color()));
+                        ui.indent("repo_info", |ui| {
+                            // Parse the description to extract different parts
+                            let parts: Vec<&str> = description.split(" | ").collect();
+                            
+                            for (i, part) in parts.iter().enumerate() {
+                                if i == 0 && *part == "Git repository" {
+                                    // Skip the "Git repository" part as it's redundant
+                                    continue;
+                                }
+                                
+                                // Sync status gets special treatment
+                                if part.contains("synced") || part.contains("needs sync") {
+                                    let color = if part.contains("needs sync") {
+                                        self.app_theme.warning_color()
+                                    } else {
+                                        self.app_theme.success_color()
+                                    };
+                                    ui.label(RichText::new(*part).color(color));
+                                } else if part.contains("files") || part.contains("MB") || part.contains("KB") {
+                                    // File count and size info
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new("📁").color(self.app_theme.hint_text_color()));
+                                        ui.label(RichText::new(*part).color(self.app_theme.text_color()));
+                                    });
+                                } else if part.contains("Extensions:") {
+                                    // Extension info with accent color
+                                    ui.label(RichText::new(*part).color(self.app_theme.accent_color()));
+                                }
+                            }
                         });
                     }
                     
-                    // Show dependencies if any
+                    // Show dependencies with better formatting
                     if let Some(deps) = repo.get("dependencies").and_then(|v| v.as_array()) {
                         if !deps.is_empty() {
                             ui.indent("repo_deps", |ui| {
-                                let dep_names: Vec<String> = deps.iter()
-                                    .filter_map(|d| {
-                                        let name = d.get("repositoryName").and_then(|v| v.as_str())?;
-                                        if let Some(target_ref) = d.get("targetRef").and_then(|v| v.as_str()) {
-                                            Some(format!("{} ({})", name, target_ref))
-                                        } else {
-                                            Some(name.to_string())
-                                        }
-                                    })
-                                    .collect();
-                                ui.label(RichText::new(format!("🔗 Dependencies: {}", dep_names.join(", "))).small().color(self.app_theme.hint_text_color()));
+                                ui.label(RichText::new("Dependencies:").color(self.app_theme.hint_text_color()));
+                                for dep in deps {
+                                    if let Some(name) = dep.get("repositoryName").and_then(|v| v.as_str()) {
+                                        ui.indent("dep_item", |ui| {
+                                            ui.horizontal(|ui| {
+                                                ui.label("•");
+                                                ui.label(name);
+                                                if let Some(target_ref) = dep.get("targetRef").and_then(|v| v.as_str()) {
+                                                    ui.label(RichText::new(format!("@ {}", target_ref)).color(self.app_theme.accent_color()));
+                                                }
+                                            });
+                                        });
+                                    }
+                                }
                             });
                         }
                     }
                     
-                    ui.add_space(2.0);
+                    ui.add_space(8.0);
                 }
             }
         } else if let Some(message) = self.result.get("message").and_then(|v| v.as_str()) {
