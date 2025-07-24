@@ -846,15 +846,45 @@ impl ToolResultFormatter {
                 if let Some(name) = repo.get("name").and_then(|v| v.as_str()) {
                     result.push_str(&format!("• **{name}**"));
                     
-                    if let Some(branch) = repo.get("activeBranch").and_then(|v| v.as_str()) {
+                    // Show branch if available
+                    if let Some(branch) = repo.get("branch").and_then(|v| v.as_str()) {
                         result.push_str(&format!(" ({branch})"));
                     }
                     
                     result.push('\n');
                     
-                    if let Some(path) = repo.get("path").and_then(|v| v.as_str()) {
-                        result.push_str(&format!("  📁 {path}\n"));
+                    // Show remote URL
+                    if let Some(remote) = repo.get("remote").and_then(|v| v.as_str()) {
+                        if !remote.is_empty() {
+                            result.push_str(&format!("  🔗 {remote}\n"));
+                        }
                     }
+                    
+                    // Show description which contains sync status and other info
+                    if let Some(description) = repo.get("description").and_then(|v| v.as_str()) {
+                        result.push_str(&format!("  ℹ️  {description}\n"));
+                    }
+                    
+                    // Show dependencies if any
+                    if let Some(deps) = repo.get("dependencies").and_then(|v| v.as_array()) {
+                        if !deps.is_empty() {
+                            result.push_str("  🔗 Dependencies: ");
+                            let dep_names: Vec<String> = deps.iter()
+                                .filter_map(|d| {
+                                    let name = d.get("repositoryName").and_then(|v| v.as_str())?;
+                                    if let Some(target_ref) = d.get("targetRef").and_then(|v| v.as_str()) {
+                                        Some(format!("{} ({})", name, target_ref))
+                                    } else {
+                                        Some(name.to_string())
+                                    }
+                                })
+                                .collect();
+                            result.push_str(&dep_names.join(", "));
+                            result.push('\n');
+                        }
+                    }
+                    
+                    result.push('\n');
                 }
             }
         } else {

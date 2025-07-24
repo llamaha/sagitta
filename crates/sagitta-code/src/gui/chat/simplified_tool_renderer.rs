@@ -885,11 +885,42 @@ impl<'a> SimplifiedToolRenderer<'a> {
                         }
                     });
                     
-                    if let Some(path) = repo.get("path").and_then(|v| v.as_str()) {
-                        ui.indent("repo_path", |ui| {
-                            ui.label(RichText::new(path).small().color(self.app_theme.hint_text_color()));
+                    // Show remote URL if available
+                    if let Some(remote) = repo.get("remote").and_then(|v| v.as_str()) {
+                        if !remote.is_empty() {
+                            ui.indent("repo_remote", |ui| {
+                                ui.label(RichText::new(format!("🔗 {}", remote)).small().color(self.app_theme.hint_text_color()));
+                            });
+                        }
+                    }
+                    
+                    // Show description which contains sync status and other info
+                    if let Some(description) = repo.get("description").and_then(|v| v.as_str()) {
+                        ui.indent("repo_description", |ui| {
+                            ui.label(RichText::new(format!("ℹ️  {}", description)).small().color(self.app_theme.hint_text_color()));
                         });
                     }
+                    
+                    // Show dependencies if any
+                    if let Some(deps) = repo.get("dependencies").and_then(|v| v.as_array()) {
+                        if !deps.is_empty() {
+                            ui.indent("repo_deps", |ui| {
+                                let dep_names: Vec<String> = deps.iter()
+                                    .filter_map(|d| {
+                                        let name = d.get("repositoryName").and_then(|v| v.as_str())?;
+                                        if let Some(target_ref) = d.get("targetRef").and_then(|v| v.as_str()) {
+                                            Some(format!("{} ({})", name, target_ref))
+                                        } else {
+                                            Some(name.to_string())
+                                        }
+                                    })
+                                    .collect();
+                                ui.label(RichText::new(format!("🔗 Dependencies: {}", dep_names.join(", "))).small().color(self.app_theme.hint_text_color()));
+                            });
+                        }
+                    }
+                    
+                    ui.add_space(2.0);
                 }
             }
         } else if let Some(message) = self.result.get("message").and_then(|v| v.as_str()) {
