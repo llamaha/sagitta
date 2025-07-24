@@ -531,6 +531,34 @@ where
         
         Ok(tags)
     }
+    
+    /// Get tags that point to a specific commit
+    pub fn get_tags_at_commit(&self, repo_path: &std::path::Path, commit_id: &str) -> GitResult<Vec<String>> {
+        let repo = GitRepository::open(repo_path)?;
+        let git2_repo = repo.repo();
+        
+        let target_oid = git2_repo.revparse_single(commit_id)?.id();
+        let mut tags = Vec::new();
+        
+        if let Ok(tag_names) = git2_repo.tag_names(None) {
+            for tag_name in tag_names.iter().flatten() {
+                if let Ok(reference) = git2_repo.find_reference(&format!("refs/tags/{}", tag_name)) {
+                    if let Some(oid) = reference.target() {
+                        if oid == target_oid {
+                            tags.push(tag_name.to_string());
+                        }
+                    } else if let Ok(peeled) = reference.peel_to_commit() {
+                        // Handle annotated tags
+                        if peeled.id() == target_oid {
+                            tags.push(tag_name.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(tags)
+    }
 
     /// Create a new branch
     ///

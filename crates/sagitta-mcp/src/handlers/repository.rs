@@ -233,8 +233,14 @@ pub async fn handle_repository_list(
                 Some(target_ref.clone())
             } else if let Some(git_status) = &enhanced_repo.git_status {
                 if git_status.is_detached_head {
-                    // Show commit hash for detached HEAD
-                    Some(format!("{}", &git_status.current_commit[..8]))
+                    // Check if there are tags at this commit
+                    if !git_status.tags_at_commit.is_empty() {
+                        // Show the first tag (usually there's only one)
+                        Some(git_status.tags_at_commit[0].clone())
+                    } else {
+                        // Show commit hash for detached HEAD without tags
+                        Some(format!("{}", &git_status.current_commit[..8]))
+                    }
                 } else if let Some(active_branch) = &enhanced_repo.active_branch {
                     // Show active branch if available
                     Some(active_branch.clone())

@@ -914,6 +914,8 @@ pub struct GitRepositoryStatus {
     pub available_branches: Vec<String>,
     /// Whether repository is in detached HEAD state
     pub is_detached_head: bool,
+    /// Tags pointing to the current commit
+    pub tags_at_commit: Vec<String>,
 }
 
 /// Sync state information
@@ -1220,6 +1222,10 @@ async fn get_git_repository_status(path: &Path) -> Result<GitRepositoryStatus> {
         Some(repo_info.current_branch.clone())
     };
     
+    // Get tags at current commit
+    let tags_at_commit = git_manager.get_tags_at_commit(path, &repo_info.current_commit)
+        .unwrap_or_default();
+    
     Ok(GitRepositoryStatus {
         current_commit: repo_info.current_commit,
         current_branch,
@@ -1227,6 +1233,7 @@ async fn get_git_repository_status(path: &Path) -> Result<GitRepositoryStatus> {
         remote_url: repo_info.remote_url,
         available_branches,
         is_detached_head,
+        tags_at_commit,
     })
 }
 

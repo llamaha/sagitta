@@ -210,6 +210,7 @@ pub struct GitRepositoryStatus {
     pub is_clean: bool,
     pub remote_url: Option<String>,
     pub is_detached_head: bool,
+    pub tags_at_commit: Vec<String>,
 }
 
 /// Repository sync status
@@ -286,6 +287,7 @@ impl From<sagitta_search::EnhancedRepositoryInfo> for EnhancedRepoInfo {
                 is_clean: git.is_clean,
                 remote_url: git.remote_url,
                 is_detached_head: git.is_detached_head,
+                tags_at_commit: git.tags_at_commit,
             }),
             sync_status: RepoSyncStatus {
                 state: match enhanced.sync_status.state {
