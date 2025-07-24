@@ -32,7 +32,7 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "repository_list".to_string(),
-            description: "Lists currently configured repositories.".to_string(),
+            description: "Lists currently configured repositories with their dependencies. Each repository includes a 'dependencies' field showing all linked dependency repositories with their pinned versions. Dependencies are version-locked to match your project's actual usage - query these dependency repositories directly for accurate implementation details instead of relying on potentially outdated web documentation.".to_string(),
             parameters: json!({ "type": "object", "properties": {} }),
             is_required: false,
         },
@@ -50,7 +50,7 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "semantic_code_search".to_string(),
-            description: "Performs semantic search on an indexed repository. Use elementType (function, class, struct, method, interface) and lang (rust, python, javascript, go) parameters for better results. Examples: query='authentication', elementType='function', lang='rust' finds Rust auth functions.".to_string(),
+            description: "Performs semantic search on an indexed repository. Use elementType (function, class, struct, method, interface) and lang (rust, python, javascript, go) parameters for better results. Examples: query='authentication', elementType='function', lang='rust' finds Rust auth functions. Pro tip: Query dependency repositories listed in repository_list output to understand actual implementation details rather than guessing based on outdated documentation.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {

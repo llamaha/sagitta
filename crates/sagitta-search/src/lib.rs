@@ -1228,10 +1228,18 @@ async fn get_sync_status(repo_config: &RepositoryConfig, git_status: Option<&Git
     
     // Determine overall sync state
     let state = if let Some(git_status) = git_status {
-        if repo_config.last_synced_commits.is_empty() {
-            SyncState::NeverSynced
-        } else {
-            // Check if current commit matches last synced commit for active branch
+        // Check new field first, fall back to deprecated field
+        if let Some(last_synced_commit) = &repo_config.last_synced_commit {
+            if last_synced_commit == &git_status.current_commit {
+                SyncState::UpToDate
+            } else {
+                let active_branch = repo_config.active_branch.as_ref()
+                    .unwrap_or(&repo_config.default_branch);
+                branches_needing_sync.push(active_branch.clone());
+                SyncState::NeedsSync
+            }
+        } else if !repo_config.last_synced_commits.is_empty() {
+            // Fall back to deprecated field for backward compatibility
             let active_branch = repo_config.active_branch.as_ref()
                 .unwrap_or(&repo_config.default_branch);
             
@@ -1246,13 +1254,15 @@ async fn get_sync_status(repo_config: &RepositoryConfig, git_status: Option<&Git
                 branches_needing_sync.push(active_branch.clone());
                 SyncState::NeedsSync
             }
+        } else {
+            SyncState::NeverSynced
         }
     } else {
         // Can't determine git status (e.g., no commits, corrupted repo, doesn't exist)
-        if repo_config.last_synced_commits.is_empty() {
-            SyncState::NeverSynced
-        } else {
+        if repo_config.last_synced_commit.is_some() || !repo_config.last_synced_commits.is_empty() {
             SyncState::Unknown
+        } else {
+            SyncState::NeverSynced
         }
     };
     

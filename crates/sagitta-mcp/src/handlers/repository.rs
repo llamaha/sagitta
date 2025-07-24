@@ -464,7 +464,9 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
                     info!(repo_name=%repo_name, commit=%commit, "Sync successful, proceeding to update config.");
                     let mut config_write = config.write().await;
                     if let Some(repo_mut) = config_write.repositories.iter_mut().find(|r| r.name == repo_name) {
-                        // Use branch_to_sync_str (which is &str) for the key
+                        // Update the new last_synced_commit field
+                        repo_mut.last_synced_commit = Some(commit.clone());
+                        // Also update deprecated field for backward compatibility
                         repo_mut.last_synced_commits.insert(branch_to_sync_str.to_string(), commit.clone());
                         repo_mut.indexed_languages = Some(indexed_languages_from_sync.clone());
                         save_config_with_test_isolation(&config_write).map_err(|e| {
