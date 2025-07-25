@@ -673,10 +673,17 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                     app.state.current_response_id = None;
                 }
                 
-                // Save conversation after response completes
+                // Mark conversation as modified and save after response completes
+                app.state.conversation_modified = true;
                 if let Some(ref mut manager) = app.simple_conversation_manager {
-                    if let Err(e) = manager.save_current_conversation() {
-                        log::error!("Failed to save conversation after response: {e}");
+                    match manager.save_current_conversation() {
+                        Ok(_) => {
+                            app.state.conversation_modified = false;
+                            log::debug!("Saved conversation after response completed");
+                        }
+                        Err(e) => {
+                            log::error!("Failed to save conversation after response: {e}");
+                        }
                     }
                 }
                 
@@ -2091,7 +2098,26 @@ pub fn handle_show_new_conversation_confirmation(app: &mut SagittaCodeApp) {
 
 /// Handle create new conversation event
 pub fn handle_create_new_conversation(app: &mut SagittaCodeApp) {
-    log::info!("Creating new conversation - saving current and clearing state");
+    log::info!("Creating new conversation - stopping stream, saving current and clearing ALL state");
+    
+    // CRITICAL: First stop any ongoing streaming - same as STOP button
+    // IMMEDIATELY reset all UI states for instant feedback
+    app.state.is_waiting_for_response = false;
+    app.state.is_thinking = false;
+    app.state.is_responding = false;
+    app.state.is_streaming_response = false;
+    app.state.is_executing_tool = false;
+    app.state.thinking_message = None;
+    app.state.thinking_start_time = None;
+    
+    // Cancel the agent streaming if it exists
+    if let Some(agent) = &app.agent {
+        let agent_clone = agent.clone();
+        tokio::spawn(async move {
+            agent_clone.cancel().await;
+            log::info!("Agent streaming cancelled for new conversation");
+        });
+    }
     
     // Save the current conversation before creating a new one
     if let Some(ref mut manager) = app.simple_conversation_manager {
@@ -2100,21 +2126,30 @@ pub fn handle_create_new_conversation(app: &mut SagittaCodeApp) {
         }
     }
     
-    // Clear current conversation state
+    // CRITICAL: Clear ALL conversation state and context
     app.state.current_conversation_id = None;
     app.state.current_conversation_title = None;
     app.state.messages.clear();
-    
-    // Clear chat manager messages
-    app.chat_manager.clear_all_messages();
-    
-    // Clear agent state
-    app.state.is_waiting_for_response = false;
-    app.state.is_thinking = false;
-    app.state.is_responding = false;
-    app.state.is_executing_tool = false;
     app.state.current_response_id = None;
     app.state.tool_results.clear();
+    app.state.running_tools.clear();
+    app.state.tool_call_to_run_id.clear();
+    app.state.active_tool_calls.clear();
+    app.state.completed_tool_results.clear();
+    app.state.tool_calls_continued.clear();
+    app.state.pending_tool_calls.clear();
+    app.state.active_tool_call_message_id = None;
+    app.state.conversation_modified = false;
+    
+    // Clear chat manager messages - this clears the UI
+    app.chat_manager.clear_all_messages();
+    
+    // Clear any loop state
+    app.state.is_in_loop = false;
+    app.state.loop_break_requested = false;
+    app.state.loop_inject_message = None;
+    app.state.loop_inject_buffer.clear();
+    app.state.show_loop_inject_input = false;
     
     // Create new conversation in simple manager
     if let Some(ref mut manager) = app.simple_conversation_manager {

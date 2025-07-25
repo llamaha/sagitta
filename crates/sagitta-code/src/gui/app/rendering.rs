@@ -1148,6 +1148,22 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
             }
         },
         ActivePanel::Conversation => {
+            // Load conversations into panel if we have a manager
+            if let Some(ref manager) = app.simple_conversation_manager {
+                if let Ok(conversations) = manager.list_conversations() {
+                    // Convert to panel format
+                    let panel_conversations: Vec<_> = conversations.into_iter()
+                        .map(|(id, title, last_active)| crate::gui::conversation::panel::ConversationInfo {
+                            id,
+                            title,
+                            preview: String::new(), // TODO: Add preview support
+                            last_active,
+                        })
+                        .collect();
+                    app.conversation_panel.update_conversations(panel_conversations);
+                }
+            }
+            
             // New conversation panel with proper theming and resizing
             app.conversation_panel.render(ctx, app.state.current_theme);
             
