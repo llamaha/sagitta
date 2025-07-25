@@ -767,6 +767,9 @@ pub struct EditFileParams {
     /// Replace all occurrences (default: false)
     #[serde(default)]
     pub replace_all: bool,
+    /// Optional repository name to edit file in. If not specified, uses the current/active repository
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository_name: Option<String>,
 }
 
 /// Result of edit_file
@@ -803,6 +806,9 @@ pub struct MultiEditFileParams {
     pub file_path: String,
     /// Array of edit operations to perform sequentially
     pub edits: Vec<EditOperation>,
+    /// Optional repository name to edit file in. If not specified, uses the current/active repository
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository_name: Option<String>,
 }
 
 /// Result of multi_edit_file
@@ -881,6 +887,9 @@ pub struct ReadFileParams {
     pub start_line: usize,
     /// End line (1-based, inclusive)
     pub end_line: usize,
+    /// Optional repository name to read file from. If not specified, uses the current/active repository
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository_name: Option<String>,
 }
 
 /// Result of read_file
@@ -912,6 +921,9 @@ pub struct WriteFileParams {
     /// Create parent directories if they don't exist (default: true)
     #[serde(default = "default_create_parents")]
     pub create_parents: bool,
+    /// Optional repository name to write file in. If not specified, uses the current/active repository
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository_name: Option<String>,
 }
 
 fn default_create_parents() -> bool {

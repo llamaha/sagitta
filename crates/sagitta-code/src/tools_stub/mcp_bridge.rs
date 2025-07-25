@@ -172,14 +172,15 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "edit_file".to_string(),
-            description: "Performs exact string replacements in files with diff output. WARNING: Currently only works in the active repository - cannot edit files in dependencies.".to_string(),
+            description: "Performs exact string replacements in files with diff output. The repository_name parameter allows editing files in ANY repository including dependencies!".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "file_path": { "type": "string", "description": "The absolute path to the file to edit" },
                     "old_string": { "type": "string", "description": "The text to search for and replace" },
                     "new_string": { "type": "string", "description": "The text to replace it with" },
-                    "replace_all": { "type": "boolean", "description": "Replace all occurrences (default: false)" }
+                    "replace_all": { "type": "boolean", "description": "Replace all occurrences (default: false)" },
+                    "repository_name": { "type": "string", "description": "Optional repository name to edit file in. If not specified, uses the current/active repository" }
                 },
                 "required": ["file_path", "old_string", "new_string"]
             }),
@@ -187,7 +188,7 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "multi_edit_file".to_string(),
-            description: "Performs multiple sequential edits to a single file with diff output. WARNING: Currently only works in the active repository - cannot edit files in dependencies.".to_string(),
+            description: "Performs multiple sequential edits to a single file with diff output. The repository_name parameter allows editing files in ANY repository including dependencies!".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -204,7 +205,8 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
                             },
                             "required": ["old_string", "new_string"]
                         }
-                    }
+                    },
+                    "repository_name": { "type": "string", "description": "Optional repository name to edit file in. If not specified, uses the current/active repository" }
                 },
                 "required": ["file_path", "edits"]
             }),
@@ -230,13 +232,14 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "read_file".to_string(),
-            description: "Reads a specific range of lines from a file. You MUST specify both start_line and end_line (1-based line numbers). Maximum 400 lines per request. Example: to read first 100 lines use start_line=1, end_line=100. DO NOT use 'limit' or 'offset' parameters - they don't exist. WARNING: Currently only works in the active repository - cannot read files from dependencies (use semantic_code_search or ripgrep for dependencies).".to_string(),
+            description: "Reads a specific range of lines from a file. You MUST specify both start_line and end_line (1-based line numbers). Maximum 400 lines per request. Example: to read first 100 lines use start_line=1, end_line=100. DO NOT use 'limit' or 'offset' parameters - they don't exist. The repository_name parameter allows reading files from ANY repository including dependencies!".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "file_path": { "type": "string", "description": "Path to the file to read. Can be absolute or relative to the current repository" },
                     "start_line": { "type": "integer", "description": "REQUIRED: Line number to start reading from (1-based, inclusive). Example: 1 for first line" },
-                    "end_line": { "type": "integer", "description": "REQUIRED: Line number to stop reading at (1-based, inclusive). Maximum range is 400 lines. Example: 100 to read up to line 100" }
+                    "end_line": { "type": "integer", "description": "REQUIRED: Line number to stop reading at (1-based, inclusive). Maximum range is 400 lines. Example: 100 to read up to line 100" },
+                    "repository_name": { "type": "string", "description": "Optional repository name to read file from. If not specified, uses the current/active repository" }
                 },
                 "required": ["file_path", "start_line", "end_line"]
             }),
@@ -244,13 +247,14 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "write_file".to_string(),
-            description: "Writes content to a file with optional parent directory creation. WARNING: Currently only works in the active repository - cannot write files to dependencies.".to_string(),
+            description: "Writes content to a file with optional parent directory creation. The repository_name parameter allows writing files in ANY repository including dependencies!".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "file_path": { "type": "string", "description": "Path to the file to write. Can be absolute or relative to the current repository" },
                     "content": { "type": "string", "description": "The content to write to the file" },
-                    "create_parents": { "type": "boolean", "description": "Create parent directories if they don't exist (default: true)" }
+                    "create_parents": { "type": "boolean", "description": "Create parent directories if they don't exist (default: true)" },
+                    "repository_name": { "type": "string", "description": "Optional repository name to write file in. If not specified, uses the current/active repository" }
                 },
                 "required": ["file_path", "content"]
             }),

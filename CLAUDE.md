@@ -38,18 +38,19 @@ When adding new dependencies:
 
 ### Cross-Repository Tool Support
 
-**Tools that support cross-repository operations (via `repositoryName` parameter):**
+**ALL major tools now support cross-repository operations (via `repositoryName` parameter):**
 - ✅ `semantic_code_search` - Search code in any repository
 - ✅ `search_file` - Find files in any repository  
 - ✅ `ripgrep` - Search file contents in any repository
+- ✅ `read_file` - Read files from any repository
+- ✅ `edit_file` - Edit files in any repository
+- ✅ `multi_edit_file` - Edit files in any repository
+- ✅ `write_file` - Write files to any repository
 
-**Tools currently limited to active repository only:**
-- ⚠️ `read_file` - Cannot read files from dependencies
-- ⚠️ `edit_file` - Cannot edit files in dependencies
-- ⚠️ `multi_edit_file` - Cannot edit files in dependencies
-- ⚠️ `write_file` - Cannot write files to dependencies
-
-**Workaround for file reading limitation:** Use `ripgrep` or `semantic_code_search` to view code from dependencies.
+**Example usage with dependencies:**
+- Read egui source: `read_file(file_path="src/lib.rs", start_line=1, end_line=50, repository_name="egui")`
+- Search in tokio: `ripgrep(pattern="async fn", repository_name="tokio")`
+- Edit dependency: `edit_file(file_path="Cargo.toml", old_string="0.1.0", new_string="0.2.0", repository_name="my-dependency")`
 
 This approach ensures you understand the actual implementation rather than outdated documentation.
 

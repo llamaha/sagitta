@@ -12,12 +12,75 @@ use super::utils::get_current_repository_path;
 /// Handler for writing file contents
 pub async fn handle_write_file<C: QdrantClientTrait + Send + Sync + 'static>(
     params: WriteFileParams,
-    _config: Arc<RwLock<AppConfig>>,
+    config: Arc<RwLock<AppConfig>>,
     _qdrant_client: Arc<C>,
     _auth_user_ext: Option<Extension<AuthenticatedUser>>,
 ) -> Result<WriteFileResult, ErrorObject> {
-    // Handle relative paths using repository context
-    let file_path = if Path::new(&params.file_path).is_absolute() {
+    // Handle repository context and relative paths
+    let file_path = if let Some(repo_name) = &params.repository_name {
+        // Use specified repository
+        let config_guard = config.read().await;
+        let repo_config = config_guard.repositories.iter()
+            .find(|r| r.name == *repo_name)
+            .ok_or_else(|| ErrorObject {
+                code: -32603,
+                message: format!("Repository '{}' not found", repo_name),
+                data: None,
+            })?;
+        
+        if Path::new(&params.file_path).is_absolute() {
+            // Verify absolute path is within repository
+            let absolute_path = PathBuf::from(&params.file_path);
+            let canonical_base = repo_config.local_path.canonicalize()
+                .map_err(|e| ErrorObject {
+                    code: -32603,
+                    message: format!("Failed to canonicalize repository path: {}", e),
+                    data: None,
+                })?;
+            
+            // For write_file, we may need to create the file first
+            if absolute_path.exists() {
+                let canonical_target = absolute_path.canonicalize()
+                    .map_err(|e| ErrorObject {
+                        code: -32603,
+                        message: format!("Failed to canonicalize target path: {}", e),
+                        data: None,
+                    })?;
+                
+                if !canonical_target.starts_with(&canonical_base) {
+                    return Err(ErrorObject {
+                        code: -32603,
+                        message: format!("File path '{}' is outside repository '{}'", params.file_path, repo_name),
+                        data: None,
+                    });
+                }
+            } else {
+                // For new files, check parent directory
+                if let Some(parent) = absolute_path.parent() {
+                    if parent.exists() {
+                        let canonical_parent = parent.canonicalize()
+                            .map_err(|e| ErrorObject {
+                                code: -32603,
+                                message: format!("Failed to canonicalize parent path: {}", e),
+                                data: None,
+                            })?;
+                        
+                        if !canonical_parent.starts_with(&canonical_base) {
+                            return Err(ErrorObject {
+                                code: -32603,
+                                message: format!("File path '{}' is outside repository '{}'", params.file_path, repo_name),
+                                data: None,
+                            });
+                        }
+                    }
+                }
+            }
+            absolute_path
+        } else {
+            // Relative path within repository
+            repo_config.local_path.join(&params.file_path)
+        }
+    } else if Path::new(&params.file_path).is_absolute() {
         PathBuf::from(&params.file_path)
     } else {
         // Try to get repository context

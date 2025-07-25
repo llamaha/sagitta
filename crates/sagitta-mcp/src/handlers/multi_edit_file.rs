@@ -113,12 +113,51 @@ fn apply_edit(content: &str, edit: &EditOperation) -> Result<String, String> {
 /// Handler for multi-edit file operations
 pub async fn handle_multi_edit_file<C: QdrantClientTrait + Send + Sync + 'static>(
     params: MultiEditFileParams,
-    _config: Arc<RwLock<AppConfig>>,
+    config: Arc<RwLock<AppConfig>>,
     _qdrant_client: Arc<C>,
     _auth_user_ext: Option<Extension<AuthenticatedUser>>,
 ) -> Result<MultiEditFileResult, ErrorObject> {
-    // Handle relative paths using repository context
-    let file_path = if Path::new(&params.file_path).is_absolute() {
+    // Handle repository context and relative paths
+    let file_path = if let Some(repo_name) = &params.repository_name {
+        // Use specified repository
+        let config_guard = config.read().await;
+        let repo_config = config_guard.repositories.iter()
+            .find(|r| r.name == *repo_name)
+            .ok_or_else(|| ErrorObject {
+                code: -32603,
+                message: format!("Repository '{}' not found", repo_name),
+                data: None,
+            })?;
+        
+        if Path::new(&params.file_path).is_absolute() {
+            // Verify absolute path is within repository
+            let absolute_path = PathBuf::from(&params.file_path);
+            let canonical_base = repo_config.local_path.canonicalize()
+                .map_err(|e| ErrorObject {
+                    code: -32603,
+                    message: format!("Failed to canonicalize repository path: {}", e),
+                    data: None,
+                })?;
+            let canonical_target = absolute_path.canonicalize()
+                .map_err(|e| ErrorObject {
+                    code: -32603,
+                    message: format!("Failed to canonicalize target path: {}", e),
+                    data: None,
+                })?;
+            
+            if !canonical_target.starts_with(&canonical_base) {
+                return Err(ErrorObject {
+                    code: -32603,
+                    message: format!("File path '{}' is outside repository '{}'", params.file_path, repo_name),
+                    data: None,
+                });
+            }
+            absolute_path
+        } else {
+            // Relative path within repository
+            repo_config.local_path.join(&params.file_path)
+        }
+    } else if Path::new(&params.file_path).is_absolute() {
         PathBuf::from(&params.file_path)
     } else {
         // Try to get repository context
