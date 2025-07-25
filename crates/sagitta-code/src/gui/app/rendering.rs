@@ -804,6 +804,10 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
                     context_aware_message.push_str(&format!("[System: Current repository context is '{repo_context}'. When the user refers to 'this repository' or asks for operations without specifying a repository, use '{repo_context}']\n\n"));
                 }
                 
+                // Add current working directory for better context (especially for local models)
+                if let Ok(cwd) = std::env::current_dir() {
+                    context_aware_message.push_str(&format!("[System: CWD is {}]\n\n", cwd.display()));
+                }
                 
                 // Append the actual user message
                 context_aware_message.push_str(&user_message);

@@ -132,7 +132,11 @@ async fn run_direct_llm_with_tool_execution(
             id: Uuid::new_v4(),
             role: Role::User,
             parts: vec![MessagePart::Text {
-                text: initial_prompt.clone()
+                text: if let Ok(cwd) = std::env::current_dir() {
+                    format!("[System: CWD is {}]\n\n{}", cwd.display(), initial_prompt)
+                } else {
+                    initial_prompt.clone()
+                }
             }],
             metadata: Default::default(),
         }
@@ -347,10 +351,17 @@ async fn run_direct_llm_with_tool_execution(
                 break;
             }
             
+            // Add CWD context to user message for better context (especially for local models)
+            let message_with_context = if let Ok(cwd) = std::env::current_dir() {
+                format!("[System: CWD is {}]\n\n{}", cwd.display(), input)
+            } else {
+                input.to_string()
+            };
+            
             messages.push(Message {
                 id: Uuid::new_v4(),
                 role: Role::User,
-                parts: vec![MessagePart::Text { text: input.to_string() }],
+                parts: vec![MessagePart::Text { text: message_with_context }],
                 metadata: Default::default(),
             });
             
@@ -478,7 +489,11 @@ async fn run_direct_llm(
             id: Uuid::new_v4(),
             role: Role::User,
             parts: vec![MessagePart::Text {
-                text: initial_prompt.clone()
+                text: if let Ok(cwd) = std::env::current_dir() {
+                    format!("[System: CWD is {}]\n\n{}", cwd.display(), initial_prompt)
+                } else {
+                    initial_prompt.clone()
+                }
             }],
             metadata: Default::default(),
         }
@@ -692,10 +707,17 @@ async fn run_direct_llm(
                 break;
             }
             
+            // Add CWD context to user message for better context (especially for local models)
+            let message_with_context = if let Ok(cwd) = std::env::current_dir() {
+                format!("[System: CWD is {}]\n\n{}", cwd.display(), input)
+            } else {
+                input.to_string()
+            };
+            
             messages.push(Message {
                 id: Uuid::new_v4(),
                 role: Role::User,
-                parts: vec![MessagePart::Text { text: input.to_string() }],
+                parts: vec![MessagePart::Text { text: message_with_context }],
                 metadata: Default::default(),
             });
             

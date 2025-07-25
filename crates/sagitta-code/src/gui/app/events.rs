@@ -377,9 +377,14 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                                         
                                         log::info!("Starting continuation stream after tool completion and history update");
                                         
-                                        // Send an empty message to continue the conversation
+                                        // Send a message with current working directory context to continue the conversation
                                         // The model will see the tool results and provide its analysis
-                                        match agent_clone.process_message_stream("").await {
+                                        let continuation_message = if let Ok(cwd) = std::env::current_dir() {
+                                            format!("[System: CWD is {}]\n", cwd.display())
+                                        } else {
+                                            String::new()
+                                        };
+                                        match agent_clone.process_message_stream(&continuation_message).await {
                                             Ok(mut stream) => {
                                                 log::info!("Successfully created continuation stream");
                                                 let mut chunk_count = 0;
