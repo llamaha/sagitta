@@ -39,6 +39,10 @@ pub struct SagittaCodeConfig {
     /// Auto-sync configuration (file watching, auto-commit, etc.)
     #[serde(default)]
     pub auto_sync: AutoSyncConfig,
+    
+    /// Tool configuration (timeouts, limits, etc.)
+    #[serde(default)]
+    pub tools: ToolConfig,
 }
 
 
@@ -154,6 +158,7 @@ impl Default for SagittaCodeConfig {
             logging: LoggingConfig::default(),
             conversation: ConversationConfig::default(),
             auto_sync: AutoSyncConfig::default(),
+            tools: ToolConfig::default(),
         };
         
         // Always ensure at least one provider is configured
@@ -627,6 +632,32 @@ impl Default for AutoSyncConfig {
     }
 }
 
+/// Configuration for tool behavior (timeouts, limits, etc.)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolConfig {
+    /// Shell command timeout in milliseconds
+    #[serde(default = "default_shell_timeout_ms")]
+    pub shell_timeout_ms: u64,
+    
+    /// Maximum file size for read operations (in bytes)
+    #[serde(default = "default_max_file_size")]
+    pub max_file_size: u64,
+    
+    /// Maximum number of search results
+    #[serde(default = "default_max_search_results")]
+    pub max_search_results: usize,
+}
+
+impl Default for ToolConfig {
+    fn default() -> Self {
+        Self {
+            shell_timeout_ms: default_shell_timeout_ms(),
+            max_file_size: default_max_file_size(),
+            max_search_results: default_max_search_results(),
+        }
+    }
+}
+
 /// Configuration for file watching
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileWatcherConfig {
@@ -898,6 +929,19 @@ fn default_auto_commit_skip_hooks() -> bool {
 
 fn default_auto_commit_cooldown_seconds() -> u64 {
     30 // 30 seconds minimum between auto-commits
+}
+
+// Tool configuration defaults
+fn default_shell_timeout_ms() -> u64 {
+    60000 // 60 seconds default (increased from 30s for running tests)
+}
+
+fn default_max_file_size() -> u64 {
+    100 * 1024 * 1024 // 100MB
+}
+
+fn default_max_search_results() -> usize {
+    1000
 }
 
 #[cfg(test)]

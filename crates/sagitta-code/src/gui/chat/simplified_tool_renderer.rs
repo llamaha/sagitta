@@ -964,6 +964,25 @@ impl<'a> SimplifiedToolRenderer<'a> {
             }
         } else if let Some(message) = self.result.get("message").and_then(|v| v.as_str()) {
             ui.label(message);
+        } else if let Some(error) = self.result.get("error") {
+            // Handle error object or string
+            if let Some(error_str) = error.as_str() {
+                // Simple string error
+                ui.label(RichText::new(error_str).color(self.app_theme.error_color()));
+            } else if let Some(error_msg) = error.get("message").and_then(|v| v.as_str()) {
+                // Error object with message field
+                ui.label(RichText::new(error_msg).color(self.app_theme.error_color()));
+                
+                // Also show error code if available
+                if let Some(code) = error.get("code").and_then(|v| v.as_i64()) {
+                    ui.label(RichText::new(format!("Error code: {}", code))
+                        .small()
+                        .color(self.app_theme.hint_text_color()));
+                }
+            } else {
+                // Fallback for other error formats
+                ui.label(RichText::new("Operation failed").color(self.app_theme.error_color()));
+            }
         } else {
             ui.label("Repository operation completed");
         }

@@ -166,6 +166,7 @@ mod tests {
             file_path: file_path.to_str().unwrap().to_string(),
             content: content.to_string(),
             create_parents: true,
+            repository_name: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -195,6 +196,7 @@ mod tests {
             file_path: file_path.to_str().unwrap().to_string(),
             content: new_content.to_string(),
             create_parents: true,
+            repository_name: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -220,6 +222,7 @@ mod tests {
             file_path: file_path.to_str().unwrap().to_string(),
             content: content.to_string(),
             create_parents: true,
+            repository_name: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -244,6 +247,7 @@ mod tests {
             file_path: file_path.to_str().unwrap().to_string(),
             content: "Content".to_string(),
             create_parents: false,
+            repository_name: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -267,6 +271,7 @@ mod tests {
             file_path: file_path.to_str().unwrap().to_string(),
             content: large_content.clone(),
             create_parents: true,
+            repository_name: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));

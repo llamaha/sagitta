@@ -695,34 +695,14 @@ fn get_repo_config_mcp<'a>(
         })
 }
 
-/// Validates search patterns to prevent overly broad searches that could return excessive results
+/// Validates search patterns - allows broad patterns but will truncate results
 fn validate_search_pattern(pattern: &str) -> Result<(), ErrorObject> {
-    // Disallow standalone wildcards that would match everything
-    let dangerous_patterns = ["*", "**", "**/*", "*/*", "**/**"];
-    
-    if dangerous_patterns.contains(&pattern) {
+    // Allow all patterns now, including "*" - we'll handle truncation in the handler
+    // Only block completely empty patterns
+    if pattern.is_empty() {
         return Err(ErrorObject {
             code: error_codes::INVALID_PARAMS,
-            message: format!(
-                "Pattern '{}' is too broad and could return excessive results. Please use more specific patterns like '*.rs', 'src/*.ts', or '*config*'. Patterns must contain at least 2 non-wildcard characters.",
-                pattern
-            ),
-            data: None,
-        });
-    }
-    
-    // Require at least some non-wildcard characters
-    let non_wildcard_chars = pattern.chars()
-        .filter(|c| *c != '*' && *c != '?' && *c != '/')
-        .count();
-    
-    if non_wildcard_chars < 2 {
-        return Err(ErrorObject {
-            code: error_codes::INVALID_PARAMS,
-            message: format!(
-                "Pattern '{}' must contain at least 2 non-wildcard characters. Examples: '*.rs', 'test*', '*config*', 'src/*.js'",
-                pattern
-            ),
+            message: "Pattern cannot be empty".to_string(),
             data: None,
         });
     }
@@ -747,7 +727,7 @@ pub async fn handle_repository_search_file(
     let search_path = &repo_config.local_path;
     let case_sensitive = params.case_sensitive.unwrap_or(false);
 
-    let mut matching_paths = find_files_matching_pattern(search_path, &params.pattern, case_sensitive)
+    let matching_paths = find_files_matching_pattern(search_path, &params.pattern, case_sensitive)
         .map_err(|e| {
             let error_data = create_error_data(&anyhow!(e));
             ErrorObject {
@@ -757,37 +737,25 @@ pub async fn handle_repository_search_file(
             }
         })?;
     
-    // Check file count before processing
-    const MAX_SEARCH_RESULTS: usize = 500;
-    if matching_paths.len() > MAX_SEARCH_RESULTS {
-        return Err(ErrorObject {
-            code: error_codes::INVALID_REQUEST,
-            message: format!(
-                "Too many results: {} files found (limit: {}). Try with a more specific pattern. Examples: 'src/*.rs' instead of '*.rs', 'test_*.py' instead of '*.py'",
-                matching_paths.len(),
-                MAX_SEARCH_RESULTS
-            ),
-            data: None,
-        });
-    }
+    // Truncate results to 50 files
+    const MAX_DISPLAY_RESULTS: usize = 50;
+    let total_found = matching_paths.len();
+    let truncated = total_found > MAX_DISPLAY_RESULTS;
+    let paths_to_display: Vec<_> = matching_paths.into_iter().take(MAX_DISPLAY_RESULTS).collect();
 
     // Convert PathBufs to Strings for JSON response
-    let matching_files_str: Vec<String> = matching_paths
+    let mut matching_files_str: Vec<String> = paths_to_display
         .into_iter()
         .map(|p| p.to_string_lossy().to_string())
         .collect();
-
-    // Check total output size
-    let total_size: usize = matching_files_str.iter().map(|s| s.len() + 1).sum(); // +1 for newline
-    if total_size > 5000 {
-        return Err(ErrorObject {
-            code: error_codes::INVALID_REQUEST,
-            message: format!(
-                "Output too large: {} characters (limit: 5000). Try with a more specific pattern.",
-                total_size
-            ),
-            data: None,
-        });
+    
+    // Add truncation message if needed
+    if truncated {
+        matching_files_str.push(format!(
+            "\n... output truncated. Found {} total files but showing only first {}. Use more specific patterns to refine search (e.g., '*.rs', 'src/**/*.ts', '*test*')",
+            total_found,
+            MAX_DISPLAY_RESULTS
+        ));
     }
 
     Ok(RepositorySearchFileResult { matching_files: matching_files_str })

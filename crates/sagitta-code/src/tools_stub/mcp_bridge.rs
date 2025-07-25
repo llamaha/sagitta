@@ -73,7 +73,7 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "search_file".to_string(),
-            description: "Searches for files within a repository using glob patterns. The repositoryName parameter allows searching in ANY repository including dependencies! Patterns like '*.rs' search recursively by default. Use 'src/*.rs' to limit to a specific directory. Use '**/*.rs' for explicit recursive search. IMPORTANT: Use this to explore dependency repositories directly.".to_string(),
+            description: "Searches for files within a repository using glob patterns. The repositoryName parameter allows searching in ANY repository including dependencies! Patterns like '*.rs' search recursively by default. Use 'src/*.rs' to limit to a specific directory. Pattern '*' is now allowed and will show first 50 files. IMPORTANT: Use this to explore dependency repositories directly.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -221,7 +221,7 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
                     "command": { "type": "string", "description": "The command to execute. Must include one of: tail_lines, head_lines, or grep_pattern" },
                     "working_directory": { "type": "string", "description": "Working directory path. Only set if you need a different directory and have confirmed the path exists" },
                     "env": { "type": "object", "description": "Optional environment variables", "additionalProperties": { "type": "string" } },
-                    "timeout_ms": { "type": "integer", "description": "Command timeout in milliseconds (default: 30000)" },
+                    "timeout_ms": { "type": "integer", "description": "Command timeout in milliseconds (default: 60000)" },
                     "grep_pattern": { "type": "string", "description": "Filter output to lines containing this pattern (use when searching for specific text)" },
                     "head_lines": { "type": "integer", "description": "Show first N lines of output (use when start of output is important)" },
                     "tail_lines": { "type": "integer", "description": "Show last N lines of output (recommended: 50 for most commands, 100 for verbose output)" }

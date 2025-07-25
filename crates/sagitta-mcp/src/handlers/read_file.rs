@@ -376,6 +376,7 @@ mod tests {
             file_path: file_path.to_str().unwrap().to_string(),
             start_line: 1,
             end_line: 10,
+            repository_name: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -402,6 +403,7 @@ mod tests {
             file_path: file_path.to_str().unwrap().to_string(),
             start_line: 2,
             end_line: 4,
+            repository_name: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -427,6 +429,7 @@ mod tests {
             file_path: file_path.to_str().unwrap().to_string(),
             start_line: 2,
             end_line: 2,
+            repository_name: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -485,6 +488,7 @@ mod tests {
             file_path: file_path.to_str().unwrap().to_string(),
             start_line: 1,
             end_line: 1,
+            repository_name: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -514,6 +518,7 @@ mod tests {
                 file_path: file_path_str.clone(),
                 start_line: i * 10 + 1,
                 end_line: (i + 1) * 10,
+                repository_name: None,
             };
             
             let config_clone = config.clone();
@@ -560,6 +565,7 @@ mod tests {
             file_path: file_path.to_str().unwrap().to_string(),
             start_line: 1,
             end_line: 10,
+            repository_name: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -587,6 +593,7 @@ mod tests {
             file_path: file_path.to_str().unwrap().to_string(),
             start_line: 1,
             end_line: 5,
+            repository_name: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -625,6 +632,7 @@ mod tests {
                 file_path: file_path_str.clone(),
                 start_line: 1,
                 end_line: 100,
+                repository_name: None,
             };
             
             let config_clone = config.clone();
@@ -659,6 +667,7 @@ mod tests {
             file_path: file_path.to_str().unwrap().to_string(),
             start_line: 500,
             end_line: 510,
+            repository_name: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -680,6 +689,7 @@ mod tests {
             file_path: "/nonexistent/path/to/file.txt".to_string(),
             start_line: 1,
             end_line: 10,
+            repository_name: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -699,9 +709,10 @@ mod tests {
     #[tokio::test]
     async fn test_read_file_not_found() {
         let params = ReadFileParams {
-            file_path: "/nonexistent/file.txt".to_string(),
+            file_path: "/nonexistent/path/to/file.txt".to_string(),
             start_line: 1,
             end_line: 10,
+            repository_name: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -726,6 +737,7 @@ mod tests {
             file_path: file_path.to_str().unwrap().to_string(),
             start_line: 5,
             end_line: 10,
+            repository_name: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -753,6 +765,7 @@ mod tests {
             file_path: file_path.to_str().unwrap().to_string(),
             start_line: 1,
             end_line: 401, // 401 lines (1 to 401 inclusive)
+            repository_name: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -771,6 +784,7 @@ mod tests {
             file_path: file_path.to_str().unwrap().to_string(),
             start_line: 1,
             end_line: 400, // Exactly 400 lines
+            repository_name: None,
         };
         
         let result = handle_read_file(params, config, qdrant_client, None).await;
@@ -853,9 +867,10 @@ mod tests {
         
         // Test with relative path - should use repository context
         let params = ReadFileParams {
-            file_path: "repo_context_test.txt".to_string(),
+            file_path: "/nonexistent/path/to/file.txt".to_string(),
             start_line: 1,
             end_line: 10,
+            repository_name: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));
@@ -892,9 +907,10 @@ mod tests {
         
         // Test with relative path - should use current directory
         let params = ReadFileParams {
-            file_path: "no_context_test.txt".to_string(),
+            file_path: "/nonexistent/path/to/file.txt".to_string(),
             start_line: 1,
             end_line: 10,
+            repository_name: None,
         };
         
         let config = Arc::new(RwLock::new(AppConfig::default()));

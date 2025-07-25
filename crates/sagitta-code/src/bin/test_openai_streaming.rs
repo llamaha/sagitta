@@ -303,7 +303,7 @@ async fn run_direct_llm_with_tool_execution(
                 log::info!("🚀 Executing tool: {} with args: {}", tool_call.name, tool_call.arguments);
                 
                 // CRITICAL FIX: Execute tools via MCP like the GUI does
-                let result_json = match execute_mcp_tool(&tool_call.name, tool_call.arguments).await {
+                let result_json = match execute_mcp_tool(&tool_call.name, tool_call.arguments, None).await {
                     Ok(result) => {
                         log::info!("✅ Tool {} executed successfully", tool_call.name);
                         log::debug!("   Result: {}", serde_json::to_string_pretty(&result).unwrap_or_default());
@@ -367,7 +367,7 @@ async fn run_direct_llm_with_tool_execution(
 }
 
 /// Execute MCP tool (copied from GUI events.rs)
-async fn execute_mcp_tool(tool_name: &str, arguments: serde_json::Value) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+async fn execute_mcp_tool(tool_name: &str, arguments: serde_json::Value, app_config: Option<Arc<tokio::sync::Mutex<sagitta_code::config::types::SagittaCodeConfig>>>) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
     use sagitta_mcp::handlers::tool::handle_tools_call;
     use sagitta_mcp::mcp::types::CallToolParams;
     use sagitta_search::config::load_config;
@@ -390,10 +390,27 @@ async fn execute_mcp_tool(tool_name: &str, arguments: serde_json::Value) -> Resu
         .map_err(|e| format!("Failed to create Qdrant client: {}", e))?;
     let qdrant_client = Arc::new(qdrant_client);
     
+    // Inject timeout for shell_execute if config is provided
+    let modified_arguments = if tool_name == "shell_execute" {
+        if let Some(app_cfg) = app_config {
+            let mut args = arguments;
+            // Only inject timeout if not already specified
+            if args.get("timeout_ms").is_none() {
+                let cfg = app_cfg.lock().await;
+                args["timeout_ms"] = serde_json::json!(cfg.tools.shell_timeout_ms);
+            }
+            args
+        } else {
+            arguments
+        }
+    } else {
+        arguments
+    };
+    
     // Create the tool call params
     let params = CallToolParams {
         name: tool_name.to_string(),
-        arguments,
+        arguments: modified_arguments,
     };
     
     // Execute the tool directly using the MCP handler

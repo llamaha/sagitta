@@ -89,6 +89,9 @@ pub struct SettingsPanel {
     
     // UI preferences
     pub use_simplified_tool_rendering: bool,
+    
+    // Tool configuration
+    pub tool_shell_timeout_ms: u64,
 }
 
 impl SettingsPanel {
@@ -194,6 +197,9 @@ impl SettingsPanel {
             
             // UI preferences
             use_simplified_tool_rendering: initial_sagitta_code_config.ui.use_simplified_tool_rendering,
+            
+            // Tool configuration
+            tool_shell_timeout_ms: initial_sagitta_code_config.tools.shell_timeout_ms,
         }
     }
     
@@ -357,6 +363,14 @@ impl SettingsPanel {
                                             .on_hover_text("Comma-separated list of disallowed tools");
                                         ui.add(TextEdit::singleline(&mut self.claude_code_disallowed_tools)
                                             .hint_text("e.g., bash,exec"));
+                                        ui.end_row();
+                                        
+                                        ui.label("Shell Timeout (ms):")
+                                            .on_hover_text("Timeout for shell commands in milliseconds (default: 60000)");
+                                        ui.add(egui::DragValue::new(&mut self.tool_shell_timeout_ms)
+                                            .speed(1000.0)
+                                            .range(1000..=600000)
+                                            .suffix(" ms"));
                                         ui.end_row();
                                         
                                         // Removed Additional Directories and Skip Permissions settings
@@ -1009,6 +1023,9 @@ impl SettingsPanel {
         
         // Update UI settings
         updated_config.ui.use_simplified_tool_rendering = self.use_simplified_tool_rendering;
+        
+        // Update tool configuration
+        updated_config.tools.shell_timeout_ms = self.tool_shell_timeout_ms;
         
         // Preserve all other fields
         // and all other config sections (sagitta, ui, logging) from the original

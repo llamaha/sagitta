@@ -856,7 +856,7 @@ pub struct ShellExecuteParams {
 }
 
 fn default_shell_timeout() -> u64 {
-    30000 // 30 seconds default
+    60000 // 60 seconds default (increased for running tests and other long operations)
 }
 
 /// Result of shell_execute
@@ -1146,7 +1146,7 @@ mod tests {
     fn test_default_functions() {
         assert_eq!(default_limit(), 10);
         assert_eq!(default_verbosity(), 1);
-        assert_eq!(default_shell_timeout(), 30000);
+        assert_eq!(default_shell_timeout(), 60000);
         assert_eq!(default_create_parents(), true);
         assert_eq!(default_include_remote(), true);
         assert_eq!(default_include_tags(), true);
