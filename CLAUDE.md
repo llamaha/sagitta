@@ -4,6 +4,14 @@ This file contains important guidelines for working with this codebase. Please f
 
 ## Code Understanding and Navigation
 
+### CRITICAL: Cross-Repository Search Capability
+**YOU CAN SEARCH AND READ CODE FROM DEPENDENCIES DIRECTLY!** This is our most powerful feature:
+- Use `repository_list` to see all available repositories including dependencies
+- Use `repositoryName` parameter in search tools to query ANY repository
+- **NEVER web search for library documentation** - query the dependency repository directly!
+- Example: Instead of web searching "how to use egui", do: `semantic_code_search(repositoryName="egui", queryText="button widget", elementType="function")`
+
+### Effective Code Search
 - **Always use the code search/query MCP tool** to understand the codebase at the beginning.
 - **IMPORTANT: Use the `elementType` and `lang` parameters** to get more precise search results:
   - `elementType`: Filter by code constructs (function, class, struct, method, interface, etc.)
@@ -13,6 +21,7 @@ This file contains important guidelines for working with this codebase. Please f
   - Finding auth functions: `query="authentication", elementType="function", lang="rust"`
   - Finding Python classes: `query="database model", elementType="class", lang="python"`
   - Finding Go interfaces: `query="handler interface", elementType="interface", lang="go"`
+  - **Finding egui examples: `repositoryName="egui", query="button example", elementType="function"`**
 - Query for similar implementations when adding new features
 - Search for existing patterns before creating new ones
 - If running "cargo build" ALWAYS use "cargo build --release --all --features cuda".  Otherwise you break the semantic search features and we can't continue.
@@ -24,17 +33,23 @@ When adding new dependencies:
 1. **Web search for the official Git project URL** to get the correct repository information
 2. **Use the repository add tool** to add the dependency's source code for analysis
 3. **Use --target-ref or specific branch** to match the exact version you're using
-4. **Use repository_add_dependency tool** to link the dependency to the main project
-5. **Query the added dependency repository** to understand implementation patterns and APIs
-6. **Sync repositories** after adding dependencies to keep indexed data current
+4. **Query the added dependency repository** to understand implementation patterns and APIs
+5. **Sync repositories** after adding dependencies to keep indexed data current
 
-### Managing Repository Dependencies
+### Cross-Repository Tool Support
 
-Each repository can have dependencies on other repositories in the system. Use these tools:
+**Tools that support cross-repository operations (via `repositoryName` parameter):**
+- ✅ `semantic_code_search` - Search code in any repository
+- ✅ `search_file` - Find files in any repository  
+- ✅ `ripgrep` - Search file contents in any repository
 
-- **repository_add_dependency**: Link a repository as a dependency to another
-- **repository_remove_dependency**: Remove a dependency link
-- **repository_list_dependencies**: List all dependencies for a repository
+**Tools currently limited to active repository only:**
+- ⚠️ `read_file` - Cannot read files from dependencies
+- ⚠️ `edit_file` - Cannot edit files in dependencies
+- ⚠️ `multi_edit_file` - Cannot edit files in dependencies
+- ⚠️ `write_file` - Cannot write files to dependencies
+
+**Workaround for file reading limitation:** Use `ripgrep` or `semantic_code_search` to view code from dependencies.
 
 This approach ensures you understand the actual implementation rather than outdated documentation.
 

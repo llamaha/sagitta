@@ -32,7 +32,7 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "repository_list".to_string(),
-            description: "Lists currently configured repositories with their dependencies. Each repository includes a 'dependencies' field showing all linked dependency repositories with their pinned versions. Dependencies are version-locked to match your project's actual usage - query these dependency repositories directly for accurate implementation details instead of relying on potentially outdated web documentation.".to_string(),
+            description: "Lists currently configured repositories with their dependencies. Each repository includes a 'dependencies' field showing all linked dependency repositories with their pinned versions. Dependencies are version-locked to match your project's actual usage - query these dependency repositories directly for accurate implementation details instead of relying on potentially outdated web documentation. IMPORTANT: Use repository names from this list with tools that support 'repositoryName' parameter to work across repositories.".to_string(),
             parameters: json!({ "type": "object", "properties": {} }),
             is_required: false,
         },
@@ -50,7 +50,7 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "semantic_code_search".to_string(),
-            description: "Performs semantic search on an indexed repository. Use elementType (function, class, struct, method, interface) and lang (rust, python, javascript, go) parameters for better results. Examples: query='authentication', elementType='function', lang='rust' finds Rust auth functions. Pro tip: Query dependency repositories listed in repository_list output to understand actual implementation details rather than guessing based on outdated documentation.".to_string(),
+            description: "Performs semantic search on an indexed repository. The repositoryName parameter allows searching in ANY repository including dependencies! Use elementType (function, class, struct, method, interface) and lang (rust, python, javascript, go) parameters for better results. Examples: query='authentication', elementType='function', lang='rust' finds Rust auth functions. CRITICAL: Query dependency repositories (e.g., 'egui', 'tokio') directly instead of web searching - use repository_list to see available repos.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -73,7 +73,7 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "search_file".to_string(),
-            description: "Searches for files within a repository using glob patterns. Patterns like '*.rs' search recursively by default. Use 'src/*.rs' to limit to a specific directory. Use '**/*.rs' for explicit recursive search.".to_string(),
+            description: "Searches for files within a repository using glob patterns. The repositoryName parameter allows searching in ANY repository including dependencies! Patterns like '*.rs' search recursively by default. Use 'src/*.rs' to limit to a specific directory. Use '**/*.rs' for explicit recursive search. IMPORTANT: Use this to explore dependency repositories directly.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -87,7 +87,7 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "ripgrep".to_string(),
-            description: "Performs recursive regex search for content within repository files. Similar to ripgrep (rg) command. Searches file contents, not just filenames.".to_string(),
+            description: "Performs recursive regex search for content within repository files. The repository_name parameter allows searching in ANY repository including dependencies! Similar to ripgrep (rg) command. Searches file contents, not just filenames. CRITICAL: Use this to search code in dependencies instead of web searching.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -172,7 +172,7 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "edit_file".to_string(),
-            description: "Performs exact string replacements in files with diff output.".to_string(),
+            description: "Performs exact string replacements in files with diff output. WARNING: Currently only works in the active repository - cannot edit files in dependencies.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -187,7 +187,7 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "multi_edit_file".to_string(),
-            description: "Performs multiple sequential edits to a single file with diff output.".to_string(),
+            description: "Performs multiple sequential edits to a single file with diff output. WARNING: Currently only works in the active repository - cannot edit files in dependencies.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -230,7 +230,7 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "read_file".to_string(),
-            description: "Reads a specific range of lines from a file. You MUST specify both start_line and end_line (1-based line numbers). Maximum 400 lines per request. Example: to read first 100 lines use start_line=1, end_line=100. DO NOT use 'limit' or 'offset' parameters - they don't exist.".to_string(),
+            description: "Reads a specific range of lines from a file. You MUST specify both start_line and end_line (1-based line numbers). Maximum 400 lines per request. Example: to read first 100 lines use start_line=1, end_line=100. DO NOT use 'limit' or 'offset' parameters - they don't exist. WARNING: Currently only works in the active repository - cannot read files from dependencies (use semantic_code_search or ripgrep for dependencies).".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -244,7 +244,7 @@ pub fn get_mcp_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "write_file".to_string(),
-            description: "Writes content to a file with optional parent directory creation.".to_string(),
+            description: "Writes content to a file with optional parent directory creation. WARNING: Currently only works in the active repository - cannot write files to dependencies.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {

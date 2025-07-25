@@ -244,7 +244,7 @@ pub fn render_single_message_content(
         
         // Render the tool call
         ui.add_space(1.0);
-        if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state, tool_cards_collapsed, tool_card_individual_states, use_simplified_tool_rendering) {
+        if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state, use_simplified_tool_rendering) {
             clicked_tool = Some(tool_info);
         }
         ui.add_space(1.0);
@@ -270,7 +270,7 @@ pub fn render_single_message_content(
     if !unpositioned_tools.is_empty() {
         ui.add_space(1.0);
         for tool_call in unpositioned_tools {
-            if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state, tool_cards_collapsed, tool_card_individual_states, use_simplified_tool_rendering) {
+            if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state, use_simplified_tool_rendering) {
                 clicked_tool = Some(tool_info);
             }
             ui.add_space(4.0);
