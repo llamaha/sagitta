@@ -2091,7 +2091,14 @@ pub fn handle_show_new_conversation_confirmation(app: &mut SagittaCodeApp) {
 
 /// Handle create new conversation event
 pub fn handle_create_new_conversation(app: &mut SagittaCodeApp) {
-    log::info!("Creating new conversation - clearing current state");
+    log::info!("Creating new conversation - saving current and clearing state");
+    
+    // Save the current conversation before creating a new one
+    if let Some(ref mut manager) = app.simple_conversation_manager {
+        if let Err(e) = manager.save_current_conversation() {
+            log::error!("Failed to save current conversation before creating new one: {}", e);
+        }
+    }
     
     // Clear current conversation state
     app.state.current_conversation_id = None;

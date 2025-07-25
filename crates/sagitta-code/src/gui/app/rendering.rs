@@ -41,6 +41,9 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
     // Refresh repository list periodically (every 30 seconds)
     refresh_repository_list_periodically(app);
     
+    // Auto-save conversation periodically (every 30 seconds)
+    auto_save_conversation_periodically(app);
+    
     // Handle temporary thinking indicator timeout (3 seconds)
     if let Some(start_time) = app.state.thinking_start_time {
         if start_time.elapsed() > std::time::Duration::from_secs(3) {
@@ -737,10 +740,22 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
             // Add user message to chat using the streaming manager
             app.chat_manager.add_user_message(user_message.clone());
             
+            // Mark conversation as modified and initialize auto-save timer
+            app.state.conversation_modified = true;
+            if app.state.last_auto_save.is_none() {
+                app.state.last_auto_save = Some(std::time::Instant::now());
+            }
+            
             // Save conversation after adding user message
             if let Some(ref mut manager) = app.simple_conversation_manager {
-                if let Err(e) = manager.save_current_conversation() {
-                    log::error!("Failed to save conversation after user message: {e}");
+                match manager.save_current_conversation() {
+                    Ok(_) => {
+                        app.state.conversation_modified = false;
+                        log::debug!("Saved conversation after user message");
+                    }
+                    Err(e) => {
+                        log::error!("Failed to save conversation after user message: {e}");
+                    }
                 }
             }
             
@@ -2103,6 +2118,36 @@ fn refresh_repository_list_periodically(app: &mut SagittaCodeApp) {
         
         unsafe {
             LAST_REPO_REFRESH = Some(std::time::Instant::now());
+        }
+    }
+}
+
+/// Auto-save the current conversation periodically
+fn auto_save_conversation_periodically(app: &mut SagittaCodeApp) {
+    // Only save if there's a conversation and it has been modified
+    if !app.state.conversation_modified {
+        return;
+    }
+    
+    // Check if we should auto-save (every 30 seconds)
+    let should_save = app.state.last_auto_save
+        .map(|last| last.elapsed().as_secs() >= 30)
+        .unwrap_or(false); // Don't save immediately on startup
+    
+    if should_save {
+        log::debug!("Auto-saving conversation...");
+        
+        if let Some(ref mut manager) = app.simple_conversation_manager {
+            match manager.save_current_conversation() {
+                Ok(_) => {
+                    log::debug!("Auto-saved conversation successfully");
+                    app.state.conversation_modified = false;
+                    app.state.last_auto_save = Some(std::time::Instant::now());
+                }
+                Err(e) => {
+                    log::error!("Failed to auto-save conversation: {}", e);
+                }
+            }
         }
     }
 }

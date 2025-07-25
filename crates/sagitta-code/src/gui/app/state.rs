@@ -98,6 +98,10 @@ pub struct AppState {
     pub sidebar_action: Option<SidebarAction>,
     pub editing_conversation_id: Option<Uuid>,
     
+    // Auto-save state
+    pub last_auto_save: Option<std::time::Instant>,
+    pub conversation_modified: bool,
+    
 
     
     // Loop control features
@@ -202,7 +206,9 @@ impl AppState {
             sidebar_action: None,
             editing_conversation_id: None,
             
-
+            // Auto-save state
+            last_auto_save: None,
+            conversation_modified: false,
             
             // Loop control features
             is_in_loop: false,
