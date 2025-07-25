@@ -37,8 +37,6 @@ mod tests {
                 let mut should_focus = false;
                 let token_usage = None;
                 let mut stop_requested = false;
-                let mut tool_cards_collapsed = false;
-                let mut tool_card_individual_states = std::collections::HashMap::new();
                 
                 // Initial state
                 let initial_buffer = input_buffer.clone();
@@ -77,8 +75,6 @@ mod tests {
                     &mut should_focus,
                     &token_usage,
                     &mut stop_requested,
-                    &mut tool_cards_collapsed,
-                    &mut tool_card_individual_states,
                 );
                 
                 // Verify that Ctrl+Enter added a newline but didn't submit
@@ -115,8 +111,6 @@ mod tests {
                 let mut should_focus = false;
                 let token_usage = None;
                 let mut stop_requested = false;
-                let mut tool_cards_collapsed = false;
-                let mut tool_card_individual_states = std::collections::HashMap::new();
                 
                 // Add Enter event without modifiers to the context
                 ui.input_mut(|input| {
@@ -155,8 +149,6 @@ mod tests {
                     &mut should_focus,
                     &token_usage,
                     &mut stop_requested,
-                    &mut tool_cards_collapsed,
-                    &mut tool_card_individual_states,
                 );
                 
                 // In a real scenario with focus, this would be true, but in unit tests
@@ -191,8 +183,6 @@ mod tests {
                 let mut should_focus = false;
                 let token_usage = None;
                 let mut stop_requested = false;
-                let mut tool_cards_collapsed = false;
-                let mut tool_card_individual_states = std::collections::HashMap::new();
                 
                 chat_input_ui(
                     ui,
@@ -217,8 +207,6 @@ mod tests {
                     &mut should_focus,
                     &token_usage,
                     &mut stop_requested,
-                    &mut tool_cards_collapsed,
-                    &mut tool_card_individual_states,
                 );
                 
                 // Empty buffer should never trigger submission regardless of Enter

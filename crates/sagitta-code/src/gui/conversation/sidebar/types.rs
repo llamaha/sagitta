@@ -19,6 +19,8 @@ pub enum SidebarAction {
     SetWorkspace(Uuid),
     // Title update action
     UpdateConversationTitle(Uuid), // conversation_id
+    // Debug: Force refresh all conversation summaries
+    ForceRefreshAllConversations,
 }
 
 // --- Display types for conversation items ---

@@ -57,7 +57,7 @@ impl ConversationSidebar {
                         };
                         ui.add_space(spacing);
                         
-                        self.render_search_bar(ui, app_state);
+                        self.render_search_bar(ui, app_state, theme);
                         ui.add_space(spacing);
 
                         if app_state.conversation_data_loading {
@@ -126,11 +126,18 @@ impl ConversationSidebar {
                     |ui: &mut Ui, text: &str| ui.button(text)
                 };
                 
-                if button_fn(ui, "🔄").on_hover_text("Refresh conversations").clicked() {
+                // Apply theme styling to buttons
+                // Note: We can't use RichText directly with button_fn, so we'll style the button differently
+                if ui.button(RichText::new("🔄").color(theme.button_text_color())).on_hover_text("Refresh conversations").clicked() {
                     self.pending_action = Some(SidebarAction::RefreshConversations);
                 }
-                if button_fn(ui, "➕").on_hover_text("New conversation").clicked() {
+                if ui.button(RichText::new("➕").color(theme.button_text_color())).on_hover_text("New conversation").clicked() {
                     self.pending_action = Some(SidebarAction::CreateNewConversation);
+                }
+                
+                // DEBUG: Temporary button to manually trigger conversation worker
+                if ui.button(RichText::new("🔧").color(theme.warning_color())).on_hover_text("DEBUG: Force refresh all conversation summaries").clicked() {
+                    self.pending_action = Some(SidebarAction::ForceRefreshAllConversations);
                 }
                 
             });
@@ -160,15 +167,15 @@ impl ConversationSidebar {
                     ui.selectable_value(&mut self.organization_mode, OrganizationMode::Recency, "⏰ Recency");
                     ui.selectable_value(&mut self.organization_mode, OrganizationMode::Project, "📁 Project");
                     ui.selectable_value(&mut self.organization_mode, OrganizationMode::Status, "🎯 Status");
-                    ui.selectable_value(&mut self.organization_mode, OrganizationMode::Clusters, "🧩 Clusters");
-                    ui.selectable_value(&mut self.organization_mode, OrganizationMode::Tags, "🏷️ Tags");
+                    ui.selectable_value(&mut self.organization_mode, OrganizationMode::Clusters, "⬡ Clusters");
+                    ui.selectable_value(&mut self.organization_mode, OrganizationMode::Tags, "🏷 Tags");
                     ui.selectable_value(&mut self.organization_mode, OrganizationMode::Success, "📈 Success");
                 });
         });
     }
 
     /// Render the search bar
-    fn render_search_bar(&mut self, ui: &mut Ui, _app_state: &mut AppState) {
+    fn render_search_bar(&mut self, ui: &mut Ui, _app_state: &mut AppState, theme: &AppTheme) {
         ui.horizontal(|ui| {
             ui.label("🔍");
             
@@ -194,7 +201,7 @@ impl ConversationSidebar {
                 }
             }
             
-            if ui.button("🚫").on_hover_text("Clear search").clicked() {
+            if ui.button(RichText::new("🚫").color(theme.button_text_color())).on_hover_text("Clear search").clicked() {
                 self.edit_buffer.clear();
                 self.search_query = None;
                 self.search_debounce_timer = None;
@@ -231,7 +238,7 @@ impl ConversationSidebar {
             } else { 
                 crate::gui::symbols::navigation::TRIANGLE_RIGHT
             };
-            if ui.button(arrow).clicked() {
+            if ui.button(RichText::new(arrow).color(theme.button_text_color())).clicked() {
                 self.toggle_group(&group.id);
             }
             
@@ -449,7 +456,13 @@ impl ConversationSidebar {
                         log::error!("Failed to send UpdateConversationTitle event: {e}");
                     }
                 }
-                _ => {}
+                SidebarAction::ForceRefreshAllConversations => {
+                    log::info!("Sidebar: DEBUG - Force refreshing all conversation summaries");
+                    // Send a refresh event that triggers summary regeneration for all conversations
+                    if let Err(e) = app_event_sender.send(AppEvent::DebugForceRefreshAllSummaries) {
+                        log::error!("Failed to send DebugForceRefreshAllSummaries event: {e}");
+                    }
+                }
             }
         }
     }
@@ -460,8 +473,8 @@ impl ConversationSidebar {
             OrganizationMode::Recency => "⏰ Recency",
             OrganizationMode::Project => "📁 Project",
             OrganizationMode::Status => "🎯 Status",
-            OrganizationMode::Clusters => "🧩 Clusters",
-            OrganizationMode::Tags => "🏷️ Tags",
+            OrganizationMode::Clusters => "⬡ Clusters",
+            OrganizationMode::Tags => "🏷 Tags",
             OrganizationMode::Success => "📈 Success",
             OrganizationMode::Custom(_) => "⚙️ Custom",
         }

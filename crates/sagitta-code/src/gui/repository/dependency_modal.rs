@@ -176,7 +176,7 @@ impl DependencyModal {
             .spacing([10.0, 8.0])
             .show(ui, |ui| {
                 ui.label("Repository:");
-                egui::ComboBox::from_id_source("dep_repo_combo")
+                egui::ComboBox::from_id_salt("dep_repo_combo")
                     .selected_text(&self.add_form.selected_repository)
                     .show_ui(ui, |ui| {
                         // Filter out the current repository and already added dependencies

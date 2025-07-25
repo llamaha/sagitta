@@ -1356,6 +1356,7 @@ mod tests {
             auto_sync: crate::config::types::AutoSyncConfig::default(),
             current_provider: crate::providers::types::ProviderType::ClaudeCode,
             provider_configs: std::collections::HashMap::new(),
+            tools: crate::config::types::ToolConfig::default(),
         }
     }
 
