@@ -113,9 +113,6 @@ pub struct AppState {
     // Input focus management
     pub should_focus_input: bool,
     
-    // Tool card collapse state
-    pub tool_cards_collapsed: bool,
-    pub tool_card_individual_states: HashMap<String, bool>, // tool_call_id -> collapsed state
     
     // Tool rendering mode
     pub use_simplified_tool_rendering: bool,
@@ -220,9 +217,6 @@ impl AppState {
             // Input focus management
             should_focus_input: true, // Focus input on startup
             
-            // Tool card collapse state
-            tool_cards_collapsed: false, // Start with tool cards expanded
-            tool_card_individual_states: HashMap::new(),
             
             // Tool rendering mode
             use_simplified_tool_rendering: false, // Default to full rendering

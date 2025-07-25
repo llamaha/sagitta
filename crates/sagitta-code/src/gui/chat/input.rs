@@ -46,9 +46,6 @@ pub fn chat_input_ui(
     current_token_usage: &Option<crate::llm::client::TokenUsage>,
     // Stop/Cancel callback
     stop_requested: &mut bool,
-    // Tool card collapse state
-    tool_cards_collapsed: &mut bool,
-    tool_card_individual_states: &mut std::collections::HashMap<String, bool>,
 ) -> Option<egui::Id> {
     // Handle key events before the text edit widget to manually process Ctrl+Enter
     let mut new_line_added = false;
@@ -263,28 +260,6 @@ pub fn chat_input_ui(
                 }
                 
                 ui.add_space(4.0);
-                
-                // Tool card collapse/expand toggle button
-                let toggle_icon = if *tool_cards_collapsed { "+" } else { "−" };
-                let toggle_label = RichText::new(toggle_icon)
-                    .color(accent_color)
-                    .small();
-                
-                let tooltip_text = if *tool_cards_collapsed {
-                    "Results are collapsed"
-                } else {
-                    "Results are uncollapsed"
-                };
-                
-                if ui.small_button(toggle_label)
-                    .on_hover_text(tooltip_text)
-                    .clicked() 
-                {
-                    *tool_cards_collapsed = !*tool_cards_collapsed;
-                    // Clear individual overrides so ALL cards follow the new global state
-                    tool_card_individual_states.clear();
-                }
-                
                 ui.add_space(8.0);
                 
                 // Show character count on the right

@@ -782,27 +782,8 @@ impl SettingsPanel {
                             ui.heading("UI Settings");
                             ui.collapsing("Interface Preferences", |ui| {
                                 ui.label("Configure user interface behavior and appearance");
-                                
-                                Grid::new("ui_settings_grid")
-                                    .num_columns(2)
-                                    .spacing([8.0, 8.0])
-                                    .show(ui, |ui| {
-                                        ui.label("Simplified Tool Rendering:");
-                                        if ui.checkbox(&mut self.use_simplified_tool_rendering, "")
-                                            .on_hover_text("Show tool results without collapsible cards for cleaner output")
-                                            .changed() {
-                                            // Send event to update app state immediately
-                                            if let Some(ref sender) = self.app_event_sender {
-                                                let _ = sender.send(crate::gui::app::events::AppEvent::UpdateUiPreference {
-                                                    preference: crate::gui::app::events::UiPreference::SimplifiedToolRendering(self.use_simplified_tool_rendering),
-                                                });
-                                            }
-                                        }
-                                        ui.end_row();
-                                    });
-                                
                                 ui.add_space(4.0);
-                                ui.label("When enabled, tool outputs will be displayed directly without the collapsible card UI.");
+                                ui.label("More preferences coming soon...");
                             });
                             ui.add_space(16.0);
                             

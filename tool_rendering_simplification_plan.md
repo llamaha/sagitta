@@ -92,39 +92,44 @@ Based on user feedback, implemented the following improvements:
 4. **Improved text alignment** - Added explicit left alignment for tool cards
 5. **Cleaned up status indicators** - Using text instead of symbols (e.g., "Success" instead of "✓")
 
-### 🚧 Phase 6: Cleanup Legacy Code - READY TO START
+### ✅ Phase 6: Cleanup Legacy Code - COMPLETED
 
 #### Code to Remove (when fully migrated):
 1. **Collapsing Header Helper**
-   - [ ] Remove `crates/sagitta-code/src/gui/chat/view/collapsing_header_helper.rs`
-   - [ ] Remove imports and usage of `create_controlled_collapsing_header`
-   - [ ] Remove imports and usage of `get_tool_card_state`
+   - [x] Remove `crates/sagitta-code/src/gui/chat/view/collapsing_header_helper.rs`
+   - [x] Remove imports and usage of `create_controlled_collapsing_header`
+   - [x] Remove imports and usage of `get_tool_card_state`
 
 2. **Tool Card State Management**
-   - [ ] Remove `tool_cards_collapsed` from `AppState`
-   - [ ] Remove `tool_card_individual_states` from `AppState`
-   - [ ] Remove these parameters from all function signatures
+   - [x] Remove `tool_cards_collapsed` from `AppState`
+   - [x] Remove `tool_card_individual_states` from `AppState`
+   - [x] Marked unused parameters with _ prefix (preserving compatibility)
+   - [x] Removed collapse button from chat input UI
 
 3. **Legacy Rendering Functions** (in view.rs)
-   - [ ] Remove the old `render_single_tool_call` implementation (keep wrapper)
-   - [ ] Remove the old `render_tool_card` implementation (keep wrapper)
-   - [ ] Remove `render_file_read_output`
-   - [ ] Remove `render_file_write_output` 
-   - [ ] Remove `render_search_output`
-   - [ ] Remove `render_search_output_legacy`
-   - [ ] Remove `render_repository_output`
-   - [ ] Remove `render_todo_output`
-   - [ ] Remove `render_ping_output`
-   - [ ] Remove `render_terminal_output`
-   - [ ] Remove `render_diff_output`
+   - [x] Remove the old `render_single_tool_call` implementation (kept wrapper)
+   - [x] Remove the old `render_tool_card` implementation (kept wrapper)
+   - [x] Remove `render_file_read_output`
+   - [x] Remove `render_file_write_output` 
+   - [x] Remove `render_search_output`
+   - [x] Remove `render_search_output_legacy`
+   - [x] Remove `render_repository_output`
+   - [x] Remove `render_todo_output`
+   - [x] Remove `render_ping_output`
+   - [x] Remove `render_terminal_output`
+   - [x] Remove `render_diff_output`
 
 4. **ToolResultRenderer Struct**
-   - [ ] Remove the old `ToolResultRenderer` struct and implementation
-   - [ ] Remove its usage in tool rendering
+   - [x] Remove the old `ToolResultRenderer` struct and implementation
+   - [x] Remove its usage in tool rendering
 
 5. **Helper Functions**
    - [ ] Remove tool type checking functions if not used elsewhere
-   - [ ] Remove `FILE_READ_FONT_SIZES` thread local (moved to simplified renderer)
+   - [x] Remove `FILE_READ_FONT_SIZES` thread local (moved to simplified renderer)
+
+6. **Settings Panel**
+   - [x] Removed simplified tool rendering option from settings UI
+   - [x] Kept the configuration field for compatibility
 
 #### Code to Keep:
 - The wrapper functions that switch between old/new rendering
@@ -510,6 +515,11 @@ The tool rendering simplification has been successfully completed:
    - `render_single_tool_call()` now always uses simplified rendering
    - `render_tool_card()` now always uses simplified rendering
    - Parameters for old state management marked as unused (backward compatibility)
+
+3. **UI Cleanup**:
+   - Removed collapse/expand button from chat input UI
+   - Removed simplified tool rendering option from settings panel
+   - Tool outputs now display directly without collapsible card UI
 
 3. **What's Next**:
    - The unused parameters in function signatures can be removed in a future refactor

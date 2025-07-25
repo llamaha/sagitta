@@ -51,8 +51,6 @@ pub fn render_message_group(
     copy_state: &mut CopyButtonState,
     running_tools: &HashMap<ToolRunId, RunningToolInfo>,
     collapsed_thinking: &mut HashMap<String, bool>,
-    tool_cards_collapsed: bool,
-    tool_card_individual_states: &mut HashMap<String, bool>,
     use_simplified_tool_rendering: bool,
 ) -> Option<(String, String)> {
     if message_group.is_empty() {
@@ -166,14 +164,14 @@ pub fn render_message_group(
                 ui.vertical(|ui| {
                     ui.set_max_width(total_width - 80.0); // Leave space for timestamp
                     
-                    if let Some(tool_info) = render_single_message_content(ui, message, bg_color, total_width - 80.0, app_theme, running_tools, copy_state, collapsed_thinking, tool_cards_collapsed, tool_card_individual_states, use_simplified_tool_rendering) {
+                    if let Some(tool_info) = render_single_message_content(ui, message, bg_color, total_width - 80.0, app_theme, running_tools, copy_state, collapsed_thinking, use_simplified_tool_rendering) {
                         clicked_tool = Some(tool_info);
                     }
                 });
             });
         } else {
             // Single message in group - use full width
-            if let Some(tool_info) = render_single_message_content(ui, message, bg_color, total_width, app_theme, running_tools, copy_state, collapsed_thinking, tool_cards_collapsed, tool_card_individual_states, use_simplified_tool_rendering) {
+            if let Some(tool_info) = render_single_message_content(ui, message, bg_color, total_width, app_theme, running_tools, copy_state, collapsed_thinking, use_simplified_tool_rendering) {
                 clicked_tool = Some(tool_info);
             }
         }
@@ -213,8 +211,6 @@ pub fn render_single_message_content(
     running_tools: &HashMap<ToolRunId, RunningToolInfo>,
     copy_state: &mut CopyButtonState,
     collapsed_thinking: &mut HashMap<String, bool>,
-    tool_cards_collapsed: bool,
-    tool_card_individual_states: &mut HashMap<String, bool>,
     use_simplified_tool_rendering: bool,
 ) -> Option<(String, String)> {
     let mut clicked_tool = None;

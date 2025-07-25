@@ -69,11 +69,10 @@ pub fn chat_view_ui(ui: &mut egui::Ui, messages: &[ChatMessage], app_theme: AppT
     let empty_running_tools = HashMap::new();
     let mut empty_collapsed_thinking = HashMap::new();
     let empty_tool_results = HashMap::new();
-    let mut empty_tool_card_states = HashMap::new();
-    modern_chat_view_ui(ui, &chat_items, app_theme, copy_state, &empty_running_tools, &mut empty_collapsed_thinking, &empty_tool_results, false, &mut empty_tool_card_states, false);
+    modern_chat_view_ui(ui, &chat_items, app_theme, copy_state, &empty_running_tools, &mut empty_collapsed_thinking, &empty_tool_results, false);
 }
 
-pub fn modern_chat_view_ui(ui: &mut egui::Ui, items: &[ChatItem], app_theme: AppTheme, copy_state: &mut CopyButtonState, running_tools: &HashMap<ToolRunId, RunningToolInfo>, collapsed_thinking: &mut HashMap<String, bool>, tool_results: &HashMap<String, String>, tool_cards_collapsed: bool, tool_card_individual_states: &mut HashMap<String, bool>, use_simplified_tool_rendering: bool) -> Option<(String, String)> {
+pub fn modern_chat_view_ui(ui: &mut egui::Ui, items: &[ChatItem], app_theme: AppTheme, copy_state: &mut CopyButtonState, running_tools: &HashMap<ToolRunId, RunningToolInfo>, collapsed_thinking: &mut HashMap<String, bool>, tool_results: &HashMap<String, String>, use_simplified_tool_rendering: bool) -> Option<(String, String)> {
     // Use the app theme's colors directly
     let bg_color = app_theme.panel_background();
     let _text_color = app_theme.text_color();
@@ -145,13 +144,13 @@ pub fn modern_chat_view_ui(ui: &mut egui::Ui, items: &[ChatItem], app_theme: App
                             ChatItem::Message(message) => {
                                 // Render individual messages
                                 let messages_group = vec![message];
-                                if let Some(tool_info) = render_message_group(ui, &messages_group, &bg_color, total_width - 32.0, app_theme, copy_state, running_tools, collapsed_thinking, tool_cards_collapsed, tool_card_individual_states, use_simplified_tool_rendering) {
+                                if let Some(tool_info) = render_message_group(ui, &messages_group, &bg_color, total_width - 32.0, app_theme, copy_state, running_tools, collapsed_thinking, use_simplified_tool_rendering) {
                                     clicked_tool = Some(tool_info);
                                 }
                             }
                             ChatItem::ToolCard(tool_card) => {
                                 // Render tool card
-                                if let Some(tool_info) = render_tool_card(ui, tool_card, &bg_color, total_width - 32.0, app_theme, running_tools, copy_state, tool_cards_collapsed, tool_card_individual_states, use_simplified_tool_rendering) {
+                                if let Some(tool_info) = render_tool_card(ui, tool_card, &bg_color, total_width - 32.0, app_theme, running_tools, copy_state, use_simplified_tool_rendering) {
                                     clicked_tool = Some(tool_info);
                                 }
                             }
@@ -220,17 +219,17 @@ fn render_single_tool_call_simplified(ui: &mut Ui, tool_call: &ToolCall, _max_wi
 }
 
 /// Render a single tool call as a compact, clickable card
-pub fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color32, max_width: f32, app_theme: AppTheme, _running_tools: &HashMap<ToolRunId, RunningToolInfo>, _copy_state: &mut CopyButtonState, _tool_cards_collapsed: bool, _tool_card_individual_states: &mut HashMap<String, bool>, _use_simplified_rendering: bool) -> Option<(String, String)> {
+pub fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color32, max_width: f32, app_theme: AppTheme, _running_tools: &HashMap<ToolRunId, RunningToolInfo>, _copy_state: &mut CopyButtonState, _use_simplified_rendering: bool) -> Option<(String, String)> {
     // Always use simplified rendering
     render_single_tool_call_simplified(ui, tool_call, max_width, app_theme)
 }
 
 /// Render tool calls as compact, clickable cards (for backward compatibility)
-fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, copy_state: &mut CopyButtonState, tool_cards_collapsed: bool, tool_card_individual_states: &mut HashMap<String, bool>, use_simplified_rendering: bool) -> Option<(String, String)> {
+fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, copy_state: &mut CopyButtonState, use_simplified_rendering: bool) -> Option<(String, String)> {
     let mut clicked_tool_result = None;
     
     for tool_call in tool_calls {
-        if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state, tool_cards_collapsed, tool_card_individual_states, use_simplified_rendering) {
+        if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state, use_simplified_rendering) {
             clicked_tool_result = Some(tool_info);
         }
         ui.add_space(4.0); // Consistent spacing between tool cards
@@ -269,7 +268,7 @@ fn render_tool_card_simplified(ui: &mut Ui, tool_card: &ToolCard, _max_width: f3
 }
 
 /// Render a standalone tool card
-fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_width: f32, app_theme: AppTheme, _running_tools: &HashMap<ToolRunId, RunningToolInfo>, _copy_state: &mut CopyButtonState, _tool_cards_collapsed: bool, _tool_card_individual_states: &mut HashMap<String, bool>, _use_simplified_rendering: bool) -> Option<(String, String)> {
+fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_width: f32, app_theme: AppTheme, _running_tools: &HashMap<ToolRunId, RunningToolInfo>, _copy_state: &mut CopyButtonState, _use_simplified_rendering: bool) -> Option<(String, String)> {
     // Always use simplified rendering
     render_tool_card_simplified(ui, tool_card, max_width, app_theme)
 }
