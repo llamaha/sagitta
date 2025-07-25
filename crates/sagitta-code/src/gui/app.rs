@@ -38,7 +38,7 @@ use crate::llm::title::TitleGenerator;
 // Import the modularized components
 mod panels;
 use super::conversation;
-use super::conversation::{SimpleConversationSidebar, SimpleConversationManager, SimpleSidebarAction};
+use super::conversation::SimpleConversationManager;
 pub mod events;
 pub mod tool_formatting;
 pub mod state;
@@ -85,8 +85,8 @@ pub struct SagittaCodeApp {
     pub chat_manager: Arc<StreamingChatManager>,
     pub settings_panel: SettingsPanel,
     pub task_panel: TaskPanel,
-    conversation_sidebar: SimpleConversationSidebar,
     simple_conversation_manager: Option<SimpleConversationManager>,
+    conversation_panel: conversation::panel::ConversationPanel,
     claude_md_modal: ClaudeMdModal,
     provider_setup_dialog: ProviderSetupDialog,
     config: Arc<Mutex<SagittaCodeConfig>>,
@@ -180,8 +180,8 @@ impl SagittaCodeApp {
             chat_manager: Arc::new(StreamingChatManager::new()),
             settings_panel,
             task_panel: TaskPanel::new(None, None, sagitta_code_config_arc.clone()),
-            conversation_sidebar: SimpleConversationSidebar::new(),
             simple_conversation_manager: None, // Will be initialized after we have storage path
+            conversation_panel: conversation::panel::ConversationPanel::new(),
             claude_md_modal: ClaudeMdModal::new(sagitta_code_config_arc.clone()),
             provider_setup_dialog: ProviderSetupDialog::new(sagitta_code_config_arc.clone()),
             config: sagitta_code_config_arc.clone(),

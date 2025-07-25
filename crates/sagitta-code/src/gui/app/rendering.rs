@@ -2,7 +2,7 @@
 
 use egui::{Context, Key, TopBottomPanel, Frame, Vec2, Margin};
 use crate::gui::app::AppEvent;
-use crate::gui::conversation::sidebar::{OrganizationMode, SimpleSidebarAction};
+use crate::gui::conversation::panel::PanelAction;
 use super::SagittaCodeApp;
 use super::super::chat::input::chat_input_ui;
 use super::super::chat::view::modern_chat_view_ui;
@@ -1148,38 +1148,28 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
             }
         },
         ActivePanel::Conversation => {
-            // Simple conversation sidebar
-            egui::SidePanel::left("conversation_sidebar")
-                .resizable(true)
-                .default_width(280.0)
-                .min_width(200.0)
-                .max_width(400.0)
-                .show(ctx, |ui| {
-                    app.conversation_sidebar.render(ui, &app.state.current_theme);
-                });
+            // New conversation panel with proper theming and resizing
+            app.conversation_panel.render(ctx, app.state.current_theme);
             
-            // Process any pending actions from the sidebar
-            if let Some(action) = app.conversation_sidebar.pending_action.take() {
+            // Process any pending actions from the panel
+            if let Some(action) = app.conversation_panel.take_pending_action() {
                 match action {
-                    SimpleSidebarAction::SwitchToConversation(id) => {
+                    PanelAction::SelectConversation(id) => {
                         if let Some(ref mut manager) = app.simple_conversation_manager {
                             if let Err(e) = manager.switch_conversation(id) {
                                 log::error!("Failed to switch conversation: {e}");
                                 app.state.toasts.error(format!("Failed to load conversation: {e}"));
                             } else {
-                                app.conversation_sidebar.selected_conversation = Some(id);
+                                app.conversation_panel.select_conversation(id);
                             }
                         }
                     }
-                    SimpleSidebarAction::CreateNewConversation => {
+                    PanelAction::CreateNewConversation => {
                         if let Some(ref mut manager) = app.simple_conversation_manager {
                             match manager.create_conversation("New Conversation".to_string()) {
                                 Ok(id) => {
-                                    app.conversation_sidebar.selected_conversation = Some(id);
-                                    // Refresh list
-                                    if let Ok(conversations) = manager.list_conversations() {
-                                        app.conversation_sidebar.update_conversations(conversations);
-                                    }
+                                    app.conversation_panel.select_conversation(id);
+                                    // TODO: Refresh conversation list in panel
                                 }
                                 Err(e) => {
                                     log::error!("Failed to create conversation: {e}");
@@ -1188,20 +1178,17 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                             }
                         }
                     }
-                    SimpleSidebarAction::DeleteConversation(id) => {
+                    PanelAction::DeleteConversation(id) => {
                         if let Some(ref mut manager) = app.simple_conversation_manager {
                             if let Err(e) = manager.delete_conversation(id) {
                                 log::error!("Failed to delete conversation: {e}");
                                 app.state.toasts.error(format!("Failed to delete conversation: {e}"));
                             } else {
-                                // Refresh list
-                                if let Ok(conversations) = manager.list_conversations() {
-                                    app.conversation_sidebar.update_conversations(conversations);
-                                }
+                                // TODO: Refresh conversation list in panel
                             }
                         }
                     }
-                    SimpleSidebarAction::RenameConversation(id, new_title) => {
+                    PanelAction::RenameConversation(id, new_title) => {
                         if let Some(ref mut manager) = app.simple_conversation_manager {
                             // Switch to conversation first to ensure it's current
                             if manager.current_conversation_id() == Some(id) {
@@ -1209,21 +1196,12 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                                     log::error!("Failed to rename conversation: {e}");
                                     app.state.toasts.error(format!("Failed to rename conversation: {e}"));
                                 } else {
-                                    // Refresh list
-                                    if let Ok(conversations) = manager.list_conversations() {
-                                        app.conversation_sidebar.update_conversations(conversations);
-                                    }
+                                    // TODO: Refresh conversation list in panel
                                 }
                             }
                         }
                     }
-                    SimpleSidebarAction::RefreshList => {
-                        if let Some(ref mut manager) = app.simple_conversation_manager {
-                            if let Ok(conversations) = manager.list_conversations() {
-                                app.conversation_sidebar.update_conversations(conversations);
-                            }
-                        }
-                    }
+                    // RefreshList action removed - panel handles its own refresh
                 }
             }
         },

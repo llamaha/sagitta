@@ -44,7 +44,7 @@ impl SimpleConversationManager {
     /// Switch to a different conversation - synchronous and direct
     pub fn switch_conversation(&mut self, id: Uuid) -> Result<()> {
         // Save current conversation if there is one
-        if let Some(current) = &self.current_conversation {
+        if let Some(_current) = &self.current_conversation {
             self.save_current_conversation()?;
         }
         
@@ -127,7 +127,7 @@ impl SimpleConversationManager {
     }
     
     /// Add a message to current conversation
-    pub fn add_message(&mut self, message: StreamingMessage) -> Result<()> {
+    pub fn add_message(&mut self, _message: StreamingMessage) -> Result<()> {
         if let Some(conversation) = &mut self.current_conversation {
             conversation.update_last_active();
             // Messages are saved when we call save_current_conversation

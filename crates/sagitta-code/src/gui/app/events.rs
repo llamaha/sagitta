@@ -1583,7 +1583,7 @@ pub fn switch_to_conversation(app: &mut SagittaCodeApp, conversation_id: uuid::U
     app.chat_manager.clear_all_messages();
     
     // Update sidebar selection
-    app.conversation_sidebar.selected_conversation = Some(conversation_id);
+    app.conversation_panel.select_conversation(conversation_id);
     
     // Find and set the conversation title
     if let Some(summary) = app.state.conversation_list.iter().find(|s| s.id == conversation_id) {
@@ -2120,10 +2120,10 @@ pub fn handle_create_new_conversation(app: &mut SagittaCodeApp) {
     if let Some(ref mut manager) = app.simple_conversation_manager {
         match manager.create_conversation("New Conversation".to_string()) {
             Ok(id) => {
-                app.conversation_sidebar.selected_conversation = Some(id);
+                app.conversation_panel.select_conversation(id);
                 // Refresh list
                 if let Ok(conversations) = manager.list_conversations() {
-                    app.conversation_sidebar.update_conversations(conversations);
+                    // TODO: Update conversation panel with conversations
                 }
                 log::info!("Created new conversation with ID: {}", id);
             }
@@ -2158,7 +2158,7 @@ pub fn handle_create_new_conversation(app: &mut SagittaCodeApp) {
     app.state.tool_calls_continued.clear();
     
     // Update sidebar selection
-    app.conversation_sidebar.selected_conversation = None;
+    // Clear conversation selection in panel
     
     // Force a UI refresh
     if let Err(e) = app.app_event_sender.send(AppEvent::RefreshConversationList) {

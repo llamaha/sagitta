@@ -454,17 +454,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
                     app.simple_conversation_manager = Some(manager);
                     log::info!("Initialized SimpleConversationManager");
                     
-                    // Load conversation list for sidebar
-                    if let Some(ref mut manager) = app.simple_conversation_manager {
-                        match manager.list_conversations() {
-                            Ok(conversations) => {
-                                app.conversation_sidebar.update_conversations(conversations);
-                            }
-                            Err(e) => {
-                                log::error!("Failed to load conversations: {e}");
-                            }
-                        }
-                    }
+                    // TODO: Load conversation list into the new panel
                 }
                 Err(e) => {
                     log::error!("Failed to initialize SimpleConversationManager: {e}");

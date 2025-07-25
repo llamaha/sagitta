@@ -3,7 +3,7 @@
 use crate::agent::state::types::{AgentMode, AgentState};
 use crate::agent::message::types::{ToolCall, AgentMessage};
 use crate::agent::events::ToolRunId;
-use crate::gui::conversation::sidebar::SidebarAction;
+// Removed SidebarAction import - no longer needed
 use crate::gui::chat::CopyButtonState;
 use super::super::theme::AppTheme;
 use crate::providers::types::ProviderType;
@@ -95,7 +95,7 @@ pub struct AppState {
     pub current_token_usage: Option<crate::llm::client::TokenUsage>,
     
     // Sidebar state
-    pub sidebar_action: Option<SidebarAction>,
+    // Removed sidebar_action - no longer needed
     pub editing_conversation_id: Option<Uuid>,
     
     // Auto-save state
@@ -203,7 +203,7 @@ impl AppState {
             current_token_usage: None,
             
             // Sidebar state
-            sidebar_action: None,
+            // sidebar_action removed
             editing_conversation_id: None,
             
             // Auto-save state
@@ -411,8 +411,7 @@ mod tests {
         // Test initial running tools state
         assert!(state.running_tools.is_empty());
         
-        // Test initial sidebar state
-        assert!(state.sidebar_action.is_none());
+        // sidebar state tests removed
         assert!(state.editing_conversation_id.is_none());
         
         // Test initial loop state
