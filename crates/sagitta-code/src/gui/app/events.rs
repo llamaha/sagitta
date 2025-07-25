@@ -673,6 +673,13 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                     app.state.current_response_id = None;
                 }
                 
+                // Save conversation after response completes
+                if let Some(ref mut manager) = app.simple_conversation_manager {
+                    if let Err(e) = manager.save_current_conversation() {
+                        log::error!("Failed to save conversation after response: {e}");
+                    }
+                }
+                
                 // Notify auto title updater after assistant response completes
                 if let (Some(conversation_id), Some(sender)) = (app.state.current_conversation_id, &app.auto_title_sender) {
                     // Get current message count after assistant response
@@ -1344,8 +1351,7 @@ pub fn process_conversation_service_events(app: &mut SagittaCodeApp) {
                 },
                 crate::agent::conversation::service::ConversationEvent::ClustersUpdated(clusters) => {
                     log::debug!("Conversation clusters updated: {} clusters", clusters.len());
-                    // Update the conversation sidebar with new clusters
-                    app.conversation_sidebar.clusters = clusters;
+                    // Simple sidebar doesn't use clusters
                 },
                 crate::agent::conversation::service::ConversationEvent::AnalyticsReady(report) => {
                     log::info!("Analytics ready from conversation service");
@@ -1577,7 +1583,7 @@ pub fn switch_to_conversation(app: &mut SagittaCodeApp, conversation_id: uuid::U
     app.chat_manager.clear_all_messages();
     
     // Update sidebar selection
-    app.conversation_sidebar.select_conversation(Some(conversation_id));
+    app.conversation_sidebar.selected_conversation = Some(conversation_id);
     
     // Find and set the conversation title
     if let Some(summary) = app.state.conversation_list.iter().find(|s| s.id == conversation_id) {
@@ -2102,6 +2108,24 @@ pub fn handle_create_new_conversation(app: &mut SagittaCodeApp) {
     app.state.is_executing_tool = false;
     app.state.current_response_id = None;
     app.state.tool_results.clear();
+    
+    // Create new conversation in simple manager
+    if let Some(ref mut manager) = app.simple_conversation_manager {
+        match manager.create_conversation("New Conversation".to_string()) {
+            Ok(id) => {
+                app.conversation_sidebar.selected_conversation = Some(id);
+                // Refresh list
+                if let Ok(conversations) = manager.list_conversations() {
+                    app.conversation_sidebar.update_conversations(conversations);
+                }
+                log::info!("Created new conversation with ID: {}", id);
+            }
+            Err(e) => {
+                log::error!("Failed to create new conversation: {e}");
+                app.state.toasts.error(format!("Failed to create conversation: {e}"));
+            }
+        }
+    }
     app.state.pending_tool_calls.clear();
     
     // Clear token usage counter
@@ -2127,7 +2151,7 @@ pub fn handle_create_new_conversation(app: &mut SagittaCodeApp) {
     app.state.tool_calls_continued.clear();
     
     // Update sidebar selection
-    app.conversation_sidebar.select_conversation(None);
+    app.conversation_sidebar.selected_conversation = None;
     
     // Force a UI refresh
     if let Err(e) = app.app_event_sender.send(AppEvent::RefreshConversationList) {
@@ -3229,8 +3253,8 @@ mod tests {
         // Test handling checkpoint suggestions
         app.handle_checkpoint_suggestions(conversation_id, suggestions);
         
-        // Verify that the feature has been removed (should return empty)
-        assert!(app.conversation_sidebar.get_checkpoint_suggestions().is_empty());
+        // The simplified system no longer tracks checkpoint suggestions
+        // Just verify the app handles the event without crashing
     }
 
     #[test]
@@ -3259,8 +3283,8 @@ mod tests {
         // Test handling branch suggestions
         app.handle_branch_suggestions(conversation_id, suggestions);
         
-        // Verify that the feature has been removed (should return empty)
-        assert!(app.conversation_sidebar.get_branch_suggestions().is_empty());
+        // The simplified system no longer tracks branch suggestions
+        // Just verify the app handles the event without crashing
     }
     
     #[test]

@@ -1311,16 +1311,12 @@ mod tests {
                 name: "repo1".to_string(),
                 url: "https://github.com/test/repo1.git".to_string(),
                 local_path: temp_dir.path().join("repo1"),
-                default_branch: "main".to_string(),
-                tracked_branches: vec!["main".to_string()],
                 ..Default::default()
             },
             RepositoryConfig {
                 name: "repo2".to_string(),
                 url: "https://github.com/test/repo2.git".to_string(),
                 local_path: temp_dir.path().join("repo2"),
-                default_branch: "main".to_string(),
-                tracked_branches: vec!["main".to_string()],
                 ..Default::default()
             },
         ];

@@ -2,7 +2,7 @@
 
 use egui::{Context, Key, TopBottomPanel, Frame, Vec2, Margin};
 use crate::gui::app::AppEvent;
-use crate::gui::conversation::sidebar::OrganizationMode;
+use crate::gui::conversation::sidebar::{OrganizationMode, SimpleSidebarAction};
 use super::SagittaCodeApp;
 use super::super::chat::input::chat_input_ui;
 use super::super::chat::view::modern_chat_view_ui;
@@ -633,32 +633,7 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
             Err(_) => false, // Default to false if lock fails
         }
     };
-    if enable_shortcuts {
-        if ctx.input(|i| i.key_pressed(Key::Num1) && i.modifiers.ctrl) {
-            // Ctrl+1: Switch to Recency mode
-            app.conversation_sidebar.set_organization_mode(OrganizationMode::Recency);
-        }
-        if ctx.input(|i| i.key_pressed(Key::Num2) && i.modifiers.ctrl) {
-            // Ctrl+2: Switch to Project mode
-            app.conversation_sidebar.set_organization_mode(OrganizationMode::Project);
-        }
-        if ctx.input(|i| i.key_pressed(Key::Num3) && i.modifiers.ctrl) {
-            // Ctrl+3: Switch to Status mode
-            app.conversation_sidebar.set_organization_mode(OrganizationMode::Status);
-        }
-        if ctx.input(|i| i.key_pressed(Key::Num4) && i.modifiers.ctrl) {
-            // Ctrl+4: Switch to Clusters mode
-            app.conversation_sidebar.set_organization_mode(OrganizationMode::Clusters);
-        }
-        if ctx.input(|i| i.key_pressed(Key::Num5) && i.modifiers.ctrl) {
-            // Ctrl+5: Switch to Tags mode
-            app.conversation_sidebar.set_organization_mode(OrganizationMode::Tags);
-        }
-        if ctx.input(|i| i.key_pressed(Key::Num6) && i.modifiers.ctrl) {
-            // Ctrl+6: Switch to Success mode
-            app.conversation_sidebar.set_organization_mode(OrganizationMode::Success);
-        }
-    }
+    // Removed organization mode shortcuts - no longer needed with simple sidebar
     
 
     
@@ -761,6 +736,13 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
             
             // Add user message to chat using the streaming manager
             app.chat_manager.add_user_message(user_message.clone());
+            
+            // Save conversation after adding user message
+            if let Some(ref mut manager) = app.simple_conversation_manager {
+                if let Err(e) = manager.save_current_conversation() {
+                    log::error!("Failed to save conversation after user message: {e}");
+                }
+            }
             
             // Notify auto title updater if we have an active conversation
             if let (Some(conversation_id), Some(sender)) = (app.state.current_conversation_id, &app.auto_title_sender) {
@@ -969,8 +951,7 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
             if let Some(action) = app.panels.analytics_panel.render(ctx, app.state.current_theme) {
                 match action {
                     super::panels::AnalyticsAction::SwitchToSuccessMode => {
-                        // Switch conversation sidebar to success organization mode
-                        app.conversation_sidebar.organization_mode = OrganizationMode::Success;
+                        // Simple sidebar doesn't support organization modes
                         
                         // Also switch to conversation panel to show the success mode
                         app.panels.toggle_panel(ActivePanel::Conversation);
@@ -1152,12 +1133,84 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
             }
         },
         ActivePanel::Conversation => {
-            // Use the sophisticated ConversationSidebar component instead of basic UI
-            let theme = app.state.current_theme;
-            let conversation_service = app.get_conversation_service();
-            let app_event_sender = app.app_event_sender.clone();
-            let sagitta_config = app.config.clone();
-            app.conversation_sidebar.show(ctx, &mut app.state, &theme, conversation_service, app_event_sender, sagitta_config);
+            // Simple conversation sidebar
+            egui::SidePanel::left("conversation_sidebar")
+                .resizable(true)
+                .default_width(280.0)
+                .min_width(200.0)
+                .max_width(400.0)
+                .show(ctx, |ui| {
+                    app.conversation_sidebar.render(ui, &app.state.current_theme);
+                });
+            
+            // Process any pending actions from the sidebar
+            if let Some(action) = app.conversation_sidebar.pending_action.take() {
+                match action {
+                    SimpleSidebarAction::SwitchToConversation(id) => {
+                        if let Some(ref mut manager) = app.simple_conversation_manager {
+                            if let Err(e) = manager.switch_conversation(id) {
+                                log::error!("Failed to switch conversation: {e}");
+                                app.state.toasts.error(format!("Failed to load conversation: {e}"));
+                            } else {
+                                app.conversation_sidebar.selected_conversation = Some(id);
+                            }
+                        }
+                    }
+                    SimpleSidebarAction::CreateNewConversation => {
+                        if let Some(ref mut manager) = app.simple_conversation_manager {
+                            match manager.create_conversation("New Conversation".to_string()) {
+                                Ok(id) => {
+                                    app.conversation_sidebar.selected_conversation = Some(id);
+                                    // Refresh list
+                                    if let Ok(conversations) = manager.list_conversations() {
+                                        app.conversation_sidebar.update_conversations(conversations);
+                                    }
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to create conversation: {e}");
+                                    app.state.toasts.error(format!("Failed to create conversation: {e}"));
+                                }
+                            }
+                        }
+                    }
+                    SimpleSidebarAction::DeleteConversation(id) => {
+                        if let Some(ref mut manager) = app.simple_conversation_manager {
+                            if let Err(e) = manager.delete_conversation(id) {
+                                log::error!("Failed to delete conversation: {e}");
+                                app.state.toasts.error(format!("Failed to delete conversation: {e}"));
+                            } else {
+                                // Refresh list
+                                if let Ok(conversations) = manager.list_conversations() {
+                                    app.conversation_sidebar.update_conversations(conversations);
+                                }
+                            }
+                        }
+                    }
+                    SimpleSidebarAction::RenameConversation(id, new_title) => {
+                        if let Some(ref mut manager) = app.simple_conversation_manager {
+                            // Switch to conversation first to ensure it's current
+                            if manager.current_conversation_id() == Some(id) {
+                                if let Err(e) = manager.update_conversation_title(new_title) {
+                                    log::error!("Failed to rename conversation: {e}");
+                                    app.state.toasts.error(format!("Failed to rename conversation: {e}"));
+                                } else {
+                                    // Refresh list
+                                    if let Ok(conversations) = manager.list_conversations() {
+                                        app.conversation_sidebar.update_conversations(conversations);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    SimpleSidebarAction::RefreshList => {
+                        if let Some(ref mut manager) = app.simple_conversation_manager {
+                            if let Ok(conversations) = manager.list_conversations() {
+                                app.conversation_sidebar.update_conversations(conversations);
+                            }
+                        }
+                    }
+                }
+            }
         },
         ActivePanel::GitHistory => {
             // Render git history modal
@@ -1298,78 +1351,7 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                 
                 ui.separator();
                 
-                // Phase 10: Organization mode shortcuts
-                let enable_shortcuts = {
-                    match app.config.try_lock() {
-                        Ok(config_guard) => config_guard.conversation.sidebar.enable_keyboard_shortcuts,
-                        Err(_) => false, // Default to false if lock fails
-                    }
-                };
-                if enable_shortcuts {
-                    ui.label(egui::RichText::new("Conversation Organization:").color(theme.accent_color()).strong());
-                    
-                    // Recency Mode
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Ctrl + 1: Recency Mode").color(theme.text_color()));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button(egui::RichText::new("Switch").color(theme.button_text_color())).clicked() {
-                                app.conversation_sidebar.set_organization_mode(OrganizationMode::Recency);
-                            }
-                        });
-                    });
-                    
-                    // Project Mode
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Ctrl + 2: Project Mode").color(theme.text_color()));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button(egui::RichText::new("Switch").color(theme.button_text_color())).clicked() {
-                                app.conversation_sidebar.set_organization_mode(OrganizationMode::Project);
-                            }
-                        });
-                    });
-                    
-                    // Status Mode
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Ctrl + 3: Status Mode").color(theme.text_color()));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button(egui::RichText::new("Switch").color(theme.button_text_color())).clicked() {
-                                app.conversation_sidebar.set_organization_mode(OrganizationMode::Status);
-                            }
-                        });
-                    });
-                    
-                    // Clusters Mode
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Ctrl + 4: Clusters Mode").color(theme.text_color()));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button(egui::RichText::new("Switch").color(theme.button_text_color())).clicked() {
-                                app.conversation_sidebar.set_organization_mode(OrganizationMode::Clusters);
-                            }
-                        });
-                    });
-                    
-                    // Tags Mode
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Ctrl + 5: Tags Mode").color(theme.text_color()));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button(egui::RichText::new("Switch").color(theme.button_text_color())).clicked() {
-                                app.conversation_sidebar.set_organization_mode(OrganizationMode::Tags);
-                            }
-                        });
-                    });
-                    
-                    // Success Mode
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Ctrl + 6: Success Mode").color(theme.text_color()));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button(egui::RichText::new("Switch").color(theme.button_text_color())).clicked() {
-                                app.conversation_sidebar.set_organization_mode(OrganizationMode::Success);
-                            }
-                        });
-                    });
-                    
-                    ui.separator();
-                }
+                // Simple sidebar doesn't support organization modes
                 
                 ui.label(egui::RichText::new("General:").color(theme.accent_color()).strong());
                 

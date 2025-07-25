@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use super::SagittaCodeApp;
 use super::events::AppEvent;
+use crate::gui::conversation::SimpleConversationManager;
 use super::super::repository::manager::RepositoryManager;
 use super::super::repository::RepoPanel;
 use super::super::theme::AppTheme;
@@ -445,6 +446,34 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
             
             // Set the agent on the RepoPanel
             app.repo_panel.set_agent(agent_arc);
+            
+            // Initialize simple conversation manager
+            let storage_path = get_default_conversation_storage_path();
+            match SimpleConversationManager::new(storage_path, app.chat_manager.clone()) {
+                Ok(manager) => {
+                    app.simple_conversation_manager = Some(manager);
+                    log::info!("Initialized SimpleConversationManager");
+                    
+                    // Load conversation list for sidebar
+                    if let Some(ref mut manager) = app.simple_conversation_manager {
+                        match manager.list_conversations() {
+                            Ok(conversations) => {
+                                app.conversation_sidebar.update_conversations(conversations);
+                            }
+                            Err(e) => {
+                                log::error!("Failed to load conversations: {e}");
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to initialize SimpleConversationManager: {e}");
+                    app.panels.events_panel.add_event(
+                        super::SystemEventType::Error,
+                        format!("Failed to initialize conversation system: {e}")
+                    );
+                }
+            }
             
             // Initialize conversation service for the sidebar - use shared instances (Phase 1 optimization)
             if let Err(e) = app.initialize_conversation_service_with_shared_instances(qdrant_client_concrete.clone(), Some(embedding_handler_arc.clone())).await {

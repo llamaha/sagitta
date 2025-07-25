@@ -3,7 +3,7 @@ use std::time::Instant;
 use egui::Color32;
 use crate::gui::theme::AppTheme;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum MessageAuthor {
     User,
     Agent,
@@ -11,7 +11,7 @@ pub enum MessageAuthor {
     Tool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum MessageStatus {
     Sending,
     Thinking,

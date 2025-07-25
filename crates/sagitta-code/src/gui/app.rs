@@ -38,6 +38,7 @@ use crate::llm::title::TitleGenerator;
 // Import the modularized components
 mod panels;
 use super::conversation;
+use super::conversation::{SimpleConversationSidebar, SimpleConversationManager, SimpleSidebarAction};
 pub mod events;
 pub mod tool_formatting;
 pub mod state;
@@ -84,7 +85,8 @@ pub struct SagittaCodeApp {
     pub chat_manager: Arc<StreamingChatManager>,
     pub settings_panel: SettingsPanel,
     pub task_panel: TaskPanel,
-    conversation_sidebar: ConversationSidebar,
+    conversation_sidebar: SimpleConversationSidebar,
+    simple_conversation_manager: Option<SimpleConversationManager>,
     claude_md_modal: ClaudeMdModal,
     provider_setup_dialog: ProviderSetupDialog,
     config: Arc<Mutex<SagittaCodeConfig>>,
@@ -178,7 +180,8 @@ impl SagittaCodeApp {
             chat_manager: Arc::new(StreamingChatManager::new()),
             settings_panel,
             task_panel: TaskPanel::new(None, None, sagitta_code_config_arc.clone()),
-            conversation_sidebar: ConversationSidebar::with_default_config(),
+            conversation_sidebar: SimpleConversationSidebar::new(),
+            simple_conversation_manager: None, // Will be initialized after we have storage path
             claude_md_modal: ClaudeMdModal::new(sagitta_code_config_arc.clone()),
             provider_setup_dialog: ProviderSetupDialog::new(sagitta_code_config_arc.clone()),
             config: sagitta_code_config_arc.clone(),
@@ -513,16 +516,7 @@ impl SagittaCodeApp {
             // Refresh the service data
             service.refresh().await?;
             
-            // Get updated clusters
-            let clusters = service.get_clusters().await?;
-            
-            // Update sidebar with new cluster data
-            self.conversation_sidebar.clusters = clusters;
-            
-            log::info!("Updated conversation sidebar with {} clusters", self.conversation_sidebar.clusters.len());
-
-            // After refresh, send an event to update conversation list in AppState
-            let _convos = service.list_conversations().await?;
+            // Simple system doesn't use clusters - just refresh the conversation list
             self.app_event_sender.send(AppEvent::RefreshConversationList)?;
         }
         

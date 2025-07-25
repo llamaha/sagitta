@@ -629,6 +629,31 @@ impl StreamingChatManager {
         log::debug!("Restored tool card for tool '{}' with run_id {}", tool_call.name, run_id);
     }
     
+    /// Directly restore a tool card (used by simple persistence)
+    pub fn restore_tool_card_direct(&self, tool_card: ToolCard) {
+        let run_id = tool_card.run_id;
+        
+        // Store in tool_cards map
+        {
+            let mut tool_cards = self.tool_cards.lock().unwrap();
+            tool_cards.insert(run_id, tool_card.clone());
+        }
+        
+        // Add to messages list as a ChatItem::ToolCard
+        {
+            let mut messages = self.messages.lock().unwrap();
+            messages.push(ChatItem::ToolCard(tool_card));
+        }
+        
+        log::debug!("Directly restored tool card with run_id {}", run_id);
+    }
+    
+    /// Get all tool cards
+    pub fn get_all_tool_cards(&self) -> Vec<ToolCard> {
+        let tool_cards = self.tool_cards.lock().unwrap();
+        tool_cards.values().cloned().collect()
+    }
+    
     /// Get all items for display (includes active streams and tool cards)
     pub fn get_all_items(&self) -> Vec<ChatItem> {
         let messages = self.messages.lock().unwrap();
