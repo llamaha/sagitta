@@ -26,8 +26,10 @@ impl SimpleConversationManager {
     
     /// Create a new conversation
     pub fn create_conversation(&mut self, title: String) -> Result<Uuid> {
-        let conversation = SimplifiedConversation::new(title);
+        let conversation = SimplifiedConversation::new(title.clone());
         let id = conversation.id;
+        
+        log::info!("Creating new conversation {} with title '{}'", id, title);
         
         // Save immediately
         self.persistence.save_conversation(&conversation)?;
@@ -37,6 +39,8 @@ impl SimpleConversationManager {
         
         // Clear chat manager
         self.chat_manager.clear_all_messages();
+        
+        log::info!("New conversation {} created and set as current", id);
         
         Ok(id)
     }
@@ -98,7 +102,21 @@ impl SimpleConversationManager {
     
     /// Get list of all conversations
     pub fn list_conversations(&self) -> Result<Vec<(Uuid, String, chrono::DateTime<chrono::Utc>)>> {
-        self.persistence.list_conversations()
+        let mut conversations = self.persistence.list_conversations()?;
+        
+        // If we have a current conversation that's not in the list (not yet saved to disk),
+        // add it to ensure it shows up in the UI
+        if let Some(current) = &self.current_conversation {
+            if !conversations.iter().any(|(id, _, _)| *id == current.id) {
+                log::debug!("Adding current unsaved conversation {} to list", current.id);
+                conversations.push((current.id, current.title.clone(), current.last_active));
+                // Sort again to maintain order
+                conversations.sort_by(|a, b| b.2.cmp(&a.2));
+            }
+        }
+        
+        log::debug!("SimpleConversationManager: listing {} conversations (including current)", conversations.len());
+        Ok(conversations)
     }
     
     /// Delete a conversation

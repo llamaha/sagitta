@@ -15,7 +15,9 @@ pub struct SimplePersistence {
 impl SimplePersistence {
     pub fn new(storage_dir: PathBuf) -> Result<Self> {
         // Ensure storage directory exists
+        log::info!("Creating SimplePersistence with storage dir: {:?}", storage_dir);
         fs::create_dir_all(&storage_dir)?;
+        log::info!("Storage directory created/verified: {:?}", storage_dir);
         Ok(Self { storage_dir })
     }
     
@@ -29,10 +31,14 @@ impl SimplePersistence {
         let path = self.conversation_path(conversation.id);
         let json = serde_json::to_string_pretty(conversation)?;
         
+        log::info!("Saving conversation {} to {:?}", conversation.id, path);
+        
         // Atomic write: write to temp file, then rename
         let temp_path = path.with_extension("tmp");
         fs::write(&temp_path, json)?;
         fs::rename(temp_path, path)?;
+        
+        log::info!("Successfully saved conversation {} with title '{}'", conversation.id, conversation.title);
         
         Ok(())
     }
@@ -51,6 +57,8 @@ impl SimplePersistence {
     pub fn list_conversations(&self) -> Result<Vec<(Uuid, String, chrono::DateTime<chrono::Utc>)>> {
         let mut conversations = Vec::new();
         
+        log::debug!("Listing conversations from directory: {:?}", self.storage_dir);
+        
         for entry in fs::read_dir(&self.storage_dir)? {
             let entry = entry?;
             let path = entry.path();
@@ -61,6 +69,7 @@ impl SimplePersistence {
                         // Read just enough to get title and last_active
                         if let Ok(json) = fs::read_to_string(&path) {
                             if let Ok(conv) = serde_json::from_str::<SimplifiedConversation>(&json) {
+                                log::debug!("Found conversation {} with title '{}'", id, conv.title);
                                 conversations.push((id, conv.title, conv.last_active));
                             }
                         }
@@ -68,6 +77,8 @@ impl SimplePersistence {
                 }
             }
         }
+        
+        log::info!("Found {} conversations in storage", conversations.len());
         
         // Sort by last active, newest first
         conversations.sort_by(|a, b| b.2.cmp(&a.2));

@@ -16,7 +16,7 @@ pub struct ConversationInfo {
 }
 
 /// Actions that can be requested from the panel
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PanelAction {
     SelectConversation(Uuid),
     DeleteConversation(Uuid),
@@ -82,6 +82,7 @@ impl ConversationPanel {
     
     /// Update conversations list from external source
     pub fn update_conversations(&mut self, conversations: Vec<ConversationInfo>) {
+        log::debug!("ConversationPanel: updating with {} conversations", conversations.len());
         self.conversations = conversations;
     }
     
@@ -146,13 +147,12 @@ impl ConversationPanel {
                 
                 if filtered.is_empty() {
                     ui.centered_and_justified(|ui| {
-                        ui.label(egui::RichText::new(
-                            if self.search_query.is_empty() {
-                                "No conversations yet"
-                            } else {
-                                "No matching conversations"
-                            }
-                        ).color(theme.hint_text_color()));
+                        let msg = if self.search_query.is_empty() {
+                            format!("No conversations yet (total: {})", self.conversations.len())
+                        } else {
+                            format!("No matching conversations (total: {})", self.conversations.len())
+                        };
+                        ui.label(egui::RichText::new(msg).color(theme.hint_text_color()));
                     });
                 } else {
                     for conv in filtered {
@@ -167,7 +167,7 @@ impl ConversationPanel {
         let is_selected = self.selected_conversation == Some(conv.id);
         let is_editing = self.editing_conversation == Some(conv.id);
         
-        // Create a selectable frame for the entire item
+        // Create a frame with appropriate styling
         let mut frame = Frame::none()
             .inner_margin(8.0)
             .rounding(4.0);
@@ -176,24 +176,13 @@ impl ConversationPanel {
             frame = frame.fill(theme.accent_color().linear_multiply(0.2));
         }
         
-        // Make the entire frame interactive
-        let response = ui.allocate_response(
-            ui.available_size(),
-            egui::Sense::click()
-        );
+        // Use allocate_response to create a clickable area
+        let desired_size = Vec2::new(ui.available_width(), 80.0); // Fixed height for consistency
+        let (rect, response) = ui.allocate_at_least(desired_size, egui::Sense::click());
         
-        // Handle click on conversation
-        if response.clicked() && !is_editing {
-            self.select_conversation(conv.id);
-            self.pending_action = Some(PanelAction::SelectConversation(conv.id));
-        }
-        
-        // Add hover effect
-        if response.hovered() && !is_selected {
-            frame = frame.fill(theme.accent_color().linear_multiply(0.1));
-        }
-        
-        frame.show(ui, |ui| {
+        // Draw the frame content
+        ui.allocate_ui_at_rect(rect, |ui| {
+            frame.show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
                             // Title (editable if in edit mode)
@@ -244,7 +233,24 @@ impl ConversationPanel {
                             }
                         });
                     });
-                });
+            })
+        });
+        
+        // Handle hover effect
+        if response.hovered() && !is_selected {
+            ui.painter().rect_filled(
+                rect,
+                4.0,
+                theme.accent_color().linear_multiply(0.1)
+            );
+        }
+        
+        // Handle click on conversation
+        if response.clicked() && !is_editing {
+            log::debug!("Conversation {} clicked", conv.id);
+            self.select_conversation(conv.id);
+            self.pending_action = Some(PanelAction::SelectConversation(conv.id));
+        }
         
         // Handle delete confirmation dialog
         if self.show_delete_confirmation == Some(conv.id) {
@@ -403,6 +409,17 @@ impl ConversationPanel {
     /// Get and clear the pending action
     pub fn take_pending_action(&mut self) -> Option<PanelAction> {
         self.pending_action.take()
+    }
+    
+    // Test helper methods
+    #[cfg(test)]
+    pub fn set_pending_action(&mut self, action: PanelAction) {
+        self.pending_action = Some(action);
+    }
+    
+    #[cfg(test)]
+    pub fn render_content_public(&mut self, ui: &mut egui::Ui, theme: AppTheme) {
+        self.render_content(ui, theme);
     }
 }
 

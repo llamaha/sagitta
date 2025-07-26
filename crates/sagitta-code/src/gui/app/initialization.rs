@@ -449,6 +449,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
             
             // Initialize simple conversation manager
             let storage_path = get_default_conversation_storage_path();
+            log::info!("Initializing SimpleConversationManager with storage path: {:?}", storage_path);
             match SimpleConversationManager::new(storage_path, app.chat_manager.clone()) {
                 Ok(manager) => {
                     app.simple_conversation_manager = Some(manager);

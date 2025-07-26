@@ -2156,10 +2156,7 @@ pub fn handle_create_new_conversation(app: &mut SagittaCodeApp) {
         match manager.create_conversation("New Conversation".to_string()) {
             Ok(id) => {
                 app.conversation_panel.select_conversation(id);
-                // Refresh list
-                if let Ok(conversations) = manager.list_conversations() {
-                    // TODO: Update conversation panel with conversations
-                }
+                app.state.current_conversation_id = Some(id);
                 log::info!("Created new conversation with ID: {}", id);
             }
             Err(e) => {

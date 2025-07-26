@@ -4,6 +4,7 @@ use egui::{Context, Key, TopBottomPanel, Frame, Vec2, Margin};
 use crate::gui::app::AppEvent;
 use crate::gui::conversation::panel::PanelAction;
 use super::SagittaCodeApp;
+use super::events::handle_create_new_conversation;
 use super::super::chat::input::chat_input_ui;
 use super::super::chat::view::modern_chat_view_ui;
 use super::super::theme::{AppTheme, apply_theme};
@@ -1163,17 +1164,31 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
         ActivePanel::Conversation => {
             // Load conversations into panel if we have a manager
             if let Some(ref manager) = app.simple_conversation_manager {
-                if let Ok(conversations) = manager.list_conversations() {
-                    // Convert to panel format
-                    let panel_conversations: Vec<_> = conversations.into_iter()
-                        .map(|(id, title, last_active)| crate::gui::conversation::panel::ConversationInfo {
-                            id,
-                            title,
-                            preview: String::new(), // TODO: Add preview support
-                            last_active,
-                        })
-                        .collect();
-                    app.conversation_panel.update_conversations(panel_conversations);
+                match manager.list_conversations() {
+                    Ok(conversations) => {
+                        // Convert to panel format
+                        let panel_conversations: Vec<_> = conversations.into_iter()
+                            .map(|(id, title, last_active)| crate::gui::conversation::panel::ConversationInfo {
+                                id,
+                                title,
+                                preview: String::new(), // TODO: Add preview support
+                                last_active,
+                            })
+                            .collect();
+                        let conv_count = panel_conversations.len();
+                        app.conversation_panel.update_conversations(panel_conversations);
+                        // Only log periodically to avoid spam
+                        static mut LAST_LOG_TIME: Option<std::time::Instant> = None;
+                        unsafe {
+                            if LAST_LOG_TIME.map(|t| t.elapsed().as_secs() > 5).unwrap_or(true) {
+                                log::debug!("Updated conversation panel with {} conversations", conv_count);
+                                LAST_LOG_TIME = Some(std::time::Instant::now());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to list conversations: {}", e);
+                    }
                 }
             }
             
@@ -1184,28 +1199,29 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
             if let Some(action) = app.conversation_panel.take_pending_action() {
                 match action {
                     PanelAction::SelectConversation(id) => {
+                        log::info!("Processing SelectConversation action for {}", id);
                         if let Some(ref mut manager) = app.simple_conversation_manager {
                             if let Err(e) = manager.switch_conversation(id) {
                                 log::error!("Failed to switch conversation: {e}");
                                 app.state.toasts.error(format!("Failed to load conversation: {e}"));
                             } else {
+                                log::info!("Successfully switched to conversation {}", id);
                                 app.conversation_panel.select_conversation(id);
+                                app.state.current_conversation_id = Some(id);
+                                
+                                // Update the conversation title in the state
+                                if let Some(title) = manager.current_conversation_title() {
+                                    app.state.current_conversation_title = Some(title);
+                                }
                             }
+                        } else {
+                            log::error!("No simple_conversation_manager available for switching");
                         }
                     }
                     PanelAction::CreateNewConversation => {
-                        if let Some(ref mut manager) = app.simple_conversation_manager {
-                            match manager.create_conversation("New Conversation".to_string()) {
-                                Ok(id) => {
-                                    app.conversation_panel.select_conversation(id);
-                                    // TODO: Refresh conversation list in panel
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to create conversation: {e}");
-                                    app.state.toasts.error(format!("Failed to create conversation: {e}"));
-                                }
-                            }
-                        }
+                        log::info!("Processing CreateNewConversation action from panel");
+                        // Use the centralized handler to avoid duplication
+                        handle_create_new_conversation(app);
                     }
                     PanelAction::DeleteConversation(id) => {
                         if let Some(ref mut manager) = app.simple_conversation_manager {
@@ -1218,15 +1234,19 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                         }
                     }
                     PanelAction::RenameConversation(id, new_title) => {
+                        log::info!("Processing RenameConversation action for {} to '{}'", id, new_title);
                         if let Some(ref mut manager) = app.simple_conversation_manager {
-                            // Switch to conversation first to ensure it's current
+                            // If it's the current conversation, update directly
                             if manager.current_conversation_id() == Some(id) {
-                                if let Err(e) = manager.update_conversation_title(new_title) {
-                                    log::error!("Failed to rename conversation: {e}");
+                                if let Err(e) = manager.update_conversation_title(new_title.clone()) {
+                                    log::error!("Failed to rename current conversation: {e}");
                                     app.state.toasts.error(format!("Failed to rename conversation: {e}"));
-                                } else {
-                                    // TODO: Refresh conversation list in panel
                                 }
+                            } else {
+                                // For non-current conversations, we need to load, update, and save
+                                // This is a limitation of the simple manager - it only tracks current conversation
+                                log::warn!("Cannot rename non-current conversation {} with SimpleConversationManager", id);
+                                app.state.toasts.warning("Please switch to the conversation first to rename it");
                             }
                         }
                     }
