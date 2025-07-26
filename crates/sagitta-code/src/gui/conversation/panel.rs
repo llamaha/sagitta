@@ -167,18 +167,33 @@ impl ConversationPanel {
         let is_selected = self.selected_conversation == Some(conv.id);
         let is_editing = self.editing_conversation == Some(conv.id);
         
-        let item_response = ui.allocate_ui_at_rect(
-            ui.available_rect_before_wrap(),
-            |ui| {
-                let mut frame = Frame::none()
-                    .inner_margin(8.0)
-                    .rounding(4.0);
-                
-                if is_selected {
-                    frame = frame.fill(theme.accent_color().linear_multiply(0.2));
-                }
-                
-                frame.show(ui, |ui| {
+        // Create a selectable frame for the entire item
+        let mut frame = Frame::none()
+            .inner_margin(8.0)
+            .rounding(4.0);
+        
+        if is_selected {
+            frame = frame.fill(theme.accent_color().linear_multiply(0.2));
+        }
+        
+        // Make the entire frame interactive
+        let response = ui.allocate_response(
+            ui.available_size(),
+            egui::Sense::click()
+        );
+        
+        // Handle click on conversation
+        if response.clicked() && !is_editing {
+            self.select_conversation(conv.id);
+            self.pending_action = Some(PanelAction::SelectConversation(conv.id));
+        }
+        
+        // Add hover effect
+        if response.hovered() && !is_selected {
+            frame = frame.fill(theme.accent_color().linear_multiply(0.1));
+        }
+        
+        frame.show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
                             // Title (editable if in edit mode)
@@ -230,14 +245,6 @@ impl ConversationPanel {
                         });
                     });
                 });
-            }
-        );
-        
-        // Handle click on conversation
-        if item_response.response.clicked() && !is_editing {
-            self.select_conversation(conv.id);
-            self.pending_action = Some(PanelAction::SelectConversation(conv.id));
-        }
         
         // Handle delete confirmation dialog
         if self.show_delete_confirmation == Some(conv.id) {
@@ -407,10 +414,25 @@ fn format_time_ago(time: chrono::DateTime<chrono::Utc>) -> String {
     if duration.num_seconds() < 60 {
         "Just now".to_string()
     } else if duration.num_minutes() < 60 {
-        format!("{} min ago", duration.num_minutes())
+        let mins = duration.num_minutes();
+        if mins == 1 {
+            "1 min ago".to_string()
+        } else {
+            format!("{} mins ago", mins)
+        }
     } else if duration.num_hours() < 24 {
-        format!("{} hours ago", duration.num_hours())
+        let hours = duration.num_hours();
+        if hours == 1 {
+            "1 hour ago".to_string()
+        } else {
+            format!("{} hours ago", hours)
+        }
     } else {
-        format!("{} days ago", duration.num_days())
+        let days = duration.num_days();
+        if days == 1 {
+            "1 day ago".to_string()
+        } else {
+            format!("{} days ago", days)
+        }
     }
 }

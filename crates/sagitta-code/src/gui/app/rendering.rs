@@ -748,6 +748,19 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
             
             // Save conversation after adding user message
             if let Some(ref mut manager) = app.simple_conversation_manager {
+                // Update title if it's still "New Conversation"
+                if manager.current_conversation_title() == Some("New Conversation".to_string()) {
+                    // Use first 50 chars of user message as title
+                    let new_title = if user_message.len() > 50 {
+                        format!("{}...", &user_message[..47])
+                    } else {
+                        user_message.clone()
+                    };
+                    if let Err(e) = manager.update_conversation_title(new_title) {
+                        log::error!("Failed to update conversation title: {e}");
+                    }
+                }
+                
                 match manager.save_current_conversation() {
                     Ok(_) => {
                         app.state.conversation_modified = false;

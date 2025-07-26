@@ -126,6 +126,11 @@ impl SimpleConversationManager {
         Ok(())
     }
     
+    /// Get the current conversation's title
+    pub fn current_conversation_title(&self) -> Option<String> {
+        self.current_conversation.as_ref().map(|c| c.title.clone())
+    }
+    
     /// Add a message to current conversation
     pub fn add_message(&mut self, _message: StreamingMessage) -> Result<()> {
         if let Some(conversation) = &mut self.current_conversation {
